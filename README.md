@@ -6,6 +6,8 @@
 
 Every single behavior in Sudoer is fully traceable to a human-authored blueprint, making it readable, understandable, and modifiable by anyone. Sudoer runs entirely on local hardware under your absolute control. Pair it with any remote LLM endpoint or a local LLM runner (such as Ollama) for complete, air-gapped privacy.
 
+<img src="loop.png" alt="Loop Diagram" width="100%" />
+
 ---
 
 ## Highlights
