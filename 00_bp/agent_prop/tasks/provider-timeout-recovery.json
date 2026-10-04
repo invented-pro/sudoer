@@ -1,0 +1,25 @@
+{
+  "id": "provider-timeout-recovery",
+  "description": "A provider timeout is recoverable: the loop re-iterates and completes.",
+  "goal": "Read x.txt.",
+  "workspace": { "x.txt": "hi" },
+  "script": {
+    "steps": [
+      { "error": "timeout" },
+      {
+        "complete": {
+          "text": "Reading the file.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "read", "arguments": { "path": "x.txt" } }
+          ]
+        }
+      },
+      { "complete": { "text": "hi" } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "answer": { "equals": "hi" },
+    "tools": ["read"]
+  }
+}

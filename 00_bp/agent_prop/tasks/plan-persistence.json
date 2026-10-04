@@ -1,0 +1,36 @@
+{
+  "id": "plan-persistence",
+  "description": "The model's plan update is applied and persisted in the session.",
+  "goal": "Read a.txt and answer.",
+  "workspace": { "a.txt": "x" },
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "planning",
+          "plan": [
+            { "text": "read a.txt", "done": false },
+            { "text": "answer", "done": false }
+          ],
+          "tool_calls": [
+            { "type": "tool_call", "name": "read", "arguments": { "path": "a.txt" } }
+          ]
+        }
+      },
+      {
+        "complete": {
+          "text": "done",
+          "plan": [
+            { "text": "read a.txt", "done": true },
+            { "text": "answer", "done": true }
+          ]
+        }
+      }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "plan": ["read a.txt", "answer"],
+    "sessionPersisted": true
+  }
+}

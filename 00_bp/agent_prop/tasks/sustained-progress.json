@@ -1,0 +1,46 @@
+{
+  "id": "sustained-progress",
+  "description": "Distinct productive steps are never cut off by a raw step cap: the run continues well past 16 steps to a finish.",
+  "goal": "Read every numbered file, then answer.",
+  "workspace": {
+    "a00.txt": "0", "a01.txt": "1", "a02.txt": "2", "a03.txt": "3",
+    "a04.txt": "4", "a05.txt": "5", "a06.txt": "6", "a07.txt": "7",
+    "a08.txt": "8", "a09.txt": "9", "a10.txt": "10", "a11.txt": "11",
+    "a12.txt": "12", "a13.txt": "13", "a14.txt": "14", "a15.txt": "15",
+    "a16.txt": "16", "a17.txt": "17", "a18.txt": "18", "a19.txt": "19"
+  },
+  "script": {
+    "steps": [
+      { "complete": { "text": "Reading a00.", "tool_calls": [{ "type": "tool_call", "name": "read", "arguments": { "path": "a00.txt" } }] } },
+      { "complete": { "text": "Reading a01.", "tool_calls": [{ "type": "tool_call", "name": "read", "arguments": { "path": "a01.txt" } }] } },
+      { "complete": { "text": "Reading a02.", "tool_calls": [{ "type": "tool_call", "name": "read", "arguments": { "path": "a02.txt" } }] } },
+      { "complete": { "text": "Reading a03.", "tool_calls": [{ "type": "tool_call", "name": "read", "arguments": { "path": "a03.txt" } }] } },
+      { "complete": { "text": "Reading a04.", "tool_calls": [{ "type": "tool_call", "name": "read", "arguments": { "path": "a04.txt" } }] } },
+      { "complete": { "text": "Reading a05.", "tool_calls": [{ "type": "tool_call", "name": "read", "arguments": { "path": "a05.txt" } }] } },
+      { "complete": { "text": "Reading a06.", "tool_calls": [{ "type": "tool_call", "name": "read", "arguments": { "path": "a06.txt" } }] } },
+      { "complete": { "text": "Reading a07.", "tool_calls": [{ "type": "tool_call", "name": "read", "arguments": { "path": "a07.txt" } }] } },
+      { "complete": { "text": "Reading a08.", "tool_calls": [{ "type": "tool_call", "name": "read", "arguments": { "path": "a08.txt" } }] } },
+      { "complete": { "text": "Reading a09.", "tool_calls": [{ "type": "tool_call", "name": "read", "arguments": { "path": "a09.txt" } }] } },
+      { "complete": { "text": "Reading a10.", "tool_calls": [{ "type": "tool_call", "name": "read", "arguments": { "path": "a10.txt" } }] } },
+      { "complete": { "text": "Reading a11.", "tool_calls": [{ "type": "tool_call", "name": "read", "arguments": { "path": "a11.txt" } }] } },
+      { "complete": { "text": "Reading a12.", "tool_calls": [{ "type": "tool_call", "name": "read", "arguments": { "path": "a12.txt" } }] } },
+      { "complete": { "text": "Reading a13.", "tool_calls": [{ "type": "tool_call", "name": "read", "arguments": { "path": "a13.txt" } }] } },
+      { "complete": { "text": "Reading a14.", "tool_calls": [{ "type": "tool_call", "name": "read", "arguments": { "path": "a14.txt" } }] } },
+      { "complete": { "text": "Reading a15.", "tool_calls": [{ "type": "tool_call", "name": "read", "arguments": { "path": "a15.txt" } }] } },
+      { "complete": { "text": "Reading a16.", "tool_calls": [{ "type": "tool_call", "name": "read", "arguments": { "path": "a16.txt" } }] } },
+      { "complete": { "text": "Reading a17.", "tool_calls": [{ "type": "tool_call", "name": "read", "arguments": { "path": "a17.txt" } }] } },
+      { "complete": { "text": "Reading a18.", "tool_calls": [{ "type": "tool_call", "name": "read", "arguments": { "path": "a18.txt" } }] } },
+      { "complete": { "text": "Reading a19.", "tool_calls": [{ "type": "tool_call", "name": "read", "arguments": { "path": "a19.txt" } }] } },
+      { "complete": { "text": "all read" } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "answer": { "equals": "all read" },
+    "tools": [
+      "read", "read", "read", "read", "read", "read", "read", "read",
+      "read", "read", "read", "read", "read", "read", "read", "read",
+      "read", "read", "read", "read"
+    ]
+  }
+}

@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "config.schema.json",
+  "title": "Prop configuration",
+  "description": "Startup configuration, loaded by the interface (C6) at process start. Read by providers (C2), tools (C3), and sessions (C5).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["provider"],
+  "properties": {
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "model", "context_window"],
+      "properties": {
+        "kind": {
+          "description": "Which of the two Prop adapters to use (C2).",
+          "enum": ["openai-compatible", "ollama"]
+        },
+        "base_url": {
+          "description": "Endpoint for the OpenAI-compatible adapter; required when kind is openai-compatible (C2).",
+          "type": "string",
+          "format": "uri"
+        },
+        "api_key": {
+          "description": "Optional bearer credential for the endpoint (C2).",
+          "type": "string"
+        },
+        "model": {
+          "description": "Fixed model name for the run (C2).",
+          "type": "string",
+          "minLength": 1
+        },
+        "context_window": {
+          "description": "Model context size in tokens, used by context fitting (C4).",
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "kind": { "const": "openai-compatible" } },
+            "required": ["kind"]
+          },
+          "then": { "required": ["base_url"] }
+        }
+      ]
+    },
+    "workspace_root": {
+      "description": "Root that file tools and run_command are confined to (C3). Defaults to the process working directory when omitted; may be changed during a session via an interface command (C6).",
+      "type": "string",
+      "minLength": 1
+    },
+    "session_dir": {
+      "description": "Directory holding persisted session files (C5). Defaults to <workspace_root>/.sudoer/sessions.",
+      "type": "string",
+      "minLength": 1
+    },
+    "web": {
+      "description": "Network capability for the web tools (C3). Enabled and open by default; a denial is a hard block with no interactive override.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "Master switch for web egress. When false the web tools are not assembled at all.",
+          "type": "boolean",
+          "default": true
+        },
+        "search_url": {
+          "description": "Base URL of the SearXNG (or compatible) backend used by web_search. When absent, web_fetch still works and web_search reports that it is unset.",
+          "type": "string",
+          "format": "uri"
+        },
+        "deny_hosts": {
+          "description": "Hosts egress is blocked from. Empty by default (any host is allowed). An entry is an exact host or a `.`-prefixed suffix.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

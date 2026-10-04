@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "message.schema.json",
+  "title": "Transcript entry",
+  "description": "Entries the loop (C1) appends and the context (C4) sends. A transcript starts with the user goal, then alternates assistant decisions and observations.",
+  "$defs": {
+    "finish": {
+      "description": "The terminal action: the model is done and this text is the answer (C1).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "answer"],
+      "properties": {
+        "type": { "const": "finish" },
+        "answer": { "type": "string" }
+      }
+    },
+    "action": {
+      "description": "What the model chose to do this step: call a tool, or finish.",
+      "oneOf": [
+        { "$ref": "tool.schema.json#/$defs/toolCall" },
+        { "$ref": "#/$defs/finish" }
+      ]
+    },
+    "userEntry": {
+      "description": "A goal supplied by the human (normalized to text by C7).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "text"],
+      "properties": {
+        "role": { "const": "user" },
+        "text": { "type": "string" }
+      }
+    },
+    "assistantEntry": {
+      "description": "One step of reasoning: a thought plus the action it chose.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "thought", "action"],
+      "properties": {
+        "role": { "const": "assistant" },
+        "thought": { "type": "string" },
+        "action": { "$ref": "#/$defs/action" }
+      }
+    },
+    "observationEntry": {
+      "description": "The result fed back to the model. outcome ok/error is recoverable; guard_denied blocks (C3, C8).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "text", "outcome"],
+      "properties": {
+        "role": { "const": "observation" },
+        "text": { "type": "string" },
+        "outcome": { "enum": ["ok", "error", "guard_denied"] },
+        "tool_call_id": {
+          "description": "The tool call this observation answers, when it is a tool result (C3). Absent for harness-level observations such as a provider timeout.",
+          "type": "string"
+        }
+      }
+    },
+    "entry": {
+      "oneOf": [
+        { "$ref": "#/$defs/userEntry" },
+        { "$ref": "#/$defs/assistantEntry" },
+        { "$ref": "#/$defs/observationEntry" }
+      ]
+    }
+  },
+  "$ref": "#/$defs/entry"
+}

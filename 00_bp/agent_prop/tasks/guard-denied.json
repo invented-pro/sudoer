@@ -1,0 +1,21 @@
+{
+  "id": "guard-denied",
+  "description": "A file-tool call that escapes the workspace root is a guard denial and blocks the run.",
+  "goal": "Read ../secret.txt.",
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "Reading outside the workspace.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "read", "arguments": { "path": "../secret.txt" } }
+          ]
+        }
+      }
+    ]
+  },
+  "expect": {
+    "status": "blocked",
+    "tools": ["read"]
+  }
+}

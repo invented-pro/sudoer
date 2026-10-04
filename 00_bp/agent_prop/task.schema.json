@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "task.schema.json",
+  "title": "Prop gate eval task",
+  "description": "One gate task: an isolated workspace, a sequence of interactive turns (goals and commands), the scripted provider responses, and the expected observable outcome. A legacy task may give a single `goal` instead of `turns`.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "script", "expect"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+    "description": { "type": "string" },
+    "goal": {
+      "description": "Convenience single goal; equivalent to `turns: [{goal}]`.",
+      "type": "string",
+      "minLength": 1
+    },
+    "turns": {
+      "description": "Ordered inputs typed into the interactive session (C6).",
+      "type": "array",
+      "items": { "$ref": "#/$defs/turn" }
+    },
+    "workspace": {
+      "description": "Initial files, relative to the workspace root, materialized before the session.",
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "config": {
+      "description": "Partial configuration, deep-merged over the gate defaults.",
+      "type": "object"
+    },
+    "script": { "$ref": "script.schema.json" },
+    "expect": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "description": "Status of the last goal run (legacy single-goal tasks).",
+          "enum": ["complete", "incomplete", "blocked"]
+        },
+        "answer": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "equals": { "type": "string" },
+            "contains": { "type": "string" }
+          }
+        },
+        "files": {
+          "description": "Expected final contents for the listed paths; other paths are ignored.",
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "tools": {
+          "description": "Expected ordered tool-call names, across the whole session.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "runs": {
+          "description": "Expected result of each goal run, in order.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "status": {
+                "enum": ["complete", "incomplete", "blocked"]
+              },
+              "answer": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "equals": { "type": "string" },
+                  "contains": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "plan": {
+          "description": "Expected final plan item texts, in order.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "sessionPersisted": {
+          "description": "Whether a session file exists and reloads with the same id and transcript length.",
+          "type": "boolean"
+        },
+        "stdoutContains": { "type": "string" },
+        "reason": { "type": "string" }
+      }
+    }
+  },
+  "$defs": {
+    "turn": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["goal"],
+          "properties": { "goal": { "type": "string", "minLength": 1 } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command"],
+          "properties": { "command": { "type": "string", "minLength": 1 } }
+        }
+      ]
+    }
+  }
+}

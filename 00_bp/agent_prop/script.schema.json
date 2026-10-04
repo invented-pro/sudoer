@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "script.schema.json",
+  "title": "Scripted provider script",
+  "description": "The deterministic response sequence the scripted provider replays, one step per provider call. A task scripts every call the run makes, including the best-effort call.",
+  "$defs": {
+    "step": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["complete"],
+          "properties": {
+            "complete": { "$ref": "completion.schema.json" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["error"],
+          "properties": {
+            "error": {
+              "description": "timeout is recoverable (loop re-iterates); unrecoverable blocks the run (C2, C8).",
+              "enum": ["timeout", "unrecoverable"]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["steps"],
+  "properties": {
+    "steps": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/step" }
+    }
+  }
+}

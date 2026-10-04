@@ -1,0 +1,14 @@
+{
+  "id": "provider-unrecoverable",
+  "description": "An unrecoverable provider error blocks the run before any tool call.",
+  "goal": "Do anything.",
+  "script": {
+    "steps": [
+      { "error": "unrecoverable" }
+    ]
+  },
+  "expect": {
+    "status": "blocked",
+    "tools": []
+  }
+}

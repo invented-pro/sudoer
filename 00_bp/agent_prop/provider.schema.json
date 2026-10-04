@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "provider.schema.json",
+  "title": "Provider interface",
+  "description": "What the loop (C1) sends to a provider (C2) and what it gets back. The provider is stateless; the prompt is passed in full every call.",
+  "$defs": {
+    "providerRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "system", "messages", "tools"],
+      "properties": {
+        "model": {
+          "description": "Model name from configuration (C2).",
+          "type": "string",
+          "minLength": 1
+        },
+        "system": {
+          "description": "System prompt (C4).",
+          "type": "string"
+        },
+        "messages": {
+          "description": "The session transcript (C4), compacted to the window: goals plus assistant/observation entries. The goal and plan are pinned in the system prompt.",
+          "type": "array",
+          "items": { "$ref": "message.schema.json#/$defs/entry" }
+        },
+        "tools": {
+          "description": "Tool definitions advertised to the model (C3).",
+          "type": "array",
+          "items": { "$ref": "tool.schema.json#/$defs/toolDefinition" }
+        }
+      }
+    },
+    "providerResponse": {
+      "description": "The parsed completion: a thought and the chosen action. A completion with no parseable action is returned as a finish (C2).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["thought", "action"],
+      "properties": {
+        "thought": { "type": "string" },
+        "action": { "$ref": "message.schema.json#/$defs/action" }
+      }
+    }
+  }
+}

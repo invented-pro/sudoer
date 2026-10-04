@@ -1,0 +1,48 @@
+{
+  "id": "stall-exhausted",
+  "description": "Repeated identical steps make no progress, so the run stalls after the stall budget and ends incomplete via a best-effort call.",
+  "goal": "Read a.txt until it changes.",
+  "workspace": { "a.txt": "static" },
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "Reading a.txt.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "read", "arguments": { "path": "a.txt" } }
+          ]
+        }
+      },
+      {
+        "complete": {
+          "text": "Reading a.txt again.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "read", "arguments": { "path": "a.txt" } }
+          ]
+        }
+      },
+      {
+        "complete": {
+          "text": "Reading a.txt once more.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "read", "arguments": { "path": "a.txt" } }
+          ]
+        }
+      },
+      {
+        "complete": {
+          "text": "Still a.txt.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "read", "arguments": { "path": "a.txt" } }
+          ]
+        }
+      },
+      { "complete": { "text": "a.txt contains: static" } }
+    ]
+  },
+  "expect": {
+    "status": "incomplete",
+    "answer": { "contains": "static" },
+    "tools": ["read", "read", "read", "read"]
+  }
+}

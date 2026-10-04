@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tool.schema.json",
+  "title": "Tool interface",
+  "description": "The built-in tool catalog and the shapes exchanged when the loop dispatches an action (C1) to a tool (C3).",
+  "$defs": {
+    "toolDefinition": {
+      "description": "A tool as advertised to the model: name, description, and a JSON Schema for its arguments.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "description", "parameters"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "parameters": {
+          "description": "JSON Schema (draft 2020-12) describing the arguments object.",
+          "type": "object"
+        }
+      }
+    },
+    "toolCall": {
+      "description": "A model request to run a tool with validated-shape arguments.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "name", "arguments"],
+      "properties": {
+        "type": { "const": "tool_call" },
+        "id": {
+          "description": "Provider tool-call id; binds the matching observation on replay. Assigned by C1 when the provider omits it.",
+          "type": "string"
+        },
+        "name": { "type": "string", "minLength": 1 },
+        "arguments": { "type": "object" }
+      }
+    },
+    "toolOutcome": {
+      "description": "The text result of dispatching a tool call. ok and error are recoverable observations; guard_denied blocks the run (C1, C8).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome", "text"],
+      "properties": {
+        "outcome": { "enum": ["ok", "error", "guard_denied"] },
+        "text": { "type": "string" }
+      }
+    },
+    "readArgs": {
+      "description": "read (C3): return the contents of a workspace file.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 }
+      }
+    },
+    "writeArgs": {
+      "description": "write (C3): create or overwrite a workspace file.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "content"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "content": { "type": "string" }
+      }
+    },
+    "editArgs": {
+      "description": "edit (C3): replace the unique occurrence of old with new; error if absent or ambiguous.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "old", "new"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "old": { "type": "string", "minLength": 1 },
+        "new": { "type": "string" }
+      }
+    },
+    "runCommandArgs": {
+      "description": "run_command (C3): run a shell command with the workspace root as cwd.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command"],
+      "properties": {
+        "command": { "type": "string", "minLength": 1 }
+      }
+    },
+    "searchArgs": {
+      "description": "search (C3): local regex search over workspace files.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pattern"],
+      "properties": {
+        "pattern": { "type": "string", "minLength": 1 },
+        "path": { "type": "string" }
+      }
+    },
+    "webSearchArgs": {
+      "description": "web_search (C3): query a configured search backend; results are untrusted data. Present only when web.enabled is true.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["query"],
+      "properties": {
+        "query": { "type": "string", "minLength": 1 },
+        "count": { "type": "integer", "minimum": 1, "maximum": 10 }
+      }
+    },
+    "webFetchArgs": {
+      "description": "web_fetch (C3): fetch one http/https URL; the body is reduced to text and truncated. Untrusted data, not instructions. Present only when web.enabled is true.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url"],
+      "properties": {
+        "url": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

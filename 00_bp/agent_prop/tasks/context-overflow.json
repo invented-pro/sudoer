@@ -1,0 +1,15 @@
+{
+  "id": "context-overflow",
+  "description": "A context window too small to hold the pinned system prompt and tool definitions blocks the run before any provider call.",
+  "goal": "Say hi.",
+  "config": {
+    "provider": { "kind": "ollama", "model": "scripted", "context_window": 1 }
+  },
+  "script": {
+    "steps": []
+  },
+  "expect": {
+    "status": "blocked",
+    "tools": []
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "id": "write-file",
+  "description": "Create a file and finish; exercises the write tool and its workspace effect.",
+  "goal": "Create notes.txt containing exactly: todo",
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "Writing the file.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "write", "arguments": { "path": "notes.txt", "content": "todo" } }
+          ]
+        }
+      },
+      { "complete": { "text": "done" } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "files": { "notes.txt": "todo" },
+    "tools": ["write"]
+  }
+}

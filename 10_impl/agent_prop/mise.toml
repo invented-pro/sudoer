@@ -1,0 +1,22 @@
+[tools]
+dart = "3.13.5"
+
+[tasks.build]
+description = "Compile the sudoer-prop CLI into dist/ and publish it to 20_eval/agent_prop/"
+run = "dart run tool/build.dart"
+
+[tasks.analyze]
+description = "Static analysis"
+run = "dart analyze"
+
+[tasks.test]
+description = "Unit tests"
+run = "dart test"
+
+[tasks.gate]
+description = "Run the Prop build gate (suite + CLI smoke)"
+run = "dart run bin/gate.dart"
+
+[tasks."gate:suite"]
+description = "Run the Prop build gate task suite only"
+run = "dart run bin/gate.dart --no-smoke"

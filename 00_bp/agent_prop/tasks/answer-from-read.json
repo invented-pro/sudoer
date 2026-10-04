@@ -1,0 +1,25 @@
+{
+  "id": "answer-from-read",
+  "description": "One read, then a text finish; exercises the end-to-end path.",
+  "goal": "Read README.md and answer with its contents.",
+  "workspace": { "README.md": "hello world\n" },
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "I will read the file.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "read", "arguments": { "path": "README.md" } }
+          ]
+        }
+      },
+      { "complete": { "text": "hello world" } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "answer": { "equals": "hello world" },
+    "files": { "README.md": "hello world\n" },
+    "tools": ["read"]
+  }
+}

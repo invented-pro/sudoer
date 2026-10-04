@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "completion.schema.json",
+  "title": "Normalized model completion",
+  "description": "A model response after wire parsing, before the provider (C2) turns it into a thought and an action. Text with no tool calls becomes a finish (C2).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["text"],
+  "properties": {
+    "text": {
+      "description": "The visible reasoning/answer text (the thought, or the final answer), with any `<think>` reasoning block stripped (C2).",
+      "type": "string"
+    },
+    "reasoning": {
+      "description": "Private model reasoning stripped from a `<think>` block (C2); never part of the answer. Absent or empty when the model did not think aloud.",
+      "type": "string"
+    },
+    "tool_calls": {
+      "description": "Tool calls requested this step; empty or absent means the text is the answer.",
+      "type": "array",
+      "items": { "$ref": "tool.schema.json#/$defs/toolCall" }
+    },
+    "plan": {
+      "description": "Optional plan update (C1): when present it replaces the session plan. Absent means the plan is unchanged. A provider parses it from the model's fenced `plan` block (C2).",
+      "type": "array",
+      "items": { "$ref": "session.schema.json#/$defs/planItem" }
+    }
+  }
+}

@@ -1,0 +1,23 @@
+# Package and build caches
+.pub-cache/
+.dart_tool/
+build/
+
+# Compiled artifacts (dist/ + the published binary in the eval instance;
+# `sudoer-prop` on POSIX, `sudoer-prop.exe` on Windows)
+10_impl/agent_prop/dist/
+20_eval/agent_prop/sudoer-prop
+20_eval/agent_prop/sudoer-prop.exe
+
+# Release staging (keep the directory, ignore its contents)
+90_dist/*
+!90_dist/.gitkeep
+
+# Runtime sessions
+.sudoer/
+
+# Logs
+*.log
+
+# Live plaintext config (the sops/age-encrypted sudoer.enc.json is tracked)
+20_eval/agent_prop/sudoer.json

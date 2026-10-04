@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "run.schema.json",
+  "title": "Run interface",
+  "description": "The entry point and result of one execution of the loop (C1), opened inside a session (C5) and surfaced by the interface (C6).",
+  "$defs": {
+    "runRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal"],
+      "properties": {
+        "goal": {
+          "description": "One user request, normalized to text (C7).",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "runResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "description": "complete: finished with an answer. incomplete: the run stalled or hit the step ceiling, best-effort answer. blocked: guard denied or unrecoverable error (may have no answer).",
+          "enum": ["complete", "incomplete", "blocked"]
+        },
+        "answer": {
+          "type": ["string", "null"]
+        },
+        "reason": {
+          "description": "Why the run blocked or ended incomplete; optional otherwise.",
+          "type": "string"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "status": { "enum": ["complete", "incomplete"] } },
+            "required": ["status"]
+          },
+          "then": {
+            "required": ["answer"],
+            "properties": { "answer": { "type": "string" } }
+          }
+        }
+      ]
+    }
+  }
+}

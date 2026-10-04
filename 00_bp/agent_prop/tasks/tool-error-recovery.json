@@ -1,0 +1,32 @@
+{
+  "id": "tool-error-recovery",
+  "description": "A read of a missing file errors, the loop re-iterates, then succeeds.",
+  "goal": "Read missing.txt, then read exists.txt.",
+  "workspace": { "exists.txt": "ok" },
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "Reading the missing file.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "read", "arguments": { "path": "missing.txt" } }
+          ]
+        }
+      },
+      {
+        "complete": {
+          "text": "Now reading the existing file.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "read", "arguments": { "path": "exists.txt" } }
+          ]
+        }
+      },
+      { "complete": { "text": "ok" } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "answer": { "equals": "ok" },
+    "tools": ["read", "read"]
+  }
+}

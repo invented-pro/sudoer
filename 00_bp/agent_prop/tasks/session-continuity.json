@@ -1,0 +1,31 @@
+{
+  "id": "session-continuity",
+  "description": "Two goals run in one continuous session; the session persists across them.",
+  "turns": [
+    { "goal": "Remember the number 7." },
+    { "goal": "Read a.txt." }
+  ],
+  "workspace": { "a.txt": "content" },
+  "script": {
+    "steps": [
+      { "complete": { "text": "Noted." } },
+      {
+        "complete": {
+          "text": "Reading.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "read", "arguments": { "path": "a.txt" } }
+          ]
+        }
+      },
+      { "complete": { "text": "content" } }
+    ]
+  },
+  "expect": {
+    "runs": [
+      { "status": "complete", "answer": { "equals": "Noted." } },
+      { "status": "complete", "answer": { "equals": "content" } }
+    ],
+    "tools": ["read"],
+    "sessionPersisted": true
+  }
+}

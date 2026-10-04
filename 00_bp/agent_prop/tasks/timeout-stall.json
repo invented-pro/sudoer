@@ -1,0 +1,18 @@
+{
+  "id": "timeout-stall",
+  "description": "Recoverable provider timeouts make no progress; after the stall budget the run ends incomplete with a local summary.",
+  "goal": "Answer the question.",
+  "script": {
+    "steps": [
+      { "error": "timeout" },
+      { "error": "timeout" },
+      { "error": "timeout" },
+      { "error": "timeout" }
+    ]
+  },
+  "expect": {
+    "status": "incomplete",
+    "answer": { "contains": "Last observation" },
+    "tools": []
+  }
+}

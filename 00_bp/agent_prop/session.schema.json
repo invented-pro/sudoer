@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "session.schema.json",
+  "title": "Session file",
+  "description": "One persisted session (C5): the transcript and plan that survive across runs and can be resumed by id. Written under the configured session directory.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "created_at", "updated_at", "workspace_root", "plan", "transcript"],
+  "properties": {
+    "id": {
+      "description": "Session identity used to resume (C5).",
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "workspace_root": { "type": "string", "minLength": 1 },
+    "plan": {
+      "description": "The agent's plan (C1): a small ordered task list.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/planItem" }
+    },
+    "transcript": {
+      "description": "The session transcript, shared across the goals in the session.",
+      "type": "array",
+      "items": { "$ref": "message.schema.json#/$defs/entry" }
+    }
+  },
+  "$defs": {
+    "planItem": {
+      "description": "One plan item: a short task and whether it is done.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "done"],
+      "properties": {
+        "text": { "type": "string", "minLength": 1 },
+        "done": { "type": "boolean" }
+      }
+    }
+  }
+}

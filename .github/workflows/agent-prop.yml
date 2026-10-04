@@ -1,0 +1,111 @@
+name: agent-prop
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: 10_impl/agent_prop
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x64
+          - os: macos-latest
+            platform: macos-arm64
+          - os: windows-latest
+            platform: windows-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Dart (mise)
+        uses: jdx/mise-action@v2
+        with:
+          working_directory: 10_impl/agent_prop
+          cache: true
+
+      - name: Read version
+        id: version
+        shell: bash
+        run: echo "value=$(mise exec -- dart run tool/version.dart)" >> "$GITHUB_OUTPUT"
+
+      - name: Dependencies
+        run: mise exec -- dart pub get
+
+      - name: Analyze
+        run: mise run analyze
+
+      - name: Test
+        run: mise run test
+
+      - name: Gate
+        run: mise run gate
+
+      - name: Build
+        run: mise run build
+
+      # GitHub zips the artifact as `<name>.zip`, so the download carries the
+      # full version/OS/arch metadata while the binary inside is short.
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sudoer-prop-${{ steps.version.outputs.value }}-${{ matrix.platform }}
+          path: 10_impl/agent_prop/dist/sudoer-prop*
+          if-no-files-found: error
+
+  release:
+    name: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify the tag matches the package version
+        run: |
+          ver=$(sed -n 's/^version: *//p' 10_impl/agent_prop/pubspec.yaml | head -1)
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$ver" != "$tag" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match pubspec version $ver"
+            exit 1
+          fi
+
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      # Each artifact is a zip containing the short binary; repackage each as a
+      # release archive named after the artifact.
+      - name: Package release archives
+        run: |
+          cd dist
+          for dir in */; do
+            name="${dir%/}"
+            (cd "$dir" && zip -r "../${name}.zip" .)
+          done
+          ls -l
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          generate_release_notes: true

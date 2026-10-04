@@ -1,0 +1,24 @@
+{
+  "id": "edit-file",
+  "description": "Apply a targeted edit and finish; exercises the edit tool and its workspace effect.",
+  "goal": "In a.txt, replace the line 'two' with 'three'.",
+  "workspace": { "a.txt": "one\ntwo\n" },
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "Editing the file.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "edit", "arguments": { "path": "a.txt", "old": "two", "new": "three" } }
+          ]
+        }
+      },
+      { "complete": { "text": "done" } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "files": { "a.txt": "one\nthree\n" },
+    "tools": ["edit"]
+  }
+}
