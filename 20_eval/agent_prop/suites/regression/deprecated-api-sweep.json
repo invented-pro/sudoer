@@ -1,0 +1,17 @@
+{
+  "id": "deprecated-api-sweep",
+  "description": "Regression: replace a deprecated call across several files while leaving its definition intact. Measures search + systematic multi-file edits + behavior verification (SWE-bench-style sweep).",
+  "goal": "Replace every call to the deprecated printLog() with logLine() in a.dart, b.dart, and main.dart. Keep logger.dart as is (both functions stay defined). Verify `dart main.dart` still runs.",
+  "workspace": {
+    "logger.dart": "/// Preferred: log with a prefix.\nvoid logLine(String msg) => print('[log] $msg');\n\n/// Deprecated alias.\nvoid printLog(String msg) => logLine(msg);\n",
+    "a.dart": "import 'logger.dart';\n\nvoid a() => printLog('from a');\n",
+    "b.dart": "import 'logger.dart';\n\nvoid b() => printLog('from b');\n",
+    "main.dart": "import 'logger.dart';\nimport 'a.dart';\nimport 'b.dart';\n\nvoid main() {\n  printLog('starting');\n  a();\n  b();\n  printLog('done');\n}\n"
+  },
+  "check": {
+    "finished": true,
+    "command": "sh -c 'if grep -rn \"printLog(\" a.dart b.dart main.dart >/dev/null 2>&1; then echo OLDFOUND; else echo SWEEP-OK; fi'",
+    "commandContains": "SWEEP-OK",
+    "maxSteps": 16
+  }
+}

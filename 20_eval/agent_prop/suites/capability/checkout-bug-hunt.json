@@ -1,0 +1,17 @@
+{
+  "id": "checkout-bug-hunt",
+  "description": "Capability: unlocalized bug — nothing points at the fault (double-taxed total). Measures orient-ground-verify across three modules; the symptom (printed total) is all the agent gets.",
+  "goal": "`dart main.dart` prints the wrong total: expected 94.50 (10% discount, then 5% tax on 100.00 of goods). Find and fix the bug with the smallest change to pricing logic, then verify by running.",
+  "workspace": {
+    "cart.dart": "class Item {\n  final String name;\n  final double price;\n  final int qty;\n\n  const Item(this.name, this.price, this.qty);\n}\n\nconst cart = [Item('usb-c', 12.0, 5), Item('dock', 40.0, 1)];\n",
+    "pricing.dart": "import 'cart.dart';\n\ndouble subtotal(List<Item> items) =>\n    items.fold(0, (sum, it) => sum + it.price * it.qty);\n\n/// Apply a 10% promotional discount.\ndouble discounted(double amount) => amount * 0.9;\n\n/// Add 5% sales tax.\ndouble taxed(double amount) => amount * 1.05;\n\ndouble total(List<Item> items) => taxed(taxed(discounted(subtotal(items))));\n",
+    "main.dart": "import 'cart.dart';\nimport 'pricing.dart';\n\nvoid main() {\n  print('total: ${total(cart)}');\n}\n"
+  },
+  "check": {
+    "finished": true,
+    "command": "dart main.dart",
+    "commandContains": "total: 94.5",
+    "maxSteps": 24,
+    "maxErrors": 3
+  }
+}

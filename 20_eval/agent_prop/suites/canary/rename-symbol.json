@@ -1,0 +1,19 @@
+{
+  "id": "rename-symbol",
+  "description": "Canary: rename a method across two files and verify behavior is preserved. Measures small targeted edits (multi-file) + verify-then-claim.",
+  "goal": "Rename the method amount() to totalCents() everywhere in this mini-project (models.dart, main.dart) and verify that `dart main.dart` still prints 300.",
+  "workspace": {
+    "models.dart": "class Order {\n  final int qty;\n  Order(this.qty);\n\n  int amount() => qty * 100;\n}\n",
+    "main.dart": "import 'models.dart';\n\nvoid main() {\n  final o = Order(3);\n  print(o.amount());\n}\n"
+  },
+  "check": {
+    "finished": true,
+    "files": {
+      "models.dart": { "contains": "totalCents" },
+      "main.dart": { "contains": "totalCents" }
+    },
+    "command": "dart main.dart",
+    "commandContains": "300",
+    "maxSteps": 10
+  }
+}

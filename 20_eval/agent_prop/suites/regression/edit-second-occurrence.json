@@ -1,0 +1,15 @@
+{
+  "id": "edit-second-occurrence",
+  "description": "Regression: identical keys in different sections; only the section-scoped one may change. Measures edit precision under ambiguity of repeated text (edit-ambiguous-recovery territory, live-provider edition).",
+  "goal": "In config.yaml, update only the `timeout` under the `worker:` section from 30 to 60. Leave the api timeout untouched.",
+  "workspace": {
+    "config.yaml": "api:\n  timeout: 30\n  retries: 2\nworker:\n  timeout: 30\n  pool: 4\n"
+  },
+  "check": {
+    "finished": true,
+    "files": {
+      "config.yaml": { "equals": "api:\n  timeout: 30\n  retries: 2\nworker:\n  timeout: 60\n  pool: 4\n" }
+    },
+    "maxSteps": 8
+  }
+}

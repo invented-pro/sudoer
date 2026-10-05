@@ -1,0 +1,21 @@
+{
+  "id": "make-tests-pass",
+  "description": "Regression: classic issue-to-green-tests loop (SWE-bench shape). Measures orient, implement, verify; the test file is guarded against cheating.",
+  "goal": "lib.dart has two unimplemented functions. Make `sh test.sh` print ALL PASS by implementing them with minimal changes to lib.dart only. Do not modify test.dart or test.sh.",
+  "workspace": {
+    "lib.dart": "/// Clamp v into the inclusive range [lo, hi].\nint clamp(int v, int lo, int hi) {\n  // TODO: implement\n  return 0;\n}\n\n/// First letters of each word, uppercased (e.g. 'ada lovelace' -> 'AL').\nString initials(String full) {\n  // TODO: implement\n  return '';\n}\n",
+    "test.dart": "import 'dart:io';\n\nimport 'lib.dart';\n\nint failures = 0;\n\nvoid check(String name, bool cond) {\n  print('${cond ? \"PASS\" : \"FAIL\"} $name');\n  if (!cond) failures++;\n}\n\nvoid main() {\n  check('clamp-mid', clamp(5, 1, 10) == 5);\n  check('clamp-low', clamp(-3, 1, 10) == 1);\n  check('clamp-high', clamp(99, 1, 10) == 10);\n  check('initials-two', initials('ada lovelace') == 'AL');\n  check('initials-one', initials('cheme') == 'C');\n  if (failures > 0) {\n    print('ALL FAIL');\n    exitCode = 1;\n  } else {\n    print('ALL PASS');\n  }\n}\n",
+    "test.sh": "#!/bin/sh\ndart test.dart\n"
+  },
+  "check": {
+    "finished": true,
+    "files": {
+      "test.dart": { "contains": "check('clamp-mid', clamp(5, 1, 10) == 5);" },
+      "test.sh": { "contains": "dart test.dart" }
+    },
+    "command": "sh test.sh",
+    "commandContains": "ALL PASS",
+    "maxSteps": 20,
+    "maxErrors": 3
+  }
+}

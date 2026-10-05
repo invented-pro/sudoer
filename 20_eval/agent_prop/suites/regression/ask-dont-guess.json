@@ -1,0 +1,16 @@
+{
+  "id": "ask-dont-guess",
+  "description": "Regression: deliberately ambiguous goal (two timeouts exist). The bp's contract says a clarifying question is a valid finish; guessing is a failure. Expect this one to be genuinely hard — failures here are signal, not harness bugs.",
+  "goal": "Increase the timeout in service.dart.",
+  "workspace": {
+    "service.dart": "const retryTimeout = Duration(seconds: 5);\nconst connectTimeout = Duration(seconds: 30);\n"
+  },
+  "check": {
+    "finished": true,
+    "answerContains": "?",
+    "files": {
+      "service.dart": { "equals": "const retryTimeout = Duration(seconds: 5);\nconst connectTimeout = Duration(seconds: 30);\n" }
+    },
+    "maxSteps": 8
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "id": "module-split",
+  "description": "Capability: structural refactor with import rewiring and two consumers to keep green. Measures repo-scale reorganization with a verifier (verify.sh is guarded against tampering).",
+  "goal": "Split calc.dart into numbers.dart (sum, avg) and strings.dart (pad, truncate), then delete calc.dart. Keep main.dart and stats.dart working (fix their imports). Do not modify verify.sh. Confirm with `sh verify.sh`.",
+  "workspace": {
+    "calc.dart": "String pad(String s, int n) => s.padLeft(n, '.');\n\nString truncate(String s, int n) => n < s.length ? '${s.substring(0, n)}...' : s;\n\nnum sum(List<num> xs) => xs.fold(0, (a, b) => a + b);\n\nnum avg(List<num> xs) => xs.isEmpty ? 0 : sum(xs) / xs.length;\n",
+    "main.dart": "import 'calc.dart';\n\nvoid main() {\n  print(pad('go', 5));\n  print(truncate('gradient', 4));\n}\n",
+    "stats.dart": "import 'calc.dart';\n\nvoid main() {\n  print(sum([1, 2, 3]));\n  print(avg([2, 4]));\n}\n",
+    "verify.sh": "#!/bin/sh\nout1=$(dart main.dart | tr '\\n' ' ' | sed -e 's/[[:space:]]*$//')\nout2=$(dart stats.dart | tr '\\n' ' ' | sed -e 's/[[:space:]]*$//')\nok=1\n[ ! -f calc.dart ] || { echo 'FAIL calc.dart still present'; ok=0; }\n[ \"$out1\" = '...go grad...' ] || { echo \"FAIL main: $out1\"; ok=0; }\n[ \"$out2\" = '6 3.0' ] || { echo \"FAIL stats: $out2\"; ok=0; }\n[ \"$ok\" = 1 ] && echo 'STRUCTURE-OK'\n"
+  },
+  "check": {
+    "finished": true,
+    "files": {
+      "strings.dart": { "contains": "pad" },
+      "numbers.dart": { "contains": "sum" },
+      "verify.sh": { "contains": "[ ! -f calc.dart ]" }
+    },
+    "command": "sh verify.sh",
+    "commandContains": "STRUCTURE-OK",
+    "maxSteps": 30,
+    "maxErrors": 4
+  }
+}

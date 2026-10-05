@@ -1,0 +1,14 @@
+{
+  "id": "json-sort-transform",
+  "description": "Regression: deterministic data transformation verified structurally (not textually). Measures precise instruction following on data, not prose.",
+  "goal": "Create sorted.json containing the users from data.json sorted by age ascending, keeping the same structure ({\"users\": [...]}) and the same per-user keys.",
+  "workspace": {
+    "data.json": "{\n  \"users\": [\n    {\"name\": \"zoe\", \"age\": 31},\n    {\"name\": \"ali\", \"age\": 25},\n    {\"name\": \"max\", \"age\": 28}\n  ]\n}\n"
+  },
+  "check": {
+    "finished": true,
+    "command": "python3 -c 'import json;d=json.load(open(\"sorted.json\"));print(\"SORT-OK\" if [u[\"name\"] for u in d[\"users\"]]==[\"ali\",\"max\",\"zoe\"] and all(set(u)=={\"name\",\"age\"} for u in d[\"users\"]) else \"SORT-BAD\")'",
+    "commandContains": "SORT-OK",
+    "maxSteps": 10
+  }
+}

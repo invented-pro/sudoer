@@ -1,0 +1,15 @@
+{
+  "id": "csv2json-cli",
+  "description": "Capability: build a small tool from scratch with an exact behavioral contract, then verify it. Measures sustained multi-step construction (Terminal-Bench-style build-a-tool), not just editing.",
+  "goal": "Build a Dart CLI at tools/csv2json.dart: it takes one CSV file path as its argument and prints a JSON array of row objects — header names as keys, values kept as strings except integers which are parsed as ints, output compact (no extra whitespace). Verify on data/sample.csv before finishing.",
+  "workspace": {
+    "data/sample.csv": "name,age,city\nada,36,london\nbo,29,lima\n"
+  },
+  "check": {
+    "finished": true,
+    "command": "dart tools/csv2json.dart data/sample.csv",
+    "commandContains": "[{\"name\":\"ada\",\"age\":36,\"city\":\"london\"},{\"name\":\"bo\",\"age\":29,\"city\":\"lima\"}]",
+    "maxSteps": 30,
+    "maxErrors": 4
+  }
+}

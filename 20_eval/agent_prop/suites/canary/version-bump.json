@@ -1,0 +1,19 @@
+{
+  "id": "version-bump",
+  "description": "Canary: update one value consistently across three files of different formats. Measures precise multi-file edits without collateral changes.",
+  "goal": "Bump the app version from 1.2.0 to 1.3.0 everywhere it appears (meta.json, constants.dart, README.md). Change nothing else.",
+  "workspace": {
+    "meta.json": "{\n  \"name\": \"widget\",\n  \"version\": \"1.2.0\",\n  \"license\": \"MIT\"\n}\n",
+    "constants.dart": "const appName = 'widget';\nconst appVersion = '1.2.0';\n",
+    "README.md": "# widget\n\nA tiny example app.\n\nVersion: 1.2.0\n"
+  },
+  "check": {
+    "finished": true,
+    "files": {
+      "meta.json": { "contains": "1.3.0" },
+      "constants.dart": { "contains": "1.3.0" },
+      "README.md": { "contains": "1.3.0" }
+    },
+    "maxSteps": 10
+  }
+}

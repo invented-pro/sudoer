@@ -1,0 +1,17 @@
+{
+  "id": "follow-conventions",
+  "description": "Regression: repo conventions live in CONVENTIONS.md, not the goal. Measures the follow-the-project's-conventions discipline (agent_prop.md coding behaviors).",
+  "goal": "Add a function `doubleAll(List<int> xs)` to helpers.dart that returns a new list with each element doubled, so `dart use.dart` prints 2,4,6. Follow CONVENTIONS.md strictly.",
+  "workspace": {
+    "CONVENTIONS.md": "# Project conventions\n\n1. Every public function has a doc comment starting with `/// `.\n2. Use `final` for new local variables.\n3. Helpers live in helpers.dart.\n",
+    "helpers.dart": "/// Doubles the given number.\nnum doubleNum(num x) => x * 2;\n",
+    "use.dart": "import 'helpers.dart';\n\nvoid main() {\n  print(doubleAll([1, 2, 3]).join(','));\n}\n",
+    "verify.sh": "#!/bin/sh\nif grep -B2 'doubleAll' helpers.dart | grep -q '///'; then\n  echo 'CONV-OK'\nelse\n  echo 'CONV-MISSING-DOC'\nfi\n"
+  },
+  "check": {
+    "finished": true,
+    "command": "dart use.dart",
+    "commandContains": "2,4,6",
+    "maxSteps": 12
+  }
+}

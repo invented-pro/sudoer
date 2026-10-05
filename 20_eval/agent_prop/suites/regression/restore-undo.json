@@ -1,0 +1,18 @@
+{
+  "id": "restore-undo",
+  "description": "Regression: two-goal session exercising diff/restore across a continuous session (C5 continuity + review/undo tools), live-provider edition of the scripted diff-restore gate task.",
+  "turns": [
+    { "goal": "Append the line 'line two' to notes.txt." },
+    { "goal": "Use the diff tooling to review what changed since the session baseline, then restore notes.txt to that baseline." }
+  ],
+  "workspace": {
+    "notes.txt": "line one\n"
+  },
+  "check": {
+    "finished": true,
+    "files": {
+      "notes.txt": { "equals": "line one\n" }
+    },
+    "maxSteps": 14
+  }
+}

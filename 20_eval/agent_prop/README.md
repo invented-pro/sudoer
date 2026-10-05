@@ -70,14 +70,20 @@ burning twice the steps must show it.
 
 ## Suites
 
-- **canary** — 3 fast tasks, run on every build (N≥3; N=5 for release
-  candidates). Catches live-provider regressions the scripted gate can't see.
-- **regression** — failures harvested from canary runs and real use. Each task
-  records in its description which label failed and why; a task graduates here
-  only after its fix, and v2 must never be tuned on unfixed ones.
-- **capability** *(to come)* — heavyweight drills: self-build, Prop rebuild,
-  Pilot build (agent_prop.md "Build gate"), scored against the coding
-  disciplines, not just file equality.
+- **canary** — 6 fast tasks, run on every build (N≥3; N=5 for release
+  candidates). Catches live-provider regressions the scripted gate can't see:
+  write/edit/run flows, multi-file rename, lint-fix, version bumps.
+- **regression** — 8 targeted hard cases: edit precision under repeated keys,
+  structural JSON transforms, deprecated-API sweeps, issue-to-green-tests,
+  repo conventions, injected instructions in file contents, ambiguous goals
+  (ask, don't guess), diff/restore across a continuous session. Each task
+  names the discipline it measures in its description; failures here are
+  signal, not harness bugs.
+- **capability** — 3 heavyweight drills: build-a-tool with an exact behavioral
+  contract (csv2json), unlocalized bug hunt (double-taxed checkout), and a
+  guarded structural refactor (module split with import rewiring). Future
+  additions: the self-build drills from agent_prop.md's Build gate (Pilot
+  build, Prop rebuild) once tasks can reference the real repo as workspace.
 
 ## Policies
 
