@@ -9,6 +9,17 @@ import 'reliability.dart';
 import 'session.dart';
 import 'tools/tool.dart';
 
+/// The result of dispatching one call of a step's batch: its outcome, how
+/// long it took, and — on a timeout — the failure message (the outcome is
+/// null and the loop records the timeout as an observation bound to the
+/// call).
+class _Dispatched {
+  _Dispatched(this.outcome, this.elapsed, {this.timeoutMessage});
+  final ToolOutcome? outcome;
+  final Duration elapsed;
+  final String? timeoutMessage;
+}
+
 /// C1: the plan-driven multi-step ReAct loop. Owns the plan, the stall-based
 /// budget, the recoverable/blocked decision, and the run result. The
 /// transcript and plan live in the session (C5), so work carries across runs.
@@ -116,6 +127,7 @@ final class AgentLoop {
         if (failure.kind == FailureKind.cancelled) {
           // The user aborted the in-flight call (C6, C8): end the run at once.
           diagnostics.event('C1 loop', 'run cancelled mid-call');
+          await tools.reapJobs();
           observer?.onPhase('done');
           return done(RunStatus.incomplete,
               answer: 'run cancelled', reason: 'cancelled');
@@ -183,87 +195,149 @@ final class AgentLoop {
       }
 
       observer?.onPhase('acting');
-      final call = action as ToolCall;
-      // Bind the observation to the call with a stable id so adapters can
-      // replay an assistant tool_calls message paired with its tool result.
-      final resolved = call.id == null
-          ? ToolCall(
-              id: 'call_${session.id}_${session.transcript.length}',
-              name: call.name,
-              arguments: call.arguments,
-            )
-          : call;
-      session.transcript
-          .add(AssistantEntry(thought: response.thought, action: resolved));
-      observer?.onTool(resolved.name, resolved.arguments);
-      diagnostics.event(
-        'C3 tools',
-        'call ${resolved.name} ${brief(jsonEncode(resolved.arguments), 100)}'
-        ' (id=${resolved.id})',
-      );
+      final batch = action as ToolBatch;
+      // Bind each observation to its call with a stable id so adapters can
+      // replay one assistant tool_calls message paired with its tool results.
+      final calls = [
+        for (var i = 0; i < batch.calls.length; i++)
+          batch.calls[i].id == null
+              ? ToolCall(
+                  id: 'call_${session.id}_${session.transcript.length}_$i',
+                  name: batch.calls[i].name,
+                  arguments: batch.calls[i].arguments,
+                )
+              : batch.calls[i],
+      ];
+      session.transcript.add(
+          AssistantEntry(thought: response.thought, action: ToolBatch(calls)));
+      for (final call in calls) {
+        observer?.onTool(call.name, call.arguments);
+        diagnostics.event(
+          'C3 tools',
+          'call ${call.name} ${brief(jsonEncode(call.arguments), 100)}'
+          ' (id=${call.id})',
+        );
+      }
 
-      var dispatch = await _dispatch(resolved, session);
-      var outcome = dispatch.$1;
-      var toolElapsed = dispatch.$2;
-      if (outcome == null) {
-        timings.add(RunTiming('${resolved.name} (timeout)', toolElapsed));
-        steps++;
-        stalls++;
-        continue;
+      // Dispatch the batch (C1): runs of independent read-only calls go in
+      // parallel, side-effecting calls run sequentially in the listed order,
+      // and the results keep the listed order.
+      final wall = Stopwatch()..start();
+      final results = List<_Dispatched?>.filled(calls.length, null);
+      var i = 0;
+      while (i < calls.length && !session.cancel.isCancelled) {
+        if (kReadOnlyTools.contains(calls[i].name)) {
+          final run = <int>[i++];
+          while (i < calls.length &&
+              !session.cancel.isCancelled &&
+              kReadOnlyTools.contains(calls[i].name)) {
+            run.add(i++);
+          }
+          final dispatched =
+              await Future.wait([for (final j in run) _dispatch(calls[j], session)]);
+          for (var k = 0; k < run.length; k++) {
+            results[run[k]] = dispatched[k];
+          }
+        } else {
+          results[i] = await _dispatch(calls[i], session);
+          i++;
+        }
       }
 
       // A guard denial is a hard block. A workspace denial may be opened by
-      // the human surface for the session, after which the call is retried in
-      // place; a network denial has no override. Automation (no authorizer)
-      // always blocks.
-      if (outcome.outcome == Outcome.guardDenied) {
-        if (outcome.guard == GuardArea.network) {
-          diagnostics.event('C1 loop', 'blocked: ${outcome.text}');
-          observer?.onPhase('blocked');
-          return done(RunStatus.blocked, reason: outcome.text);
-        }
-        if (!tools.guard.allowOutside) {
+      // the human surface for the session, after which the denied calls are
+      // retried in place; a network denial has no override. Automation (no
+      // authorizer) always blocks.
+      final blockReason = <String?>[];
+      final denied = <int>[
+        for (var k = 0; k < results.length; k++)
+          if (results[k]?.outcome?.outcome == Outcome.guardDenied) k,
+      ];
+      if (denied.isNotEmpty) {
+        final network = denied
+            .map((k) => results[k]!.outcome!)
+            .where((o) => o.guard == GuardArea.network)
+            .toList();
+        if (network.isNotEmpty) {
+          blockReason.add(network.first.text);
+        } else if (!tools.guard.allowOutside) {
           final ask = authorize;
-          final granted =
-              ask == null ? false : await ask(resolved.name, outcome.text);
+          final granted = ask == null
+              ? false
+              : await ask(calls[denied.first].name,
+                  results[denied.first]!.outcome!.text);
           if (!granted) {
-            diagnostics.event('C1 loop', 'blocked: ${outcome.text}');
-            observer?.onPhase('blocked');
-            return done(RunStatus.blocked, reason: outcome.text);
-          }
-          tools.guard.allowOutside = true;
-          session.allowOutsideWorkspace = true;
-          diagnostics.event('C3 tools', 'authorized outside the workspace');
-          dispatch = await _dispatch(resolved, session);
-          outcome = dispatch.$1;
-          toolElapsed = dispatch.$2;
-          if (outcome == null) {
-            timings.add(RunTiming('${resolved.name} (timeout)', toolElapsed));
-            steps++;
-            stalls++;
-            continue;
+            blockReason.add(results[denied.first]!.outcome!.text);
+          } else {
+            tools.guard.allowOutside = true;
+            session.allowOutsideWorkspace = true;
+            diagnostics.event('C3 tools', 'authorized outside the workspace');
+            for (final k in denied) {
+              results[k] = await _dispatch(calls[k], session);
+            }
+            final retry = results[denied.first]?.outcome;
+            if (retry?.outcome == Outcome.guardDenied) {
+              blockReason.add(retry!.text);
+            }
           }
         }
       }
+      wall.stop();
 
-      timings.add(RunTiming(resolved.name, toolElapsed));
-      diagnostics.event(
-        'C3 tools',
-        '${resolved.name} -> ${outcome.outcome.wire}: ${brief(outcome.text)}',
-      );
-      observer?.onObservation(outcome.outcome, outcome.text,
-          elapsed: toolElapsed);
-      session.transcript.add(ObservationEntry(
-        text: outcome.text,
-        outcome: outcome.outcome,
-        toolCallId: resolved.id,
-      ));
+      // Record the turn: one observation per call, in the listed order, so
+      // every tool call is answered even when a sibling timed out, was
+      // denied, or the run was cancelled mid-batch (C8 keeps completed
+      // siblings' observations).
+      var novel = false;
+      for (var k = 0; k < calls.length; k++) {
+        final dispatched = results[k];
+        final outcome = dispatched?.outcome;
+        if (outcome == null) {
+          final message = dispatched?.timeoutMessage ??
+              (session.cancel.isCancelled ? 'cancelled' : 'dispatch skipped');
+          timings.add(RunTiming(
+              '${calls[k].name} (${dispatched == null ? 'skipped' : 'timeout'})',
+              dispatched?.elapsed ?? Duration.zero));
+          session.transcript.add(ObservationEntry(
+            text: 'tool error: $message',
+            outcome: Outcome.error,
+            toolCallId: calls[k].id,
+          ));
+          continue;
+        }
+        timings.add(RunTiming(calls[k].name, dispatched!.elapsed));
+        diagnostics.event(
+          'C3 tools',
+          '${calls[k].name} -> ${outcome.outcome.wire}: ${brief(outcome.text)}',
+        );
+        observer?.onObservation(outcome.outcome, outcome.text,
+            elapsed: dispatched.elapsed);
+        session.transcript.add(ObservationEntry(
+          text: outcome.text,
+          outcome: outcome.outcome,
+          toolCallId: calls[k].id,
+        ));
+        if (_novel(calls[k], outcome, seen)) novel = true;
+      }
+      if (calls.length > 1) {
+        timings.add(RunTiming('batch', wall.elapsed));
+      }
+
+      if (blockReason.isNotEmpty) {
+        diagnostics.event('C1 loop', 'blocked: ${blockReason.first}');
+        observer?.onPhase('blocked');
+        return done(RunStatus.blocked, reason: blockReason.first);
+      }
+      if (session.cancel.isCancelled) {
+        break;
+      }
+
       steps++;
-      // A step makes progress when it advances the plan or yields an
+      // A step makes progress when it advances the plan or yields any
       // observation not seen before in this run. Only consecutive
       // non-progress steps (repeats, errors, timeouts) end a run, so a long
       // run of distinct productive steps is never cut off by step count.
-      if (planAdvanced || _novel(resolved, outcome, seen)) {
+      if (planAdvanced || novel) {
         stalls = 0;
         diagnostics.event('C1 loop', 'progress; stall counter reset');
       } else {
@@ -274,6 +348,8 @@ final class AgentLoop {
 
     if (session.cancel.isCancelled) {
       session.cancel.reset();
+      // Every background job is reaped on cancel (C3, C8).
+      await tools.reapJobs();
       diagnostics.event('C1 loop', 'run cancelled');
       observer?.onPhase('done');
       return done(RunStatus.incomplete,
@@ -338,10 +414,9 @@ final class AgentLoop {
     return seen.add(key);
   }
 
-  /// Dispatch [call] under the tool-timeout guard. Returns the outcome (null
-  /// on timeout, so the loop can take the next step) and how long it took.
-  Future<(ToolOutcome?, Duration)> _dispatch(
-      ToolCall call, Session session) async {
+  /// Dispatch [call] under the tool-timeout guard (C8). Never touches the
+  /// transcript; the loop records every observation itself, in listed order.
+  Future<_Dispatched> _dispatch(ToolCall call, Session session) async {
     final watch = Stopwatch()..start();
     try {
       final outcome = await reliability.guardTool(
@@ -349,17 +424,13 @@ final class AgentLoop {
         tools.timeoutFor(call.name),
       );
       watch.stop();
-      return (outcome, watch.elapsed);
+      return _Dispatched(outcome, watch.elapsed);
     } on StepFailure catch (failure) {
       watch.stop();
       diagnostics.event(
           'C8 reliability', 'tool timeout; recovering: ${failure.message}');
-      session.transcript.add(ObservationEntry(
-        text: 'tool error: ${failure.message}',
-        outcome: Outcome.error,
-        toolCallId: call.id,
-      ));
-      return (null, watch.elapsed);
+      return _Dispatched(null, watch.elapsed,
+          timeoutMessage: failure.message);
     }
   }
 

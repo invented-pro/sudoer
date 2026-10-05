@@ -45,19 +45,33 @@ final class PlanItem {
   Map<String, dynamic> toJson() => {'text': text, 'done': done};
 }
 
-/// An action the model chose: call a tool, or finish.
+/// An action the model chose: finish, or a batch of tool calls
+/// (`message.schema.json`: `action` = `finish` | `toolBatch`).
 sealed class Action {
   const Action();
 
   factory Action.fromJson(Map<String, dynamic> json) => switch (json['type']) {
         'finish' => Finish(json['answer'] as String),
-        _ => ToolCall.fromJson(json),
+        // Legacy single-call actions (pre-batch sessions) wrap into a
+        // batch of one so an old session file still resumes.
+        'tool_call' => ToolBatch([ToolCall.fromJson(json)]),
+        _ => ToolBatch([
+            for (final call in (json['tool_calls'] as List? ?? const []))
+              ToolCall.fromJson((call as Map).cast<String, dynamic>()),
+          ]),
       };
+
+  /// The tool calls this action carries, in the model's listed order;
+  /// empty for a finish.
+  List<ToolCall> get calls => const [];
 
   Map<String, dynamic> toJson();
 }
 
-final class ToolCall extends Action {
+/// A model request to run a tool with validated-shape arguments
+/// (`tool.schema.json`: `toolCall`). Not itself an action: a step's action
+/// is a [ToolBatch] carrying one or more of these.
+final class ToolCall {
   const ToolCall({required this.name, required this.arguments, this.id});
 
   /// The provider's tool-call id when it supplied one; used to bind the
@@ -72,12 +86,27 @@ final class ToolCall extends Action {
         arguments: (json['arguments'] as Map).cast<String, dynamic>(),
       );
 
-  @override
   Map<String, dynamic> toJson() => {
         'type': 'tool_call',
         if (id != null) 'id': id,
         'name': name,
         'arguments': arguments,
+      };
+}
+
+/// One step's action: one or more tool calls emitted together. Independent
+/// read-only calls may run in parallel (C1); observations return bound to
+/// their calls, in the listed order.
+final class ToolBatch extends Action {
+  const ToolBatch(this.calls);
+
+  @override
+  final List<ToolCall> calls;
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': 'tool_calls',
+        'tool_calls': [for (final call in calls) call.toJson()],
       };
 }
 

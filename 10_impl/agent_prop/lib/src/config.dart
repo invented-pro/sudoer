@@ -15,6 +15,115 @@ ProviderKind _parseKind(Object? value) => switch (value) {
           '"openai-compatible", "ollama" (got: $value)'),
     };
 
+/// Sampling parameters for the configured model (C2): part of Prop's model
+/// config where the adapter supports them. Optional; omitted keys use the
+/// endpoint's defaults.
+final class SamplingConfig {
+  const SamplingConfig({
+    this.temperature,
+    this.topP,
+    this.topK,
+    this.seed,
+    this.maxTokens,
+  });
+
+  final double? temperature;
+  final double? topP;
+  final int? topK;
+  final int? seed;
+
+  /// OpenAI `max_tokens` / ollama `num_predict`.
+  final int? maxTokens;
+
+  /// The keys this config accepts, mapping an alias to its canonical name.
+  static const Map<String, String> _keys = {
+    'temperature': 'temperature',
+    'top_p': 'top_p',
+    'top_k': 'top_k',
+    'seed': 'seed',
+    'max_tokens': 'max_tokens',
+  };
+
+  factory SamplingConfig.fromJson(Map<String, dynamic> json) {
+    for (final key in json.keys) {
+      if (!_keys.containsKey(key)) {
+        throw ConfigException(
+            'provider.sampling.$key is not a sampling parameter '
+            '(expected one of: ${_keys.keys.join(', ')})');
+      }
+    }
+    double? asDouble(String key) {
+      final value = json[key];
+      if (value == null) return null;
+      if (value is! num) {
+        throw ConfigException('provider.sampling.$key must be a number');
+      }
+      return value.toDouble();
+    }
+
+    int? asInt(String key) {
+      final value = json[key];
+      if (value == null) return null;
+      if (value is! int) {
+        throw ConfigException('provider.sampling.$key must be an integer');
+      }
+      return value;
+    }
+
+    final temperature = asDouble('temperature');
+    if (temperature != null && (temperature < 0 || temperature > 2)) {
+      throw const ConfigException(
+          'provider.sampling.temperature must be within 0..2');
+    }
+    final topP = asDouble('top_p');
+    if (topP != null && (topP < 0 || topP > 1)) {
+      throw const ConfigException('provider.sampling.top_p must be within 0..1');
+    }
+    final topK = asInt('top_k');
+    if (topK != null && topK < 1) {
+      throw const ConfigException(
+          'provider.sampling.top_k must be an integer >= 1');
+    }
+    final maxTokens = asInt('max_tokens');
+    if (maxTokens != null && maxTokens < 1) {
+      throw const ConfigException(
+          'provider.sampling.max_tokens must be an integer >= 1');
+    }
+    return SamplingConfig(
+      temperature: temperature,
+      topP: topP,
+      topK: topK,
+      seed: asInt('seed'),
+      maxTokens: maxTokens,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        if (temperature != null) 'temperature': temperature,
+        if (topP != null) 'top_p': topP,
+        if (topK != null) 'top_k': topK,
+        if (seed != null) 'seed': seed,
+        if (maxTokens != null) 'max_tokens': maxTokens,
+      };
+
+  /// The chat-completions body keys for these parameters.
+  Map<String, dynamic> openAiJson() => {
+        if (temperature != null) 'temperature': temperature,
+        if (topP != null) 'top_p': topP,
+        if (seed != null) 'seed': seed,
+        if (maxTokens != null) 'max_tokens': maxTokens,
+      };
+
+  /// The ollama `options` map for these parameters.
+  Map<String, dynamic> ollamaJson() => {
+        if (temperature != null) 'temperature': temperature,
+        if (topP != null) 'top_p': topP,
+        if (topK != null) 'top_k': topK,
+        if (seed != null) 'seed': seed,
+        if (maxTokens != null) 'num_predict': maxTokens,
+      };
+}
+
 final class ProviderConfig {
   const ProviderConfig({
     required this.kind,
@@ -22,6 +131,7 @@ final class ProviderConfig {
     required this.contextWindow,
     this.baseUrl,
     this.apiKey,
+    this.sampling,
   });
 
   final ProviderKind kind;
@@ -29,6 +139,9 @@ final class ProviderConfig {
   final int contextWindow;
   final String? baseUrl;
   final String? apiKey;
+
+  /// Optional sampling parameters (C2); null means endpoint defaults.
+  final SamplingConfig? sampling;
 
   /// Parse and validate against `config.schema.json` (hand-checked; the
   /// schema remains the source of truth).
@@ -55,12 +168,19 @@ final class ProviderConfig {
     if (apiKey != null && apiKey is! String) {
       throw const ConfigException('provider.api_key must be a string');
     }
+    final sampling = json['sampling'];
+    if (sampling != null && sampling is! Map) {
+      throw const ConfigException('provider.sampling must be an object');
+    }
     return ProviderConfig(
       kind: kind,
       model: model,
       contextWindow: window,
       baseUrl: baseUrl as String?,
       apiKey: apiKey as String?,
+      sampling: sampling == null
+          ? null
+          : SamplingConfig.fromJson(sampling.cast<String, dynamic>()),
     );
   }
 
@@ -73,6 +193,7 @@ final class ProviderConfig {
         'context_window': contextWindow,
         if (baseUrl != null) 'base_url': baseUrl,
         if (apiKey != null) 'api_key': apiKey,
+        if (sampling != null) 'sampling': sampling!.toJson(),
       };
 }
 

@@ -131,6 +131,29 @@ Future<TaskReport> runTask(Task task) async {
       failures.add('tools: expected ${task.expect.tools}, got $callLog');
     }
 
+    // The tool observations in call order: the transcript's tool-bound
+    // observation entries (harness-level observations, such as a provider
+    // timeout, carry no tool_call_id and are excluded).
+    if (task.expect.observations != null) {
+      final observations = [
+        for (final entry in outcome.session.transcript)
+          if (entry is ObservationEntry && entry.toolCallId != null)
+            entry.text,
+      ];
+      final expected = task.expect.observations!;
+      for (var i = 0; i < expected.length; i++) {
+        if (i >= observations.length) {
+          failures.add('observations: expected at least ${i + 1}, '
+              'got ${observations.length}');
+          break;
+        }
+        if (!observations[i].contains(expected[i])) {
+          failures.add('observations[$i]: expected to contain '
+              '"${expected[i]}", got "${observations[i]}"');
+        }
+      }
+    }
+
     if (task.expect.files != null) {
       for (final entry in task.expect.files!.entries) {
         final file = File(p.join(temp.path, entry.key));

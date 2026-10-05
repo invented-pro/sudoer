@@ -142,8 +142,8 @@ void main() {
         text: 'reading',
         toolCalls: [ToolCall(name: 'read', arguments: {'path': 'a.txt'})],
       ));
-      expect(response.action, isA<ToolCall>());
-      expect((response.action as ToolCall).name, 'read');
+      expect(response.action, isA<ToolBatch>());
+      expect((response.action as ToolBatch).calls.single.name, 'read');
     });
 
     test('a plan update rides alongside the action', () {
@@ -945,8 +945,8 @@ void main() {
         const UserEntry('goal'),
         AssistantEntry(
             thought: '',
-            action:
-                ToolCall(name: 'run_command', arguments: {'command': 'make'})),
+            action: ToolBatch(
+                [ToolCall(name: 'run_command', arguments: {'command': 'make'})])),
         ObservationEntry(text: text, outcome: Outcome.ok, toolCallId: 'c1'),
       ];
       final request = assembler.assemble(
@@ -968,17 +968,17 @@ void main() {
         const UserEntry('goal'),
         AssistantEntry(
             thought: '',
-            action: ToolCall(name: 'read', arguments: {'path': 'lib/a.dart'})),
+            action: ToolBatch([ToolCall(name: 'read', arguments: {'path': 'lib/a.dart'})])),
         ObservationEntry(text: 'a' * 800, outcome: Outcome.ok, toolCallId: 'c0'),
         AssistantEntry(
             thought: '',
-            action:
-                ToolCall(name: 'read', arguments: {'path': 'lib/missing.dart'})),
+            action: ToolBatch(
+                [ToolCall(name: 'read', arguments: {'path': 'lib/missing.dart'})])),
         ObservationEntry(
             text: 'E' * 800, outcome: Outcome.error, toolCallId: 'c1'),
         AssistantEntry(
             thought: '',
-            action: ToolCall(name: 'read', arguments: {'path': 'lib/c.dart'})),
+            action: ToolBatch([ToolCall(name: 'read', arguments: {'path': 'lib/c.dart'})])),
         ObservationEntry(text: 'c' * 800, outcome: Outcome.ok, toolCallId: 'c2'),
         const UserEntry('current goal'),
       ];
@@ -997,7 +997,7 @@ void main() {
       // The exchange stays paired and the stored transcript is unchanged.
       expect(
           request.messages.whereType<AssistantEntry>().map((a) => a.action),
-          everyElement(isA<ToolCall>()));
+          everyElement(isA<ToolBatch>()));
       expect((transcript[2] as ObservationEntry).text, 'a' * 800);
     });
 
@@ -1074,13 +1074,13 @@ void main() {
         const UserEntry('old goal'),
         AssistantEntry(
             thought: '',
-            action: ToolCall(
-                name: 'read', arguments: {'path': 'lib/a.dart'})),
+            action: ToolBatch([ToolCall(
+                name: 'read', arguments: {'path': 'lib/a.dart'})])),
         ObservationEntry(text: 'x' * 400, outcome: Outcome.ok, toolCallId: 'c1'),
         AssistantEntry(
             thought: '',
-            action: ToolCall(
-                name: 'edit', arguments: {'path': 'lib/a.dart'})),
+            action: ToolBatch([ToolCall(
+                name: 'edit', arguments: {'path': 'lib/a.dart'})])),
         ObservationEntry(
             text: 'x' * 800, outcome: Outcome.error, toolCallId: 'c2'),
         const UserEntry('current goal'),
@@ -1103,10 +1103,10 @@ void main() {
         for (var i = 0; i < 6; i++) ...[
           AssistantEntry(
               thought: '',
-              action: ToolCall(
+              action: ToolBatch([ToolCall(
                   id: 'c$i',
                   name: 'run_command',
-                  arguments: {'command': 'cmd $i'})),
+                  arguments: {'command': 'cmd $i'})])),
           ObservationEntry(
               text: 'x' * 400, outcome: Outcome.ok, toolCallId: 'c$i'),
         ],
@@ -1116,9 +1116,11 @@ void main() {
           .assemble(model: 'm', tools: const [], transcript: transcript);
       final ids = <String>{};
       for (final entry in request.messages) {
-        if (entry is AssistantEntry && entry.action is ToolCall) {
-          final id = (entry.action as ToolCall).id;
-          if (id != null) ids.add(id);
+        if (entry is AssistantEntry && entry.action is ToolBatch) {
+          for (final call in entry.action.calls) {
+            final id = call.id;
+            if (id != null) ids.add(id);
+          }
         } else if (entry is ObservationEntry && entry.toolCallId != null) {
           expect(ids, contains(entry.toolCallId),
               reason: 'observation ${entry.toolCallId} lost its tool call');
@@ -1231,7 +1233,7 @@ void main() {
         const UserEntry('old goal'),
         AssistantEntry(
             thought: '',
-            action: ToolCall(name: 'edit', arguments: {'path': 'lib/a.dart'})),
+            action: ToolBatch([ToolCall(name: 'edit', arguments: {'path': 'lib/a.dart'})])),
         ObservationEntry(text: 'x' * 400, outcome: Outcome.ok, toolCallId: 'c1'),
         for (var i = 0; i < 10; i++)
           ObservationEntry(text: 'x' * 400, outcome: Outcome.ok),
@@ -1253,13 +1255,13 @@ void main() {
         const UserEntry('old goal'),
         AssistantEntry(
             thought: '',
-            action: ToolCall(
-                name: 'edit', arguments: {'path': 'lib/a.dart'})),
+            action: ToolBatch([ToolCall(
+                name: 'edit', arguments: {'path': 'lib/a.dart'})])),
         ObservationEntry(text: 'x' * 400, outcome: Outcome.ok, toolCallId: 'c1'),
         AssistantEntry(
             thought: '',
-            action: ToolCall(
-                name: 'run_command', arguments: {'command': 'dart test'})),
+            action: ToolBatch([ToolCall(
+                name: 'run_command', arguments: {'command': 'dart test'})])),
         ObservationEntry(text: 'x' * 400, outcome: Outcome.ok, toolCallId: 'c2'),
         for (var i = 0; i < 4; i++)
           ObservationEntry(text: 'x' * 400, outcome: Outcome.ok),
@@ -1496,7 +1498,7 @@ void main() {
           UserEntry('go'),
           AssistantEntry(
             thought: 't',
-            action: ToolCall(id: 'abc', name: 'read', arguments: {'path': 'a'}),
+            action: ToolBatch([ToolCall(id: 'abc', name: 'read', arguments: {'path': 'a'})]),
           ),
           ObservationEntry(
               text: 'ok', outcome: Outcome.ok, toolCallId: 'abc'),
@@ -1525,7 +1527,7 @@ void main() {
           UserEntry('go'),
           AssistantEntry(
             thought: 'let me look',
-            action: ToolCall(id: 'ghost', name: '', arguments: {'command': 'ls'}),
+            action: ToolBatch([ToolCall(id: 'ghost', name: '', arguments: {'command': 'ls'})]),
           ),
           ObservationEntry(
             text: 'tool call is missing a name',
@@ -1584,7 +1586,7 @@ void main() {
       await agent.run(const RunRequest('read'));
       final assistant =
           agent.session.transcript.whereType<AssistantEntry>().first;
-      final call = assistant.action as ToolCall;
+      final call = (assistant.action as ToolBatch).calls.single;
       expect(call.id, isNotNull);
       final observation =
           agent.session.transcript.whereType<ObservationEntry>().first;
@@ -1919,7 +1921,7 @@ void main() {
             model: 'm', system: 's', messages: [UserEntry('go')], tools: []),
         onDelta: (_) {},
       );
-      final call = response.action as ToolCall;
+      final call = (response.action as ToolBatch).calls.single;
       expect(call.id, 'call_x');
       expect(call.name, 'read');
       expect(call.arguments, {'path': 'a.txt'});
@@ -1942,7 +1944,7 @@ void main() {
             model: 'm', system: 's', messages: [UserEntry('go')], tools: []),
         onDelta: (_) {},
       );
-      final call = response.action as ToolCall;
+      final call = (response.action as ToolBatch).calls.single;
       expect(call.id, 'call_01a');
       expect(call.name, 'run_command');
       expect(call.arguments, {'command': 'ls'});
@@ -3109,6 +3111,465 @@ void main() {
           'workspace_root': Directory.systemTemp.path,
       });
       expect(config.provider.apiKey, Platform.environment['PATH']);
+    });
+  });
+
+  group('batch actions (C1/C2)', () {
+    test('the wire shape round-trips a tool_calls batch', () {
+      const action = ToolBatch([
+        ToolCall(id: 'a', name: 'read', arguments: {'path': 'x'}),
+        ToolCall(id: 'b', name: 'glob', arguments: {'pattern': '*.md'}),
+      ]);
+      final json = action.toJson();
+      expect(json['type'], 'tool_calls');
+      expect((json['tool_calls'] as List).length, 2);
+      final back = Action.fromJson((jsonDecode(jsonEncode(json)) as Map)
+          .cast<String, dynamic>());
+      expect(back, isA<ToolBatch>());
+      expect((back as ToolBatch).calls.length, 2);
+      expect(back.calls[1].name, 'glob');
+    });
+
+    test('a legacy single tool_call action loads as a batch of one', () {
+      final action = Action.fromJson({
+        'type': 'tool_call',
+        'id': 'old',
+        'name': 'read',
+        'arguments': {'path': 'a'},
+      });
+      expect(action, isA<ToolBatch>());
+      expect((action as ToolBatch).calls.single.id, 'old');
+    });
+
+    test('one step dispatches a read-only batch and answers every call', () async {
+      final temp = Directory.systemTemp.createTempSync('sudoer-batch-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      File(p.join(temp.path, 'a.txt')).writeAsStringSync('A');
+      File(p.join(temp.path, 'b.txt')).writeAsStringSync('B');
+      final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
+      final provider = ScriptedProvider.fromJson({
+        'steps': [
+          {
+            'complete': {
+              'text': 'reading both',
+              'tool_calls': [
+                {
+                  'type': 'tool_call',
+                  'name': 'read',
+                  'arguments': {'path': 'a.txt'},
+                },
+                {
+                  'type': 'tool_call',
+                  'name': 'read',
+                  'arguments': {'path': 'b.txt'},
+                },
+              ],
+            }
+          },
+          {'complete': {'text': 'done'}},
+        ]
+      });
+      final callLog = <String>[];
+      final agent = PropAgent.assemble(
+          config: config, provider: provider, callLog: callLog);
+      final result = await agent.run(const RunRequest('read both'));
+      expect(result.status, RunStatus.complete);
+      expect(callLog, ['read', 'read']);
+      // One assistant decision carrying both calls...
+      final decisions =
+          agent.session.transcript.whereType<AssistantEntry>().toList();
+      expect(decisions.length, 2); // the batch step and the finish
+      expect((decisions[0].action as ToolBatch).calls.length, 2);
+      // ...followed by one observation per call, in the listed order.
+      final observations = agent.session.transcript
+          .whereType<ObservationEntry>()
+          .map((o) => o.text)
+          .toList();
+      expect(observations, ['A', 'B']);
+      // ids bind each observation to its call for replay.
+      final ids =
+          (decisions[0].action as ToolBatch).calls.map((c) => c.id).toList();
+      expect(
+          agent.session.transcript
+              .whereType<ObservationEntry>()
+              .map((o) => o.toolCallId),
+          ids);
+    });
+
+    test('a sibling timeout does not discard completed observations (C8)',
+        () async {
+      final temp = Directory.systemTemp.createTempSync('sudoer-batch-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      File(p.join(temp.path, 'a.txt')).writeAsStringSync('A');
+      final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
+      final provider = ScriptedProvider.fromJson({
+        'steps': [
+          {
+            'complete': {
+              'text': 'mixed batch',
+              'tool_calls': [
+                {
+                  'type': 'tool_call',
+                  'name': 'read',
+                  'arguments': {'path': 'a.txt'},
+                },
+                {
+                  'type': 'tool_call',
+                  'name': 'run_command',
+                  'arguments': {'command': _blockingCommand()},
+                },
+              ],
+            }
+          },
+          {'complete': {'text': 'recovered'}},
+        ]
+      });
+      final agent = PropAgent.assemble(
+          config: config,
+          provider: provider,
+          reliability:
+              const Reliability(buildTimeout: Duration(seconds: 1)));
+      final result = await agent.run(const RunRequest('mixed'));
+      expect(result.status, RunStatus.complete);
+      final observations = agent.session.transcript
+          .whereType<ObservationEntry>()
+          .map((o) => o.text)
+          .toList();
+      expect(observations.first, 'A');
+      expect(observations[1], contains('timed out'));
+    });
+  });
+
+  group('tool catalog additions (C3)', () {
+    late Directory temp;
+    late ToolRegistry registry;
+
+    setUp(() {
+      temp = Directory.systemTemp.createTempSync('sudoer-tools-');
+      registry = ToolRegistry(workspaceRoot: temp.path);
+    });
+
+    tearDown(() => temp.deleteSync(recursive: true));
+
+    test('read returns a 0-based line range as text', () async {
+      File(p.join(temp.path, 'd.txt')).writeAsStringSync('L0\nL1\nL2\nL3\n');
+      final outcome = await registry.dispatch(const ToolCall(
+          name: 'read',
+          arguments: {'path': 'd.txt', 'offset': 1, 'limit': 2}));
+      expect(outcome.outcome, Outcome.ok);
+      expect(outcome.text, 'L1\nL2');
+    });
+
+    test('edit replace_all rewrites every occurrence', () async {
+      final file = File(p.join(temp.path, 'a.txt'))..writeAsStringSync('x x x\n');
+      final outcome = await registry.dispatch(const ToolCall(
+          name: 'edit',
+          arguments: {'path': 'a.txt', 'old': 'x', 'new': 'y', 'replace_all': true}));
+      expect(outcome.outcome, Outcome.ok);
+      expect(file.readAsStringSync(), 'y y y\n');
+    });
+
+    test('an ambiguous edit without replace_all is an error', () async {
+      File(p.join(temp.path, 'a.txt')).writeAsStringSync('cat\ncat\n');
+      final outcome = await registry.dispatch(const ToolCall(
+          name: 'edit', arguments: {'path': 'a.txt', 'old': 'cat', 'new': 'dog'}));
+      expect(outcome.outcome, Outcome.error);
+      expect(outcome.text, contains('ambiguous'));
+    });
+
+    test('multi_edit applies an ordered batch atomically', () async {
+      final file = File(p.join(temp.path, 'a.txt'))
+        ..writeAsStringSync('foo\nbar\nfoo\n');
+      final outcome = await registry.dispatch(const ToolCall(
+          name: 'multi_edit',
+          arguments: {
+            'path': 'a.txt',
+            'edits': [
+              {'old': 'foo', 'new': 'baz', 'replace_all': true},
+              {'old': 'bar', 'new': 'qux'},
+            ]
+          }));
+      expect(outcome.outcome, Outcome.ok);
+      expect(file.readAsStringSync(), 'baz\nqux\nbaz\n');
+    });
+
+    test('multi_edit writes nothing when a later edit fails', () async {
+      final file = File(p.join(temp.path, 'a.txt'))..writeAsStringSync('one\n');
+      final outcome = await registry.dispatch(const ToolCall(
+          name: 'multi_edit',
+          arguments: {
+            'path': 'a.txt',
+            'edits': [
+              {'old': 'one', 'new': 'two'},
+              {'old': 'missing', 'new': 'three'},
+            ]
+          }));
+      expect(outcome.outcome, Outcome.error);
+      expect(outcome.text, contains('edit 2'));
+      expect(file.readAsStringSync(), 'one\n');
+    });
+
+    test('glob finds paths by pattern, skipping build trees', () async {
+      File(p.join(temp.path, 'README.md')).writeAsStringSync('r');
+      Directory(p.join(temp.path, 'src')).createSync();
+      File(p.join(temp.path, 'src', 'main.txt')).writeAsStringSync('m');
+      Directory(p.join(temp.path, 'node_modules', 'dep'))
+          .createSync(recursive: true);
+      File(p.join(temp.path, 'node_modules', 'dep', 'x.txt'))
+          .writeAsStringSync('x');
+      final outcome = await registry.dispatch(const ToolCall(
+          name: 'glob', arguments: {'pattern': '**/*.txt'}));
+      expect(outcome.outcome, Outcome.ok);
+      expect(outcome.text, 'src/main.txt');
+    });
+
+    test('glob matching spans directories and single segments', () {
+      expect(globMatch('**/*.txt', 'a.txt'), isTrue);
+      expect(globMatch('**/*.txt', 'src/deep/a.txt'), isTrue);
+      expect(globMatch('src/*.dart', 'src/a.dart'), isTrue);
+      expect(globMatch('src/*.dart', 'lib/a.dart'), isFalse);
+      expect(globMatch('src/**/*.dart', 'src/a/b.dart'), isTrue);
+      expect(globMatch('*.md', 'README.md'), isTrue);
+      expect(globMatch('*.md', 'src/README.md'), isFalse);
+      expect(globMatch('a?c.txt', 'abc.txt'), isTrue);
+      expect(globMatch('a?c.txt', 'ac.txt'), isFalse);
+    });
+  });
+
+  group('workspace baseline (C3/C5)', () {
+    test('diff reports changes and restore reverts them', () async {
+      final temp = Directory.systemTemp.createTempSync('sudoer-baseline-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final file = File(p.join(temp.path, 'a.txt'))..writeAsStringSync('orig\n');
+      final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
+      final provider = ScriptedProvider.fromJson({
+        'steps': [
+          {
+            'complete': {
+              'tool_calls': [
+                {
+                  'type': 'tool_call',
+                  'name': 'write',
+                  'arguments': {'path': 'a.txt', 'content': 'changed\n'},
+                }
+              ],
+            }
+          },
+          {
+            'complete': {
+              'tool_calls': [
+                {
+                  'type': 'tool_call',
+                  'name': 'diff',
+                  'arguments': {'path': 'a.txt'},
+                }
+              ],
+            }
+          },
+          {
+            'complete': {
+              'tool_calls': [
+                {
+                  'type': 'tool_call',
+                  'name': 'restore',
+                  'arguments': {'path': 'a.txt'},
+                }
+              ],
+            }
+          },
+          {'complete': {'text': 'done'}},
+        ]
+      });
+      final agent = PropAgent.assemble(config: config, provider: provider);
+      final result = await agent.run(const RunRequest('change, review, undo'));
+      expect(result.status, RunStatus.complete);
+      final observations = agent.session.transcript
+          .whereType<ObservationEntry>()
+          .map((o) => o.text)
+          .toList();
+      expect(observations[0], contains('wrote'));
+      expect(observations[1], contains('- orig'));
+      expect(observations[1], contains('+ changed'));
+      expect(observations[2], contains('restored'));
+      expect(file.readAsStringSync(), 'orig\n');
+      // The session records the baseline handle (C5) and it persists.
+      expect(agent.session.baseline, isNotNull);
+      expect(
+          File(p.join(config.sessionDir, agent.session.baseline!)).existsSync(),
+          isTrue);
+      final reloaded = Session.load(config.sessionDir, agent.session.id);
+      expect(reloaded.baseline, agent.session.baseline);
+    });
+
+    test('restore without a path removes files added since the baseline',
+        () async {
+      final temp = Directory.systemTemp.createTempSync('sudoer-baseline-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      File(p.join(temp.path, 'keep.txt')).writeAsStringSync('keep\n');
+      final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
+      final provider = ScriptedProvider.fromJson({
+        'steps': [
+          {
+            'complete': {
+              'tool_calls': [
+                {
+                  'type': 'tool_call',
+                  'name': 'write',
+                  'arguments': {'path': 'new.txt', 'content': 'new'},
+                }
+              ],
+            }
+          },
+          {
+            'complete': {
+              'tool_calls': [
+                {'type': 'tool_call', 'name': 'restore', 'arguments': {}},
+              ],
+            }
+          },
+          {'complete': {'text': 'done'}},
+        ]
+      });
+      final agent = PropAgent.assemble(config: config, provider: provider);
+      final result = await agent.run(const RunRequest('write then undo'));
+      expect(result.status, RunStatus.complete);
+      expect(File(p.join(temp.path, 'keep.txt')).existsSync(), isTrue);
+      expect(File(p.join(temp.path, 'new.txt')).existsSync(), isFalse);
+    });
+  });
+
+  group('background jobs (C3/C8)', () {
+    test('start, poll, and stop a background command by id', () async {
+      final temp = Directory.systemTemp.createTempSync('sudoer-job-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
+      final provider = ScriptedProvider.fromJson({
+        'steps': [
+          {
+            'complete': {
+              'tool_calls': [
+                {
+                  'type': 'tool_call',
+                  'name': 'job',
+                  'arguments': {
+                    'action': 'start',
+                    'command': 'echo job-output; sleep 5',
+                  },
+                }
+              ],
+            }
+          },
+          {
+            'complete': {
+              'tool_calls': [
+                {'type': 'tool_call', 'name': 'job', 'arguments': {'action': 'poll', 'id': 'job1'}},
+              ],
+            }
+          },
+          {
+            'complete': {
+              'tool_calls': [
+                {'type': 'tool_call', 'name': 'job', 'arguments': {'action': 'stop', 'id': 'job1'}},
+              ],
+            }
+          },
+          {'complete': {'text': 'done'}},
+        ]
+      });
+      final agent = PropAgent.assemble(config: config, provider: provider);
+      final result = await agent.run(const RunRequest('run a job'));
+      expect(result.status, RunStatus.complete);
+      final observations = agent.session.transcript
+          .whereType<ObservationEntry>()
+          .map((o) => o.text)
+          .toList();
+      expect(observations[0], contains('job1'));
+      expect(observations[1], contains('job-output'));
+      expect(observations[2], contains('job1'));
+      await agent.dispose();
+    });
+
+    test('validate rejects a poll without an id', () async {
+      final registry = ToolRegistry(
+          workspaceRoot: Directory.systemTemp.createTempSync('sudoer-job-').path);
+      final outcome = await registry.dispatch(
+          const ToolCall(name: 'job', arguments: {'action': 'poll'}));
+      expect(outcome.outcome, Outcome.error);
+      expect(outcome.text, contains('id'));
+    });
+  });
+
+  group('sampling config (C2)', () {
+    test('parses and validates sampling parameters', () {
+      final sampling = SamplingConfig.fromJson({
+        'temperature': 0.2,
+        'top_p': 0.9,
+        'top_k': 40,
+        'seed': 7,
+        'max_tokens': 1024,
+      });
+      expect(sampling.openAiJson(), containsPair('max_tokens', 1024));
+      expect(sampling.openAiJson(), isNot(contains('top_k')));
+      expect(sampling.ollamaJson(), containsPair('num_predict', 1024));
+      expect(sampling.ollamaJson(), containsPair('top_k', 40));
+      expect(() => SamplingConfig.fromJson({'nope': 1}),
+          throwsA(isA<ConfigException>()));
+      expect(() => SamplingConfig.fromJson({'temperature': 9}),
+          throwsA(isA<ConfigException>()));
+    });
+
+    test('the provider config round-trips sampling', () {
+      final config = Config.fromJson({
+        'provider': {
+          'kind': 'ollama',
+          'model': 'm',
+          'context_window': 100,
+          'sampling': {'temperature': 0.3},
+        },
+      });
+      expect(config.provider.sampling?.temperature, 0.3);
+      expect(
+        (config.provider.toJson()['sampling'] as Map)['temperature'],
+        0.3,
+      );
+    });
+  });
+
+  group('/diff command (C6)', () {
+    test('prints the workspace changes against the session baseline', () async {
+      final temp = Directory.systemTemp.createTempSync('sudoer-diffcmd-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      File(p.join(temp.path, 'a.txt')).writeAsStringSync('one\n');
+      final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
+      final provider = ScriptedProvider.fromJson({
+        'steps': [
+          {
+            'complete': {
+              'tool_calls': [
+                {
+                  'type': 'tool_call',
+                  'name': 'edit',
+                  'arguments': {'path': 'a.txt', 'old': 'one', 'new': 'two'},
+                }
+              ],
+            }
+          },
+          {'complete': {'text': 'done'}},
+        ]
+      });
+      final out = StringBuffer();
+      final err = StringBuffer();
+      final outcome = await runRepl(
+        config: config,
+        input: Stream.fromIterable(['edit a.txt', '/diff', '/exit']),
+        out: out,
+        err: err,
+        providerFactory: (_) => provider,
+      );
+      expect(outcome.exitCode, 0);
+      // Command output goes to stdout on the automate surface (C6).
+      expect(out.toString(), contains('- one'));
+      expect(out.toString(), contains('+ two'));
     });
   });
 }

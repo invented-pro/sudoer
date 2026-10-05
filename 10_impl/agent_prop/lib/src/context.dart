@@ -3,15 +3,43 @@ import 'dart:convert';
 import 'diagnostics.dart';
 import 'errors.dart';
 import 'models.dart';
+import 'tools/tool.dart' show kReadOnlyTools;
+
+/// The system prompt's version stamp (C4): the prompt is a pinned, versioned
+/// artifact shipped with the build, so a prompt change is reviewable and
+/// evaluation results stay attributable.
+const String kPromptVersion = 'prop-prompt-v2';
 
 const String kPropSystemPrompt =
-    'You are Sudoer, a coding assistant running locally. Take one step at a '
-    'time: call exactly one tool per step. Keep the plan up to date by ending '
-    'a message with a fenced block labelled "plan" holding one Markdown '
-    'checkbox per item, for example:\n'
+    'You are Sudoer (Prop), a coding agent running locally in a workspace '
+    '(system prompt $kPromptVersion).\n'
+    '\n'
+    'Work like a careful engineer:\n'
+    '- Orient first: map the repo with glob and search before editing.\n'
+    '- Read a file before you edit it; make small, grounded edits; prefer '
+    'multi_edit for a repeated or related set of changes.\n'
+    '- Verify before claiming done: run the build, linter, or tests with '
+    'run_command and read the output. Report exactly what ran and what it '
+    'printed.\n'
+    '- Review your changes with diff, and restore to undo them.\n'
+    '- Use job for a command that should keep running (a dev server or '
+    'watcher) while you keep working.\n'
+    '- Follow the project\'s own conventions; ask a clarifying question when '
+    'the goal is ambiguous.\n'
+    '\n'
+    'Steps and tools:\n'
+    '- One step may call several tools. Batch independent read-only calls '
+    '(read, glob, search, diff) together in one step; they run in parallel.\n'
+    '- Mutating calls (write, edit, multi_edit, run_command, job, restore) '
+    'run one at a time, in the order you list them; keep each such step '
+    'small and check the result before the next.\n'
+    '\n'
+    'Keep the plan up to date by ending a message with a fenced block '
+    'labelled "plan" holding one Markdown checkbox per item, for example:\n'
     '```plan\n- [ ] next step\n- [x] finished step\n```\n'
     'The block is hidden from your answer. When you have the answer, finish '
-    'with it.';
+    'with it: concise markdown naming what changed, the commands you ran, '
+    'and the observed result.';
 
 /// The system prompt for the one tools-withheld call that writes a compact
 /// brief of earlier work (C4).
@@ -46,10 +74,11 @@ const double kDigestFraction = 0.25;
 /// unchanged.
 const int kObservationCapTokens = 4096;
 
-/// Tools whose outputs can be recovered by re-running them (C4). Outside the
-/// verbatim tail their successful results are cleared to a one-line re-run
-/// placeholder; mutating tools keep their command and outcome.
-const Set<String> kRefetchableTools = {'read', 'search', 'web_fetch'};
+/// Tools whose outputs can be recovered by re-running them (C4): exactly the
+/// read-only tools. Outside the verbatim tail their successful results are
+/// cleared to a one-line re-run placeholder; mutating tools keep their
+/// command and outcome.
+const Set<String> kRefetchableTools = kReadOnlyTools;
 
 /// What the last fold compacted.
 final class CompactionInfo {
@@ -279,18 +308,20 @@ final class ContextAssembler {
     ];
     _lastClipped = 0;
     _lastCleared = 0;
-    ToolCall? pending;
+    // The calls of the batch currently being replayed, consumed in order by
+    // the observations that answer them (the loop appends one observation per
+    // call, in the listed order).
+    final pendingCalls = <ToolCall>[];
     for (var i = _foldedThrough; i < clipped.length; i++) {
       final entry = clipped[i];
       if (entry is! ObservationEntry) {
-        pending = entry is AssistantEntry && entry.action is ToolCall
-            ? entry.action as ToolCall
-            : null;
+        pendingCalls
+          ..clear()
+          ..addAll(entry is AssistantEntry ? entry.action.calls : const []);
         view.add(entry);
         continue;
       }
-      final call = pending;
-      pending = null;
+      final call = pendingCalls.isEmpty ? null : pendingCalls.removeAt(0);
       if (i < tailStart &&
           call != null &&
           entry.outcome == Outcome.ok &&
@@ -334,12 +365,15 @@ final class ContextAssembler {
   }
 
   /// The one-line replacement for a cleared re-fetchable tool result (C4):
-  /// name the tool and its path, query, or URL so a later step can re-run it.
+  /// name the tool and its path, pattern, query, or URL so a later step can
+  /// re-run it.
   static String _clearedPlaceholder(ToolCall call) {
     final target = switch (call.name) {
       'read' => call.arguments['path'],
+      'glob' => call.arguments['pattern'],
       'search' => call.arguments['pattern'],
       'web_fetch' => call.arguments['url'],
+      'web_search' => call.arguments['query'],
       _ => null,
     };
     final what =
@@ -408,6 +442,9 @@ final class ContextAssembler {
     final files = <String, String>{};
     final commands = <String>[];
     final errors = <String>[];
+    // The batch calls being answered, consumed in order by the observations
+    // that follow them.
+    final pendingCalls = <ToolCall>[];
     String? tool;
     String? path;
     String? command;
@@ -419,14 +456,19 @@ final class ContextAssembler {
           tool = null;
           path = null;
           command = null;
-          if (action is ToolCall) {
-            tool = action.name;
-            final p = action.arguments['path'];
-            final c = action.arguments['command'];
-            if (action.name == 'run_command' && c is String) {
-              command = _short(c, 80);
-            } else if (p is String) {
-              path = p;
+          pendingCalls
+            ..clear()
+            ..addAll(action.calls);
+          final call =
+              pendingCalls.isEmpty ? null : pendingCalls.removeAt(0);
+          if (call != null) {
+            tool = call.name;
+            final pathArg = call.arguments['path'];
+            final commandArg = call.arguments['command'];
+            if (call.name == 'run_command' && commandArg is String) {
+              command = _short(commandArg, 80);
+            } else if (pathArg is String) {
+              path = pathArg;
             }
           }
         case ObservationEntry(:final text, :final outcome):
@@ -439,6 +481,18 @@ final class ContextAssembler {
           tool = null;
           path = null;
           command = null;
+          // The next observation (if any) answers the next call of the batch.
+          if (pendingCalls.isNotEmpty) {
+            final call = pendingCalls.removeAt(0);
+            tool = call.name;
+            final pathArg = call.arguments['path'];
+            final commandArg = call.arguments['command'];
+            if (call.name == 'run_command' && commandArg is String) {
+              command = _short(commandArg, 80);
+            } else if (pathArg is String) {
+              path = pathArg;
+            }
+          }
       }
     }
 
@@ -487,19 +541,22 @@ final class ContextAssembler {
 
   static String _render(Entry entry) => switch (entry) {
         UserEntry(:final text) => text,
-        AssistantEntry(:final thought, :final action) =>
-          '$thought ${action is ToolCall ? action.name : ''}',
+        AssistantEntry(:final thought, :final action) => '$thought '
+            '${action.calls.map((call) => call.name).join(' ')}',
         ObservationEntry(:final text) => text,
       };
 
-  /// Render an entry for the summarizer, including a tool call's arguments so
-  /// the brief can preserve paths and commands verbatim (C4).
+  /// Render an entry for the summarizer, including each tool call's arguments
+  /// so the brief can preserve paths and commands verbatim (C4).
   static String _renderForBrief(Entry entry) => switch (entry) {
         UserEntry(:final text) => text,
-        AssistantEntry(:final thought, :final action) => action is ToolCall
-            ? '${thought.trim()} ${action.name} '
-                '${jsonEncode(action.arguments)}'.trim()
-            : thought,
+        AssistantEntry(:final thought, :final action) => action.calls.isEmpty
+            ? thought
+            : '${thought.trim()} '
+                '${[
+                    for (final call in action.calls)
+                      '${call.name} ${jsonEncode(call.arguments)}',
+                  ].join(' ')}',
         ObservationEntry(:final text) => text,
       };
 }

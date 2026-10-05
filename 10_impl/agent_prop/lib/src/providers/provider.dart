@@ -23,7 +23,8 @@ abstract class Provider {
   });
 }
 
-/// C2 normalization: a completion with no tool call becomes a finish.
+/// C2 normalization: a completion with no tool call becomes a finish; one or
+/// more tool calls become a single batch action preserving the model's order.
 ProviderResponse parseCompletion(Completion completion) {
   if (completion.toolCalls.isEmpty) {
     return ProviderResponse(
@@ -35,7 +36,7 @@ ProviderResponse parseCompletion(Completion completion) {
   }
   return ProviderResponse(
     thought: completion.text,
-    action: completion.toolCalls.first,
+    action: ToolBatch(List<ToolCall>.of(completion.toolCalls)),
     plan: completion.plan,
     reasoning: completion.reasoning,
   );

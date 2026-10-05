@@ -6,6 +6,8 @@ import 'package:path/path.dart' as p;
 
 import '../cancellation.dart';
 import '../errors.dart';
+import 'baseline.dart';
+import 'job.dart';
 import '../models.dart';
 import '../platform.dart';
 import '../reliability.dart';
@@ -31,6 +33,18 @@ final class WorkspaceGuard {
       throw GuardDeniedException('path escapes workspace: $path');
     }
     return File(resolved);
+  }
+
+  /// Like [resolve], but for a directory target (glob/search scoping).
+  Directory resolveDir(String path) {
+    final normalizedRoot = p.normalize(p.absolute(root));
+    final resolved = p.normalize(p.join(normalizedRoot, path));
+    if (!allowOutside &&
+        resolved != normalizedRoot &&
+        !p.isWithin(normalizedRoot, resolved)) {
+      throw GuardDeniedException('path escapes workspace: $path');
+    }
+    return Directory(resolved);
   }
 }
 
@@ -117,6 +131,26 @@ String? requireString(Map<String, dynamic> args, String key) {
   return null;
 }
 
+/// Validate an optional non-negative integer argument.
+String? requireNonNegativeInt(Map<String, dynamic> args, String key) {
+  final value = args[key];
+  if (value == null) return null;
+  if (value is! int || value < 0) {
+    return 'argument $key must be an integer >= 0';
+  }
+  return null;
+}
+
+/// Validate an optional positive integer argument.
+String? requirePositiveInt(Map<String, dynamic> args, String key) {
+  final value = args[key];
+  if (value == null) return null;
+  if (value is! int || value < 1) {
+    return 'argument $key must be an integer >= 1';
+  }
+  return null;
+}
+
 /// Dispatches actions (C1) to the fixed built-in catalog (C3).
 final class ToolRegistry {
   factory ToolRegistry({
@@ -154,6 +188,13 @@ final class ToolRegistry {
 
   Duration timeoutFor(String name) => tools[name]?.timeout ?? kModelTimeout;
 
+  /// Reap every background job (C3/C8): the run was cancelled or the session
+  /// is closing, so no child process outlives the agent.
+  Future<void> reapJobs() async {
+    final job = tools['job'];
+    if (job is JobTool) await job.registry.reapAll();
+  }
+
   Future<ToolOutcome> dispatch(ToolCall call, {CancelSignal? cancel}) async {
     callLog.add(call.name);
     final tool = tools[call.name];
@@ -180,14 +221,54 @@ final class ToolRegistry {
   }
 }
 
-/// The fixed Prop catalog: read, write, edit, run_command, search.
-List<Tool> builtinTools(WorkspaceGuard guard) => [
+/// The fixed Prop catalog (C3): orientation, read/edit, execution, review and
+/// undo, plus the config-gated web tools (assembled separately).
+/// [buildTimeout] overrides the `run_command` class timeout (tests).
+List<Tool> builtinTools(
+  WorkspaceGuard guard, {
+  WorkspaceBaseline? baseline,
+  JobRegistry? jobs,
+  Duration? buildTimeout,
+}) =>
+    [
       ReadTool(guard),
       WriteTool(guard),
       EditTool(guard),
-      RunCommandTool(guard),
+      MultiEditTool(guard),
+      GlobTool(guard),
+      RunCommandTool(guard, timeoutOverride: buildTimeout),
       SearchTool(guard),
+      JobTool(guard, jobs: jobs),
+      DiffTool(guard, baseline: baseline),
+      RestoreTool(guard, baseline: baseline),
     ];
+
+/// The built-in tools whose calls are independent and read-only: a step may
+/// dispatch them together in parallel (C1). Everything else (write, edit,
+/// multi_edit, run_command, job, restore) has side effects or order
+/// dependence and runs sequentially in the listed order.
+const Set<String> kReadOnlyTools = {
+  'read',
+  'glob',
+  'search',
+  'diff',
+  'web_fetch',
+  'web_search',
+};
+
+/// Directories never walked by the workspace-wide tools (glob, search's
+/// default scope, and the baseline snapshot backing diff/restore): VCS
+/// internals, the agent's own state, and dependency/build trees.
+const Set<String> kWorkspaceSkipDirs = {
+  '.git',
+  '.sudoer',
+  '.mise',
+  '.dart_tool',
+  'node_modules',
+  'build',
+  'dist',
+  '__pycache__',
+};
 
 final class ReadTool extends Tool {
   ReadTool(super.guard);
@@ -196,7 +277,9 @@ final class ReadTool extends Tool {
   String get name => 'read';
 
   @override
-  String get description => 'Read a file from the workspace.';
+  String get description =>
+      'Read a file from the workspace, optionally a line range '
+      '(0-based offset, limit lines), returned as text.';
 
   @override
   Map<String, dynamic> get parameters => {
@@ -205,11 +288,24 @@ final class ReadTool extends Tool {
         'required': ['path'],
         'properties': {
           'path': {'type': 'string'},
+          'offset': {
+            'type': 'integer',
+            'minimum': 0,
+            'description': '0-based line index to start from',
+          },
+          'limit': {
+            'type': 'integer',
+            'minimum': 1,
+            'description': 'Maximum number of lines to return',
+          },
         },
       };
 
   @override
-  String? validate(Map<String, dynamic> args) => requireString(args, 'path');
+  String? validate(Map<String, dynamic> args) =>
+      requireString(args, 'path') ??
+      requireNonNegativeInt(args, 'offset') ??
+      requirePositiveInt(args, 'limit');
 
   @override
   Future<ToolOutcome> execute(Map<String, dynamic> args) async {
@@ -217,7 +313,18 @@ final class ReadTool extends Tool {
     if (!file.existsSync()) {
       return ToolOutcome.error('no such file: ${args['path']}');
     }
-    return ToolOutcome.ok(file.readAsStringSync());
+    final content = file.readAsStringSync();
+    final offset = args['offset'];
+    final limit = args['limit'];
+    if (offset is int || limit is int) {
+      // A line range returns the requested lines as text, with no line
+      // numbers or other prefixes (frozen in the gate contract).
+      final lines = file.readAsLinesSync();
+      return ToolOutcome.ok(
+        lines.skip(offset is int ? offset : 0).take(limit is int ? limit : lines.length).join('\n'),
+      );
+    }
+    return ToolOutcome.ok(content);
   }
 }
 
@@ -262,7 +369,8 @@ final class EditTool extends Tool {
 
   @override
   String get description =>
-      'Replace the unique occurrence of old with new in a workspace file.';
+      'Replace the unique occurrence of old with new in a workspace file; '
+      'error if absent or ambiguous. replace_all rewrites every occurrence.';
 
   @override
   Map<String, dynamic> get parameters => {
@@ -273,6 +381,11 @@ final class EditTool extends Tool {
           'path': {'type': 'string'},
           'old': {'type': 'string'},
           'new': {'type': 'string'},
+          'replace_all': {
+            'type': 'boolean',
+            'description': 'Rewrite every occurrence instead of requiring a '
+                'unique match',
+          },
         },
       };
 
@@ -289,20 +402,120 @@ final class EditTool extends Tool {
       return ToolOutcome.error('no such file: ${args['path']}');
     }
     final old = args['old'] as String;
+    final replaceAll = args['replace_all'] == true;
     final content = file.readAsStringSync();
     final count = old.allMatches(content).length;
     if (count == 0) return ToolOutcome.error('old text not found');
-    if (count > 1) return ToolOutcome.error('old text is not unique ($count)');
-    file.writeAsStringSync(content.replaceFirst(old, args['new'] as String));
-    return ToolOutcome.ok('edited ${args['path']}');
+    if (count > 1 && !replaceAll) {
+      return ToolOutcome.error(
+          'old text is ambiguous: $count matches; '
+          'pass replace_all to rewrite all of them');
+    }
+    final updated = replaceAll
+        ? content.replaceAll(old, args['new'] as String)
+        : content.replaceFirst(old, args['new'] as String);
+    file.writeAsStringSync(updated);
+    return ToolOutcome.ok(
+        'edited ${args['path']} ($count occurrence${count == 1 ? '' : 's'})');
+  }
+}
+
+/// Apply one ordered batch of edits to a single file, atomically: every edit
+/// must match (uniquely, unless replace_all) or nothing is written (C3).
+final class MultiEditTool extends Tool {
+  MultiEditTool(super.guard);
+
+  @override
+  String get name => 'multi_edit';
+
+  @override
+  String get description =>
+      'Apply an ordered batch of edits to one file in a single step; all '
+      'edits are applied to the result of the previous ones, atomically.';
+
+  @override
+  Map<String, dynamic> get parameters => {
+        'type': 'object',
+        'additionalProperties': false,
+        'required': ['path', 'edits'],
+        'properties': {
+          'path': {'type': 'string'},
+          'edits': {
+            'type': 'array',
+            'minItems': 1,
+            'items': {
+              'type': 'object',
+              'additionalProperties': false,
+              'required': ['old', 'new'],
+              'properties': {
+                'old': {'type': 'string'},
+                'new': {'type': 'string'},
+                'replace_all': {'type': 'boolean'},
+              },
+            },
+          },
+        },
+      };
+
+  @override
+  String? validate(Map<String, dynamic> args) {
+    final bad = requireString(args, 'path');
+    if (bad != null) return bad;
+    final edits = args['edits'];
+    if (edits is! List || edits.isEmpty) {
+      return 'argument edits must be a non-empty array';
+    }
+    for (final edit in edits) {
+      if (edit is! Map) return 'each edit must be an object';
+      final map = edit.cast<String, dynamic>();
+      final old = requireString(map, 'old');
+      if (old != null) return 'edits: $old';
+      final replacement = requireString(map, 'new');
+      if (replacement != null) return 'edits: $replacement';
+    }
+    return null;
+  }
+
+  @override
+  Future<ToolOutcome> execute(Map<String, dynamic> args) async {
+    final file = guard.resolve(args['path'] as String);
+    if (!file.existsSync()) {
+      return ToolOutcome.error('no such file: ${args['path']}');
+    }
+    var content = file.readAsStringSync();
+    final edits = (args['edits'] as List).cast<Map<String, dynamic>>();
+    // Apply to an in-memory copy; only a fully successful batch is written.
+    for (var i = 0; i < edits.length; i++) {
+      final edit = edits[i];
+      final old = edit['old'] as String;
+      final replaceAll = edit['replace_all'] == true;
+      final count = old.allMatches(content).length;
+      if (count == 0) {
+        return ToolOutcome.error(
+            'edit ${i + 1}: old text not found; no edits applied');
+      }
+      if (count > 1 && !replaceAll) {
+        return ToolOutcome.error(
+            'edit ${i + 1}: old text is ambiguous ($count matches); '
+            'no edits applied');
+      }
+      content = replaceAll
+          ? content.replaceAll(old, edit['new'] as String)
+          : content.replaceFirst(old, edit['new'] as String);
+    }
+    file.writeAsStringSync(content);
+    return ToolOutcome.ok('edited ${args['path']} (${edits.length} edits)');
   }
 }
 
 final class RunCommandTool extends Tool implements Cancellable {
-  RunCommandTool(super.guard, {this.shell});
+  RunCommandTool(super.guard, {this.shell, this.timeoutOverride});
 
   /// Host shell override (tests); defaults to [HostShell.host].
   final HostShell? shell;
+
+  /// Class-timeout override (tests); defaults to [kBuildTimeout].
+  final Duration? timeoutOverride;
 
   @override
   String get name => 'run_command';
@@ -312,7 +525,7 @@ final class RunCommandTool extends Tool implements Cancellable {
       'Run a shell command with the workspace root as its working directory.';
 
   @override
-  Duration get timeout => kBuildTimeout;
+  Duration get timeout => timeoutOverride ?? kBuildTimeout;
 
   @override
   Map<String, dynamic> get parameters => {
@@ -394,6 +607,137 @@ final class RunCommandTool extends Tool implements Cancellable {
   }
 }
 
+/// Cap on glob results (C3: a compiled-in bound, not configuration).
+const int kGlobCap = 500;
+
+final class GlobTool extends Tool {
+  GlobTool(super.guard);
+
+  @override
+  String get name => 'glob';
+
+  @override
+  String get description =>
+      'Find workspace paths by glob pattern (for example **/*.dart or '
+      'src/*.json), for orientation before editing.';
+
+  @override
+  Map<String, dynamic> get parameters => {
+        'type': 'object',
+        'additionalProperties': false,
+        'required': ['pattern'],
+        'properties': {
+          'pattern': {'type': 'string'},
+          'path': {
+            'type': 'string',
+            'description': 'Directory to search under, workspace-relative',
+          },
+        },
+      };
+
+  @override
+  String? validate(Map<String, dynamic> args) {
+    final bad = requireString(args, 'pattern');
+    if (bad != null) return bad;
+    if (args.containsKey('path') && args['path'] is! String) {
+      return 'argument path must be a string';
+    }
+    return null;
+  }
+
+  @override
+  Future<ToolOutcome> execute(Map<String, dynamic> args) async {
+    final pattern = args['pattern'] as String;
+    final root = p.normalize(p.absolute(workspaceRoot));
+    final scopeDir = guard.resolveDir(args['path'] as String? ?? '.');
+    if (!scopeDir.existsSync()) {
+      return ToolOutcome.error('no such directory: ${args['path']}');
+    }
+    final matches = <String>[];
+    var capped = false;
+    void walk(Directory dir) {
+      final entries = dir.listSync(followLinks: false)..sort(
+          (a, b) => a.path.compareTo(b.path));
+      for (final entry in entries) {
+        final name = p.basename(entry.path);
+        if (entry is Directory) {
+          if (kWorkspaceSkipDirs.contains(name)) continue;
+          walk(entry);
+          continue;
+        }
+        if (entry is! File) continue;
+        final relative = p.posix
+            .joinAll(p.relative(entry.path, from: root).split(p.separator));
+        if (!globMatch(pattern, relative)) continue;
+        if (matches.length >= kGlobCap) {
+          capped = true;
+          return;
+        }
+        matches.add(relative);
+      }
+    }
+
+    walk(scopeDir);
+    if (matches.isEmpty) return ToolOutcome.ok('no matches');
+    matches.sort();
+    return ToolOutcome.ok(capped
+        ? '${matches.join('\n')}\n… more than $kGlobCap matches'
+        : matches.join('\n'));
+  }
+}
+
+/// Match [path] (POSIX-style, workspace-relative) against [pattern], where
+/// `**` spans any number of directory segments, `*` matches within one
+/// segment (never `/`), and `?` matches a single character.
+bool globMatch(String pattern, String path) =>
+    _segmentsMatch(pattern.split('/'), path.split('/'));
+
+bool _segmentsMatch(List<String> pattern, List<String> path) {
+  if (pattern.isEmpty) return path.isEmpty;
+  final head = pattern.first;
+  if (head == '**') {
+    // `**` consumes zero or more path segments.
+    for (var skip = 0; skip <= path.length; skip++) {
+      if (_segmentsMatch(pattern.sublist(1), path.sublist(skip))) return true;
+    }
+    return false;
+  }
+  if (path.isEmpty) return false;
+  if (!_segmentMatches(head, path.first)) return false;
+  return _segmentsMatch(pattern.sublist(1), path.sublist(1));
+}
+
+bool _segmentMatches(String pattern, String segment) {
+  var p = 0;
+  var s = 0;
+  while (p < pattern.length) {
+    final char = pattern[p];
+    if (char == '*') {
+      // Collapse consecutive stars; `*` may end the segment.
+      while (p < pattern.length && pattern[p] == '*') {
+        p++;
+      }
+      if (p == pattern.length) return true;
+      for (var k = s; k <= segment.length; k++) {
+        if (_segmentMatches(pattern.substring(p), segment.substring(k))) {
+          return true;
+        }
+      }
+      return false;
+    }
+    if (s >= segment.length) return false;
+    if (char == '?') {
+      p++;
+      s++;
+      continue;
+    }
+    if (char != segment[s]) return false;
+    p++;
+    s++;
+  }
+  return s == segment.length;
+}
+
 final class SearchTool extends Tool {
   SearchTool(super.guard);
 
@@ -439,10 +783,24 @@ final class SearchTool extends Tool {
         target.statSync().type == FileSystemEntityType.file) {
       files = [target];
     } else if (Directory(target.path).existsSync()) {
-      files = Directory(target.path)
-          .listSync(recursive: true)
-          .whereType<File>()
-          .toList();
+      // Skip the same trees the other workspace-wide tools skip (VCS
+      // internals, the agent's own state, dependency/build trees).
+      final found = <File>[];
+      void walk(Directory dir) {
+        final entries = dir.listSync(followLinks: false)
+          ..sort((a, b) => a.path.compareTo(b.path));
+        for (final entry in entries) {
+          if (entry is Directory) {
+            if (kWorkspaceSkipDirs.contains(p.basename(entry.path))) continue;
+            walk(entry);
+          } else if (entry is File) {
+            found.add(entry);
+          }
+        }
+      }
+
+      walk(Directory(target.path));
+      files = found;
     } else {
       files = <File>[];
     }

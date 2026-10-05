@@ -41,6 +41,7 @@ final class OpenAiCompatibleProvider implements Provider {
           'messages': openAiMessages(request),
           'stream': streaming,
           if (request.tools.isNotEmpty) 'tools': _toolJson(request.tools),
+          ...config.sampling?.openAiJson() ?? const {},
         });
     } on Object catch (e) {
       throw StepFailure.unrecoverable('provider request failed: $e');
@@ -226,28 +227,34 @@ List<Map<String, dynamic>> openAiMessages(ProviderRequest request) {
         out.add({'role': 'user', 'content': text});
       case AssistantEntry(:final thought, :final action):
         switch (action) {
-          case ToolCall(name: final name) when name.isEmpty:
-            // A call with no name cannot be replayed as a tool call: the API
-            // rejects an empty `function.name`. Keep it as plain assistant
-            // text so the request stays valid and the model can retry.
-            out.add({'role': 'assistant', 'content': thought});
-          case ToolCall(:final id, :final name, :final arguments):
-            final callId = id ?? 'call_${counter++}';
-            toolCallIds.add(callId);
+          case ToolBatch(:final calls)
+              when calls.isNotEmpty && calls.every((c) => c.name.isNotEmpty):
+            // One assistant message carries the whole batch; each tool result
+            // follows as its own `role: tool` message, paired by id.
+            final batch = <Map<String, dynamic>>[];
+            for (final call in calls) {
+              final callId = call.id ?? 'call_${counter++}';
+              toolCallIds.add(callId);
+              batch.add({
+                'id': callId,
+                'type': 'function',
+                'function': {
+                  'name': call.name,
+                  'arguments': jsonEncode(call.arguments),
+                },
+              });
+            }
             out.add({
               'role': 'assistant',
               'content': thought,
-              'tool_calls': [
-                {
-                  'id': callId,
-                  'type': 'function',
-                  'function': {
-                    'name': name,
-                    'arguments': jsonEncode(arguments),
-                  },
-                }
-              ],
+              'tool_calls': batch,
             });
+          case ToolBatch():
+            // A batch containing a call with no name cannot be replayed as
+            // tool calls: the API rejects an empty `function.name`. Keep it as
+            // plain assistant text so the request stays valid and the model
+            // can retry.
+            out.add({'role': 'assistant', 'content': thought});
           case Finish():
             out.add({'role': 'assistant', 'content': thought});
         }

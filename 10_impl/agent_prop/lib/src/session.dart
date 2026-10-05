@@ -17,6 +17,7 @@ final class Session {
     required this.updatedAt,
     required this.transcript,
     required this.plan,
+    this.baseline,
   });
 
   final String id;
@@ -25,6 +26,11 @@ final class Session {
   DateTime updatedAt;
   final List<Entry> transcript;
   List<PlanItem> plan;
+
+  /// Opaque handle to the workspace baseline captured at session open,
+  /// backing diff/restore (C3/C5). Refreshed when the workspace root changes;
+  /// never shown to the model.
+  String? baseline;
 
   /// Raised when the user cancels (`/cancel`, a double `Esc`); the loop passes
   /// it into the in-flight call so it aborts at once (C6, C8).
@@ -62,6 +68,7 @@ final class Session {
           for (final item in (json['plan'] as List? ?? const []))
             PlanItem.fromJson((item as Map).cast<String, dynamic>()),
         ],
+        baseline: json['baseline'] as String?,
       );
 
   Map<String, dynamic> toJson() => {
@@ -69,6 +76,7 @@ final class Session {
         'created_at': createdAt.toIso8601String(),
         'updated_at': updatedAt.toIso8601String(),
         'workspace_root': workspaceRoot,
+        if (baseline != null) 'baseline': baseline,
         'plan': [for (final item in plan) item.toJson()],
         'transcript': [for (final entry in transcript) entry.toJson()],
       };

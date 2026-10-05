@@ -25,7 +25,7 @@ tool/
   build.dart              portable build: compile + publish (C3)
   version.dart            print the pubspec version for release naming
 lib/src/
-  agent.dart              assembles C1–C8
+  agent.dart              assembles C1–C8; owns the workspace baseline
   models.dart             transcript/action/tool/run/completion contracts
   console.dart            inline human formatting: channels, spinner, status (C6)
   markdown_render.dart    block-buffered markdown -> styled terminal text (C6)
@@ -33,14 +33,17 @@ lib/src/
   think_block.dart        `<think>` reasoning block parse/stream (C2)
   config.dart             config load + validation + $ENV expansion (C6)
   platform.dart           host shell + Windows console raw input (C3/C6)
-  context.dart            prompt assembly + compaction (C4)
+  context.dart            versioned system prompt + assembly + compaction (C4)
   reliability.dart        stall-driven budget + per-class timeouts (C8)
   session.dart            persistent, resumable session (C5)
   modality.dart           text normalization (C7)
-  tools/tool.dart         read/write/edit/run_command/search + guards (C3)
+  tools/tool.dart         read/write/edit/multi_edit/glob/search/run_command
+                           + guards and the read-only set (C3)
+  tools/baseline.dart     workspace baseline snapshot + diff/restore (C3/C5)
+  tools/job.dart          background jobs: start/poll/stop + reaping (C3/C8)
   tools/web.dart          web_search (SearXNG) + web_fetch, guarded (C3)
   providers/              openai-compatible, ollama, scripted (C2)
-  loop.dart               plan-driven ReAct loop (C1)
+  loop.dart               plan-driven multi-call ReAct loop (C1)
   interface.dart          provider selection + interactive CLI (C6)
   gate/                   task loader + runner
 test/
@@ -134,6 +137,20 @@ Any OpenAI-compatible endpoint:
 String values may reference environment variables as `$VAR` or `${VAR}`.
 A referenced variable that is unset is an error (no silent empty key).
 
+Optional sampling parameters ride under `provider.sampling` (sent where the
+adapter supports them; omitted keys use the endpoint defaults):
+
+```json
+{
+  "provider": {
+    "kind": "ollama",
+    "model": "llama3.1",
+    "context_window": 8192,
+    "sampling": { "temperature": 0.2, "top_p": 0.9, "max_tokens": 4096 }
+  }
+}
+```
+
 Web tools are on by default (any host). Point `search_url` at a self-hosted
 SearXNG to enable `web_search`; set `deny_hosts` to block specific hosts:
 
@@ -214,6 +231,7 @@ Built-in commands (both surfaces):
 | `/resume <id>` | switch to a saved session |
 | `/plan` | print the current plan |
 | `/status` | print the session status |
+| `/diff [path]` | show the workspace's changes against the session baseline |
 | `/cancel` | cancel the in-flight run |
 | `/workspace [dir]` | print or change the workspace root |
 | `/verbose on\|off` | emit per-step routing on stderr (default off) |
@@ -244,7 +262,21 @@ mise exec -- dart run bin/sudoer.dart -c /path/to/config.json \
 ### Behavior and limits
 
 - **Model must support tool calling** (e.g. `llama3.1`/`qwen2.5` on ollama,
-  `gpt-4o*` on OpenAI); the five tools are sent as function definitions.
+  `gpt-4o*` on OpenAI); the tools are sent as function definitions.
+- **Ten built-in tools plus the web pair.** Orientation (`glob`, `search`),
+  reading (`read`, with `offset`/`limit` line ranges returned as text),
+  editing (`write`, `edit` with `replace_all`, `multi_edit`), execution
+  (`run_command` foreground, `job` background start/poll/stop), review and
+  undo (`diff`, `restore` against the session baseline), and — unless
+  `web.enabled` is false — `web_search`/`web_fetch`.
+- **Multi-call steps.** One provider decision may carry several tool calls
+  (`action` = `finish` | a batch of `tool_calls`): independent read-only
+  calls (`read`, `glob`, `search`, `diff`, `web_fetch`, `web_search`) are
+  dispatched in parallel, while side-effecting calls (`write`, `edit`,
+  `multi_edit`, `run_command`, `job`, `restore`) run sequentially in the
+  listed order. Observations return bound to their calls by id, in the
+  listed order; a sibling's timeout or denial never discards completed
+  observations (C8).
 - **Two surfaces, one CLI.** Styled human output by default on a terminal;
   `--automate` (or a non-interactive stdin/stdout) selects the plain surface,
   so scripts never hang. Neither is full-screen.
@@ -253,17 +285,35 @@ mise exec -- dart run bin/sudoer.dart -c /path/to/config.json \
   complete and a `<think>` reasoning block streams dim/italic to stderr,
   apart from the answer. The visible reply is markdown and is rendered block
   by block. The automation path takes the one-shot request and prints the
-  whole reply raw.
+  whole reply raw. Streamed tool-call deltas are merged per call index, so
+  an interleaved batch reassembles into the same action.
 - **Reasoning.** If the model wraps private reasoning in `<think> … </think>`,
   the adapter strips it from the visible text and normalizes it to a separate
   `reasoning` value; it is never part of the answer and never replayed to the
   model as a tool result.
+- **Sampling.** `provider.sampling` in the config
+  (`temperature`, `top_p`, `top_k`, `seed`, `max_tokens`) is passed through
+  to the adapter where supported (OpenAI: temperature/top_p/seed/max_tokens;
+  ollama: all five, `max_tokens` as `num_predict`). Omitted keys use the
+  endpoint defaults.
+- **Workspace baseline.** When a session opens, the runtime snapshots the
+  workspace (text files; VCS/dependency/build trees skipped) beside the
+  session file and records an opaque handle. `diff` shows the working tree
+  against that snapshot (falling back to `git diff` for legacy sessions
+  without one) and `restore` reverts to it — added files are removed,
+  snapshotted files rewritten. The baseline refreshes only when the workspace
+  root changes, and is never shown to the model.
 - **Continuous, persistent session.** Goals share one transcript and plan;
   the session is written to disk after each run and can be resumed.
 - **Plan-driven.** The model sends plan updates in a fenced `plan` block of
   Markdown checkboxes (taught by the system prompt); the adapter strips the
   block, replaces the session plan, and `/plan` shows it. No block means the
   plan is unchanged.
+- **Versioned system prompt.** The system prompt is a pinned artifact
+  (`prop-prompt-v2`) shipped with the build: identity, tool guidance
+  (orient with glob/search, read before editing, prefer `multi_edit`, review
+  with `diff`, verify with `run_command`), the coding contract, the plan
+  convention, and the output format.
 - **Compaction.** Older transcript is folded into a summary at a milestone —
   the first step of a new goal once the prompt passes 75% of the window, or
   mid-run at 90%; the goal and plan are pinned. The human surface reports it
@@ -274,17 +324,20 @@ mise exec -- dart run bin/sudoer.dart -c /path/to/config.json \
   never cut off by step count. Timeouts are 30s for provider calls and 10m for
   `run_command` (`lib/src/reliability.dart`). On a stall the loop makes one
   best-effort call with tools withheld, falling back to a local summary.
+- **Background jobs are reaped.** Every `job` runs under the same host shell
+  as `run_command`; jobs are killed when the run is cancelled and when the
+  session closes, so no child process outlives the agent.
 - **Verbose routing.** `/verbose on` (or `--verbose`) prints `[C1]`–`[C8]`-
   tagged events on stderr: session/provider selection, prompt fit (C4), each
   tool call and its evaluated result (C3), plan updates and progress/stall
   accounting (C1), guard timeouts (C8), and the final status. Off by default; stdout
   stays clean.
-- **Tools are workspace-rooted** (`read`, `write`, `edit`, `run_command`,
-  `search`); a path that escapes `workspace_root` is a guard denial. The root
-  defaults to the invocation directory and can change with `/workspace`. On
-  the human surface a denial prompts `⚠ … [y/N]`; `y` opens the guard for the
-  rest of the session (in memory only) and retries the call. Automation never
-  prompts and blocks as before.
+- **Tools are workspace-rooted** (`read`, `write`, `edit`, `multi_edit`,
+  `glob`, `search`, `diff`, `restore`); a path that escapes `workspace_root`
+  is a guard denial. The root defaults to the invocation directory and can
+  change with `/workspace`. On the human surface a denial prompts `⚠ … [y/N]`;
+  `y` opens the guard for the rest of the session (in memory only) and
+  retries the call. Automation never prompts and blocks as before.
 - **Web tools are on by default** (`web_search`, `web_fetch`). They are
   assembled unless `web.enabled` is false; `web_search` uses the SearXNG
   `web.search_url` (unset means `web_search` reports it is not configured),
@@ -293,10 +346,10 @@ mise exec -- dart run bin/sudoer.dart -c /path/to/config.json \
   is a hard block — there is no interactive override — and fetched text is
   tagged untrusted and never treated as instructions. Web calls use a 20s
   timeout and cap fetches at 256 KB / 10 results (compiled-in).
-- **No sandbox yet** — `run_command` runs via `/bin/sh` inside
+- **No sandbox yet** — `run_command` and `job` run via the host shell inside
   `workspace_root` (and anywhere, once outside-workspace access is granted),
-  so it can also reach the network. The web guard governs the web tools only,
-  not the shell. Hard isolation is Pilot's safety tier.
+  so they can also reach the network. The web guard governs the web tools
+  only, not the shell. Hard isolation is Pilot's safety tier.
 
 ## Build gate
 
@@ -310,10 +363,17 @@ mise run gate          # suite + CLI smoke
 mise run gate:suite    # suite only
 ```
 
-- Tasks live in [`00_bp/agent_prop/tasks/`](../../00_bp/agent_prop/tasks).
-- The runner injects a `ScriptedProvider`; the CLI smoke spawns the real
-  `bin/sudoer.dart` offline via the `SUDOER_SCRIPT_FILE` seam.
-- Deterministic: repeated runs are identical.
+- Tasks live in [`00_bp/agent_prop/tasks/`](../../00_bp/agent_prop/tasks)
+  (24 tasks: reading, editing, orientation, execution, baseline diff/restore,
+  batch/parallel calls, error/denial/timeout paths, context overflow and
+  watermark compaction, sessions, plans, and the REPL).
+- The runner injects a `ScriptedProvider`; each task may script a completion
+  with several `tool_calls` (one batch step). The runner compares the ordered
+  tool-call log **and each call's observation** against `expect.tools` and
+  `expect.observations`. The CLI smoke spawns the real `bin/sudoer.dart`
+  offline via the `SUDOER_SCRIPT_FILE` seam.
+- Deterministic: repeated runs are identical. `job` stays out of gate scope
+  (runtime ids and timing); it is covered by unit tests instead.
 
 ## Tests and checks
 

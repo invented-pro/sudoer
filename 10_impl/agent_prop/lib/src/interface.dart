@@ -18,6 +18,7 @@ import 'providers/openai_compatible.dart';
 import 'providers/provider.dart';
 import 'providers/scripted.dart';
 import 'session.dart';
+import 'tools/job.dart';
 
 /// The two Prop surfaces (C6). Both are line CLIs on the normal terminal
 /// scrollback: [human] adds color, italics, a spinner, streamed replies, and
@@ -82,43 +83,50 @@ Future<int> runCli({
       sink: human ? console.diagnostic : errSink.writeln,
     ),
   );
-  if (human) {
-    console.banner('Sudoer · ${providerLabel(config.provider.kind)}/'
-        '${config.provider.model}');
-    console.user(goal);
-  }
-  final result =
-      await agent.run(RunRequest(normalizeToText(goal)), observer: observer);
-
-  if (human) {
-    console.stopThinking();
-    console.endLine();
-    if (result.status == RunStatus.blocked) {
-      console.error('blocked: ${result.reason ?? 'unknown'}');
-      console.status(_statusText(observer!, result, agent.session), kind: result.status.wire);
-      return 1;
+  try {
+    if (human) {
+      console.banner('Sudoer · ${providerLabel(config.provider.kind)}/'
+          '${config.provider.model}');
+      console.user(goal);
     }
-    if (result.status == RunStatus.incomplete && result.answer != null) {
-      console.answer(result.answer!);
-    }
-    console.status(_statusText(observer!, result, agent.session), kind: result.status.wire);
-    return 0;
-  }
+    final result = await agent
+        .run(RunRequest(normalizeToText(goal)), observer: observer);
 
-  switch (result.status) {
-    case RunStatus.blocked:
-      errSink.writeln('blocked: ${result.reason ?? 'unknown'}');
-      _printTimings(errSink, result);
-      return 1;
-    case RunStatus.incomplete:
-      outSink.writeln(result.answer ?? '');
-      errSink.writeln('incomplete: ${result.reason ?? 'incomplete'}');
-      _printTimings(errSink, result);
+    if (human) {
+      console.stopThinking();
+      console.endLine();
+      if (result.status == RunStatus.blocked) {
+        console.error('blocked: ${result.reason ?? 'unknown'}');
+        console.status(_statusText(observer!, result, agent.session),
+            kind: result.status.wire);
+        return 1;
+      }
+      if (result.status == RunStatus.incomplete && result.answer != null) {
+        console.answer(result.answer!);
+      }
+      console.status(_statusText(observer!, result, agent.session),
+          kind: result.status.wire);
       return 0;
-    case RunStatus.complete:
-      outSink.writeln(result.answer ?? '');
-      _printTimings(errSink, result);
-      return 0;
+    }
+
+    switch (result.status) {
+      case RunStatus.blocked:
+        errSink.writeln('blocked: ${result.reason ?? 'unknown'}');
+        _printTimings(errSink, result);
+        return 1;
+      case RunStatus.incomplete:
+        outSink.writeln(result.answer ?? '');
+        errSink.writeln('incomplete: ${result.reason ?? 'incomplete'}');
+        _printTimings(errSink, result);
+        return 0;
+      case RunStatus.complete:
+        outSink.writeln(result.answer ?? '');
+        _printTimings(errSink, result);
+        return 0;
+    }
+  } finally {
+    // Reap any background job this one-shot run started (C3/C8).
+    await agent.dispose();
   }
 }
 
@@ -206,6 +214,10 @@ final class _Repl {
   final List<RunResult> runs = [];
   late final Diagnostics diagnostics;
 
+  /// Background jobs shared across agent rebuilds (a workspace change must
+  /// not orphan a running dev server); reaped when the session closes (C8).
+  final JobRegistry jobs = JobRegistry();
+
   Session session;
   late String workspaceRoot;
   late PropAgent agent;
@@ -221,6 +233,7 @@ final class _Repl {
         callLog: callLog,
         diagnostics: diagnostics,
         authorize: _authorize,
+        jobs: jobs,
       );
 
   /// C6/C8: ask the human to allow a guard denial for the rest of the session.
@@ -342,6 +355,8 @@ final class _Repl {
       if (human) console.prompt();
     }
     await subscription.cancel();
+    // The session is closing: reap every background job (C3/C8).
+    await jobs.reapAll();
     console.close();
     return ReplOutcome(exitCode: exitCode, runs: runs, session: session);
   }
@@ -454,6 +469,8 @@ final class _Repl {
     stopped = true;
     await subscription.cancel();
     await reader.close();
+    // The session is closing: reap every background job (C3/C8).
+    await jobs.reapAll();
     console.close();
     return ReplOutcome(exitCode: exitCode, runs: runs, session: session);
   }
@@ -560,6 +577,19 @@ final class _Repl {
         } else {
           for (final item in session.plan) {
             console.info('- [${item.done ? 'x' : ' '}] ${item.text}');
+          }
+        }
+      case '/diff':
+        // C6/C3: the workspace's changes against the session baseline.
+        final argument =
+            parts.length > 1 ? line.substring(command.length).trim() : null;
+        if (argument != null && argument.isEmpty) {
+          console.error('usage: /diff [path]');
+        } else {
+          try {
+            console.info(agent.workspaceDiff(path: argument));
+          } on GuardDeniedException catch (e) {
+            console.error(e.message);
           }
         }
       case '/status':
@@ -763,6 +793,7 @@ const Set<String> kReplCommands = {
   '/plan',
   '/status',
   '/compact',
+  '/diff',
   '/workspace',
   '/verbose',
 };
@@ -779,6 +810,7 @@ List<String> helpLines({required bool interactive}) => [
       '  /resume <id>     switch to a saved session',
       '  /plan            print the current plan',
       '  /status          print the session status',
+      '  /diff [path]     show workspace changes against the session baseline',
       if (!interactive) '  /cancel          cancel the in-flight run',
       '  /compact         fold earlier context into a brief now',
       '  /workspace [dir] print or change the workspace root',

@@ -43,6 +43,7 @@ final class OllamaProvider implements Provider {
           'stream': streaming,
           'messages': ollamaMessages(request),
           if (request.tools.isNotEmpty) 'tools': _toolJson(request.tools),
+          if (config.sampling != null) 'options': config.sampling!.ollamaJson(),
         });
     } on Object catch (e) {
       throw StepFailure.unrecoverable('provider request failed: $e');
@@ -181,20 +182,28 @@ List<Map<String, dynamic>> ollamaMessages(ProviderRequest request) {
         pendingTool = false;
       case AssistantEntry(:final thought, :final action):
         switch (action) {
-          case ToolCall(:final name, :final arguments):
+          case ToolBatch(:final calls) when calls.isNotEmpty:
+            // One assistant message carries the whole batch; ollama pairs the
+            // tool results positionally with the calls, so they follow in the
+            // listed order.
             out.add({
               'role': 'assistant',
               'content': thought,
               'tool_calls': [
-                {
-                  'function': {
-                    'name': name,
-                    'arguments': arguments,
+                for (final call in calls)
+                  {
+                    'function': {
+                      'name': call.name,
+                      'arguments': call.arguments,
+                    }
                   }
-                }
               ],
             });
             pendingTool = true;
+          case ToolBatch():
+            // An empty batch is a degenerate action; replay it as text.
+            out.add({'role': 'assistant', 'content': thought});
+            pendingTool = false;
           case Finish():
             out.add({'role': 'assistant', 'content': thought});
             pendingTool = false;

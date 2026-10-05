@@ -13,7 +13,7 @@ rejects the package language version). The Dart package is `sudoer_prop`.
 ```
 dart analyze
 dart test          # offline; ScriptedProvider / SUDOER_SCRIPT_FILE
-mise run gate      # 14 tasks + smoke, no LLM
+mise run gate      # 24 tasks + smoke, no LLM
 mise run build     # compile dist/sudoer-prop and republish 20_eval/agent_prop/sudoer-prop
 ```
 

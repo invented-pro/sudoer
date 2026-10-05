@@ -26,5 +26,7 @@ export 'src/providers/scripted.dart';
 export 'src/reliability.dart';
 export 'src/session.dart';
 export 'src/think_block.dart';
+export 'src/tools/baseline.dart';
+export 'src/tools/job.dart';
 export 'src/tools/tool.dart';
 export 'src/tools/web.dart';

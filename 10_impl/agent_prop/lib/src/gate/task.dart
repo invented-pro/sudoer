@@ -17,6 +17,7 @@ final class Expect {
     this.answerContains,
     this.files,
     this.tools,
+    this.observations,
     this.runs = const [],
     this.plan,
     this.sessionPersisted,
@@ -28,6 +29,12 @@ final class Expect {
   final String? answerContains;
   final Map<String, String>? files;
   final List<String>? tools;
+
+  /// Expected substrings of the tool observations, in call order: entry i
+  /// must appear in the i-th observation. Shorter than the tool-call log
+  /// means only the prefix is checked.
+  final List<String>? observations;
+
   final List<RunExpect> runs;
   final List<String>? plan;
   final bool? sessionPersisted;
@@ -102,6 +109,7 @@ final class Task {
                   entry.key as String: entry.value as String,
               },
         tools: (expect['tools'] as List?)?.cast<String>(),
+        observations: (expect['observations'] as List?)?.cast<String>(),
         runs: [
           for (final run in runs ?? const [])
             _runExpect((run as Map).cast<String, dynamic>()),
