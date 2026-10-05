@@ -1,6 +1,6 @@
 # C4 — Context
 
-> Status: draft · Version 0.9 · **Current tier: Prop**
+> Status: draft · Version 1.0 · **Current tier: Prop**
 
 Context is what the model actually sees: `C4` is the assembly of the prompt
 sent to the provider on every turn. The loop decides; context frames the
@@ -172,7 +172,8 @@ endif
   on resume if needed.
 - **No caching.** The prompt is rebuilt on every iteration; only the brief is
   kept between steps. Prompt-cache reuse across calls arrives at Pilot.
-- **Approximate fit.** The token estimate may be approximate; the window is
+- **Approximate fit.** The token estimate is a deterministic
+  characters-per-token approximation (no tokenizer round-trip); the window is
   `context_window` from provider config (C2).
 - **Usage is reported.** The estimate for the last assembled prompt is
   exposed to the loop and, through it, to the interface (C6), so the human
@@ -212,8 +213,10 @@ The prompt is:
   a version stamp. The session records which version produced a run, so a
   prompt change is reviewable and evaluation results stay attributable.
 - **Workspace-aware.** At session open, and when the workspace changes (C6),
-  the runtime reads the project's instruction file and detected command set
-  into the prompt. A workspace with no such file simply omits that section.
+  the runtime reads the project's instruction file and the command set
+  detected by filename heuristics (Makefile, `package.json` scripts, CI
+  config, …) into the prompt. A workspace with no such file simply omits
+  that section.
 - **Image attachments.** When a coding task supplies an image (`modality`,
   C7), the image is attached to the provider request; the transcript stores a
   text reference, and the binary is not persisted in the session.

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "message.schema.json",
   "title": "Transcript entry",
-  "description": "Entries the loop (C1) appends and the context (C4) sends. A transcript starts with the user goal, then alternates assistant decisions and observations.",
+  "description": "Entries the loop (C1) appends and the context (C4) sends. A transcript starts with the user goal; an assistant decision is followed by its observations, and a harness observation (no tool_call_id, e.g. a provider timeout) may stand alone and replays as a user message.",
   "$defs": {
     "finish": {
       "description": "The terminal action: the model is done and this text is the answer (C1).",
@@ -42,7 +42,12 @@
       "required": ["role", "text"],
       "properties": {
         "role": { "const": "user" },
-        "text": { "type": "string" }
+        "text": { "type": "string" },
+        "images": {
+          "description": "Path references of the images attached to this goal (@path tokens, C7). Text only: the binaries ride the goal's provider requests at runtime and are never persisted.",
+          "type": "array",
+          "items": { "type": "string" }
+        }
       }
     },
     "assistantEntry": {

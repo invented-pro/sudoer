@@ -15,7 +15,13 @@ Future<void> main() async {
 
   final result = await Process.run(
     Platform.resolvedExecutable,
-    ['compile', 'exe', 'bin/sudoer.dart', '-o', output],
+    [
+      'compile', 'exe', 'bin/sudoer.dart', '-o', output,
+      // Build identity (lib/src/build_info.dart): the pubspec version is the
+      // single source of truth, so it is injected as a define rather than
+      // duplicated; the repo URL keeps its compile-time default.
+      '-DSUDOER_VERSION=$version',
+    ],
   );
   stdout.write(result.stdout);
   stderr.write(result.stderr);

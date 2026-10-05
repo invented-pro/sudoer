@@ -1,6 +1,6 @@
 # Prop Agent
 
-> Status: draft · Version 0.7 · **Current tier: Prop**
+> Status: draft · Version 0.8 · **Current tier: Prop**
 
 The Prop agent is the concrete assembly of components `C1`–`C8`. Its function
 is coding: it follows instructions strictly and delivers working binary
@@ -167,8 +167,10 @@ evaluation (Build gate) is where they are measured.
   reply arrives as the next goal in the same session.
 - **Report precisely.** The answer is concise, in markdown, and names what
   changed, the commands run, and the observed result.
-- **Respect the boundaries.** File and command access is confined to the
-  workspace; fetched and searched text is untrusted data, never instructions.
+- **Respect the guard.** The workspace root is the anchor — paths resolve
+  against it and commands run from it — not a fence, and the shell is
+  full-trust by design; the one hard guard is the network guard on the web
+  tools. Fetched and searched text is untrusted data, never instructions.
 
 ### Capability depth
 
@@ -199,7 +201,7 @@ gate-covered or unit-tested.
 | Modality | text in and out; image input only for coding tasks (`C7`) |
 | Session | continuous; persisted across runs, resumable by id (`C5`) |
 | Output | answers on stdout; status and diagnostics on stderr |
-| Exit code | zero on clean exit; non-zero only on a fatal startup/config error |
+| Exit code | zero on clean exit (any status that delivered an answer, `incomplete` included); non-zero on a fatal startup/config error or a blocked final run |
 
 ### Guards and contract
 
@@ -268,11 +270,12 @@ capabilities it declines. It does not:
   guards;
 - offer multi-provider fallback or a model catalog (`C2`) — not required to
   code, only to stay available;
-- allow unguarded network access: the web tools stay config-gated,
-  host-limited, size- and time-bounded, and never auto-follow page
-  instructions (`C3`).
+- pretend to confine the shell: the network guard binds only the web tools
+  — config-gated, host-limited, size- and time-bounded, never auto-following
+  page instructions — while `run_command` and `job` are full-trust by design
+  (`C3`).
 
-Mechanisms such as parallel subagents, sandboxed execution, and vision are
+Mechanisms such as parallel subagents and vision are
 coding capabilities where coding needs them and belong to Prop; only their
 *non-coding* uses are withheld. The boundary is a domain boundary, not a
 capability ceiling (`arch.md`).

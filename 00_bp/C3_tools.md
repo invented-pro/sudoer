@@ -1,6 +1,6 @@
 # C3 — Tools
 
-> Status: draft · Version 0.5 · **Current tier: Prop**
+> Status: draft · Version 0.6 · **Current tier: Prop**
 
 Tools are how the loop acts on the world: `C3` is the fixed catalog of
 built-in capabilities the model can invoke and the dispatch path that runs
@@ -88,18 +88,13 @@ else (no)
     :observation := error;
     stop
   else (no)
-    if (path escapes the workspace? [file tools]) then (yes)
+    if (egress denied by web.deny_hosts or web.enabled=false? [web tools]) then (yes)
       :return guard denied;
       stop
     else (no)
-      if (egress denied by web.deny_hosts or web.enabled=false? [web tools]) then (yes)
-        :return guard denied;
-        stop
-      else (no)
-        :execute tool with cwd = workspace root;
-        :observation := tool output;
-        stop
-      endif
+      :execute tool with cwd = workspace root;
+      :observation := tool output;
+      stop
     endif
   endif
 endif
@@ -126,16 +121,18 @@ endif
   to coding — the runtime may add a built-in tool coding requires, and each
   must be deterministic, schema-validated, and covered by the gate. The two
   web tools are present unless `web.enabled` is set to false.
-- **Workspace-rooted.** File tools resolve paths inside `workspace_root`
-  (config, C6) and reject a path that escapes it; `run_command` starts with
-  that root as its working directory. A rejection is a built-in guard denial,
-  returned to the loop rather than executed (`safety`, C10, makes the guard
-  configurable). On the human surface the user may approve a denial, which
-  opens the guard for the rest of the session (C6); automation always blocks.
+- **Workspace-anchored.** The workspace root is an anchor, not a fence:
+  file tools resolve relative paths against `workspace_root` (config, C6)
+  and `run_command` starts there as its working directory, but paths outside
+  the root are ordinary paths — nothing is denied for reaching past it, and
+  the shell is full-trust. The one built-in guard is the network guard
+  below (`safety`, C10, is where guards become policy).
 - **Network-guarded.** Web egress is allowed by default (any host) and only
   denied when `web.enabled` is false or the host matches `web.deny_hosts`, an
-  empty blacklist reserved for later policy. A network denial is a hard block:
-  unlike the workspace guard it cannot be opened from the interface.
+  empty blacklist reserved for later policy. A network denial is a hard block
+  with no interactive override. The guard binds only the built-in web tools:
+  `run_command` and `job` are full-trust and can reach any host, so the
+  deny-list is tool-scoped, not host-scoped.
 - **Untrusted content.** Fetched and searched text is data, not instructions:
   results are tagged as untrusted and the agent must not follow directives
   found in them.
@@ -146,9 +143,8 @@ endif
   execution; a mismatch becomes an observation.
 - **Errors are observations.** A recoverable failure is returned as text so
   the loop can re-iterate; a guard denial is returned as such and blocks the
-  run (`reliability`, C8), except that the human surface may authorize
-  outside-workspace access for the session, in which case that call is
-  retried. Network denials are never retried.
+  run (`reliability`, C8). The network guard is the only denial source at
+  Prop, and a denial is never retried.
 - **Bounded.** Web calls run under a dedicated timeout and read at most a
   compiled-in number of bytes; `search` and `glob` return at most a
   compiled-in number of results, and `job` output is capped (`C8`). The bounds

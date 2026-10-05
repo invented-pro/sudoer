@@ -1,6 +1,6 @@
 # C1 — Loop
 
-> Status: draft · Version 0.5 · **Current tier: Prop**
+> Status: draft · Version 0.6 · **Current tier: Prop**
 
 Every agent, at its core, is one loop. Everything else is scope built
 around that loop. `C1` is that core: the control cycle that turns a goal
@@ -182,3 +182,15 @@ At Prop the loop is what the builder uses to work on the codebase it is
 generated from — including Prop itself. It must be reliable, terminating,
 and resumable, because self-implementation runs through many goals in one
 continuous session.
+
+### Reserved: subagent nesting
+
+Parallel exploration and context isolation are coding mechanisms Prop owns
+(`C13` multi-agent, coding use). When the capability lands it nests inside
+this loop under a fixed contract — reserved here, never stubbed: a subagent
+is itself a loop (`C1`) running in a child session (`C5`) with its own
+transcript (not written into the parent's session file), a stall budget and
+step ceiling carved from the parent run's remaining budget, and the Prop
+read-only tool set by default. It returns exactly one observation — its
+final answer or failure — appended to the parent transcript, and it never
+edits the parent plan.

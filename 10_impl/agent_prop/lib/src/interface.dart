@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import 'agent.dart';
+import 'build_info.dart';
 import 'config.dart';
 import 'console.dart';
 import 'diagnostics.dart';
@@ -74,6 +75,13 @@ Future<int> runCli({
   final console = Console(out: outSink, err: errSink, ansi: human, spinner: human);
   final observer = human ? _CliObserver(console) : null;
 
+  // C7: strip `@path` tokens and load the images they name (C6).
+  final parsed = tryParseGoal(goal);
+  if (parsed == null) {
+    errSink.writeln('goal error: ${goalErrorMessage(goal)}');
+    return 2;
+  }
+
   final agent = PropAgent.assemble(
     config: config,
     provider: factory(config.provider),
@@ -85,12 +93,15 @@ Future<int> runCli({
   );
   try {
     if (human) {
-      console.banner('Sudoer · ${providerLabel(config.provider.kind)}/'
+      // The greeting: version first, then the repo link (C6, build identity).
+      console.banner('Sudoer $kBuildLabel');
+      console.header(kRepoUrl);
+      console.header('${providerLabel(config.provider.kind)}/'
           '${config.provider.model}');
       console.user(goal);
     }
     final result = await agent
-        .run(RunRequest(normalizeToText(goal)), observer: observer);
+        .run(RunRequest(parsed.text, images: parsed.images), observer: observer);
 
     if (human) {
       console.stopThinking();
@@ -221,10 +232,10 @@ final class _Repl {
   Session session;
   late String workspaceRoot;
   late PropAgent agent;
-  int exitCode = 0;
 
-  /// Resolves the pending `[y/N]` outside-workspace authorization, if any.
-  Completer<bool>? _authCompleter;
+  /// C6: non-zero when the final run was blocked and delivered nothing;
+  /// reset to zero by any later run that delivers an answer.
+  int exitCode = 0;
 
   PropAgent _build() => PropAgent.assemble(
         config: config.copyWith(workspaceRoot: workspaceRoot),
@@ -232,51 +243,18 @@ final class _Repl {
         session: session,
         callLog: callLog,
         diagnostics: diagnostics,
-        authorize: _authorize,
         jobs: jobs,
       );
-
-  /// C6/C8: ask the human to allow a guard denial for the rest of the session.
-  /// Off an interactive terminal this denies, so automation never blocks on a
-  /// prompt.
-  Future<bool> _authorize(String tool, String reason) {
-    if (!human || !interactive) return Future.value(false);
-    final pending = _authCompleter;
-    if (pending != null) return pending.future;
-    final completer = Completer<bool>();
-    _authCompleter = completer;
-    console.authorizePrompt(
-        '$tool needs to reach outside the workspace ($reason).\n'
-        'Allow outside-workspace access for this session?');
-    return completer.future;
-  }
-
-  /// Consume a key while an authorization prompt is open. Returns true when
-  /// the key was consumed (also true for keys that do not answer it).
-  bool _handleAuthKey(Key key) {
-    final completer = _authCompleter;
-    if (completer == null) return false;
-    bool? answer;
-    if (key.kind == KeyKind.rune) {
-      final ch = String.fromCharCode(key.rune).toLowerCase();
-      if (ch == 'y') answer = true;
-      if (ch == 'n') answer = false;
-    } else if (key.kind == KeyKind.enter || key.kind == KeyKind.esc) {
-      answer = false;
-    }
-    if (answer == null) return true;
-    _authCompleter = null;
-    console.authorizeResult(answer);
-    if (!completer.isCompleted) completer.complete(answer);
-    return true;
-  }
 
   Future<ReplOutcome> start({
     required Stream<String> input,
     Stream<List<int>>? rawInput,
   }) {
     if (human) {
-      console.banner('Sudoer · ${providerLabel(config.provider.kind)}/'
+      // The greeting: version first, then the repo link (C6, build identity).
+      console.banner('Sudoer $kBuildLabel');
+      console.header(kRepoUrl);
+      console.header('${providerLabel(config.provider.kind)}/'
           '${config.provider.model}');
       console.header('workspace $workspaceRoot');
       console.header('Type a goal, or /help. Ctrl+C to quit.');
@@ -378,7 +356,6 @@ final class _Repl {
 
     final subscription = reader.keys.listen((key) {
       if (stopped) return;
-      if (_handleAuthKey(key)) return;
       if (running) {
         if (key.kind != KeyKind.esc) return;
         // A direct shell command (`!`) is not interruptible: swallow Esc so
@@ -456,11 +433,6 @@ final class _Repl {
           break;
       }
     }, onDone: () {
-      final auth = _authCompleter;
-      if (auth != null && !auth.isCompleted) {
-        _authCompleter = null;
-        auth.complete(false);
-      }
       if (!finished.isCompleted) finished.complete();
     });
 
@@ -511,12 +483,19 @@ final class _Repl {
     }
   }
 
-  /// Run one goal and render its result. Shared by both surfaces.
-  Future<RunResult> _runGoal(String goal) async {
+  /// Run one goal and render its result. Shared by both surfaces. `@path`
+  /// tokens are stripped by C7 and attached to this goal only; a bad token
+  /// reports locally and the goal is not submitted. Returns null then.
+  Future<RunResult?> _runGoal(String goal) async {
+    final parsed = _parseGoalInput(goal);
+    if (parsed == null) return null;
     final observer = human ? _CliObserver(console) : null;
-    final result =
-        await agent.run(RunRequest(normalizeToText(goal)), observer: observer);
+    final result = await agent
+        .run(RunRequest(parsed.text, images: parsed.images), observer: observer);
     runs.add(result);
+    // A blocked final run makes the process exit non-zero (C6); any later
+    // run that delivers an answer resets it.
+    exitCode = result.status == RunStatus.blocked ? 1 : 0;
     if (human) {
       console.stopThinking();
       console.endLine();
@@ -535,6 +514,17 @@ final class _Repl {
       _render(console.out, console.err, result);
     }
     return result;
+  }
+
+  /// C7: strip `@path` tokens from a goal line and load the images they name.
+  /// Reports a bad token locally and returns null (the goal is not submitted).
+  ParsedGoal? _parseGoalInput(String line) {
+    try {
+      return parseGoal(line);
+    } on FormatException catch (e) {
+      console.error(e.message);
+      return null;
+    }
   }
 
   List<String> get _helpLines => helpLines(interactive: interactive);
@@ -815,6 +805,7 @@ List<String> helpLines({required bool interactive}) => [
       '  /compact         fold earlier context into a brief now',
       '  /workspace [dir] print or change the workspace root',
       '  /verbose on|off  emit per-step routing on stderr',
+      '  @path            attach an image (png/jpg/jpeg/gif/webp) to the goal',
       if (interactive)
         '  !<command>       run a shell command here (not sent to the model)',
       'Anything else is a goal for the agent.',

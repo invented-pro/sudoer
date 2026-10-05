@@ -13,7 +13,9 @@ import 'task.dart';
 const Map<String, dynamic> _gateDefaults = {
   'provider': {'kind': 'ollama', 'model': 'scripted', 'context_window': 8192},
   'workspace_root': '.',
-  // The gate is offline: keep the web tools out of every task.
+  // The gate is offline: the web tools stay out of every task, except a
+  // task that enables them only to deny the target host — the host check
+  // runs before any socket opens, so that path stays offline (C3).
   'web': {'enabled': false},
 };
 

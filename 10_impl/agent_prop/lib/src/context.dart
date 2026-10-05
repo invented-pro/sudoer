@@ -213,6 +213,7 @@ final class ContextAssembler {
     required List<ToolDefinition> tools,
     required List<Entry> transcript,
     List<PlanItem> plan = const [],
+    List<ImageAttachment> images = const [],
   }) {
     final system = _systemWithPlan(plan);
     final toolsJson = jsonEncode([for (final tool in tools) tool.toJson()]);
@@ -284,6 +285,7 @@ final class ContextAssembler {
       system: system,
       messages: messages,
       tools: tools,
+      images: images,
     );
   }
 

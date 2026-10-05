@@ -1,6 +1,6 @@
 # Prop Build Gate
 
-> Status: draft · Version 0.7 · **Current tier: Prop**
+> Status: draft · Version 0.8 · **Current tier: Prop**
 
 The gate is how Prop is judged done. Per [arch.md](../arch.md), every rung
 must pass its eval suite before it may build the next: the gate is a fixed
@@ -42,10 +42,13 @@ blueprint change, not a test bug.
   both a single call and a batch, and read-only calls in a batch run in
   parallel. The ordered tool-call log records every call and its observation.
 - No network, no wall-clock: identical output every run.
-- **Web tools stay out of scope.** The gate config sets `web.enabled: false`,
-  so the web tools are not assembled and no task can reach the network. Their
-  guard, size, and parsing logic is unit-tested with an injected HTTP client,
-  not here.
+- **Web tools stay out of scope, except the denial path.** The gate default
+  config sets `web.enabled: false`, so no task can fetch. One carve-out: a
+  task may enable the web tools and deny the target host
+  (`web.deny_hosts`), because the host check runs before any socket opens —
+  [guard-denied](tasks/guard-denied.json) covers that block offline. Size
+  and parsing logic stays unit-tested with an injected HTTP client, not
+  here.
 - **Coverage boundary.** The scripted provider injects a completion *after*
   wire parsing, so a specific endpoint's wire format (OpenAI JSON, ollama)
   is out of gate scope and unit-tested per adapter. It does exercise `C2`'s
@@ -104,6 +107,7 @@ The concrete argument shapes the scripts rely on, frozen in
 | `job` | `{action, command?, id?}` — out of gate scope (needs runtime ids) |
 | `diff` | `{path?}` — changes against the session baseline |
 | `restore` | `{path?}` — revert to the session baseline |
+| `web_fetch` | `{url}` — fetch one URL as text; the gate covers only its denial path |
 
 ## Coverage
 
@@ -122,7 +126,7 @@ The concrete argument shapes the scripts rely on, frozen in
 | [diff-restore](tasks/diff-restore.json) | `C3` baseline `diff`/`restore`; `C5` baseline |
 | [parallel-reads](tasks/parallel-reads.json) | `C1`/`C2` batch tool calls; parallel read-only |
 | [tool-error-recovery](tasks/tool-error-recovery.json) | `C3` error observation; `C1` re-iterate |
-| [guard-denied](tasks/guard-denied.json) | `C3` guard denial; `C1`/`C8` block |
+| [guard-denied](tasks/guard-denied.json) | `C3` network guard denial (`web.deny_hosts`, offline); `C1`/`C8` block |
 | [provider-timeout-recovery](tasks/provider-timeout-recovery.json) | `C2`/`C8` recoverable; `C1` re-iterate |
 | [provider-unrecoverable](tasks/provider-unrecoverable.json) | `C2`/`C8` unrecoverable; `C1` block |
 | [stall-exhausted](tasks/stall-exhausted.json) | `C1`/`C8` stall detection (repeated steps); best-effort |

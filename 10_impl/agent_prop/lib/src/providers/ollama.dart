@@ -217,5 +217,15 @@ List<Map<String, dynamic>> ollamaMessages(ProviderRequest request) {
         }
     }
   }
+  // Attach the goal's `@path` images (C7) to its user message; older entries
+  // keep their text references only.
+  if (request.images.isNotEmpty) {
+    final lastUser = out.lastIndexWhere((message) => message['role'] == 'user');
+    if (lastUser >= 0) {
+      out[lastUser]['images'] = [
+        for (final image in request.images) base64Encode(image.bytes),
+      ];
+    }
+  }
   return out;
 }

@@ -42,14 +42,12 @@ final class Console {
     bool spinner = false,
     int width = 80,
   })  : _spinnerEnabled = spinner && ansi,
-        _width = width,
         _markdown = MarkdownStream(width: width);
 
   final StringSink out;
   final StringSink err;
   final bool ansi;
   final bool _spinnerEnabled;
-  final int _width;
   final MarkdownStream _markdown;
 
   Timer? _timer;
@@ -122,39 +120,6 @@ final class Console {
     stopThinking();
     write();
     if (running) _startSpinner();
-  }
-
-  /// A blocking authorization prompt (C6): a highlighted question with a
-  /// `[y/N]` suffix, answered by a single key. An explicit `\n` in [text]
-  /// starts a new line, so a caller can keep the high-value question off a
-  /// long context line; each paragraph also wraps to the console width.
-  void authorizePrompt(String text) {
-    endLine();
-    stopThinking();
-    final paragraphs = text.split('\n');
-    final lines = <String>[];
-    for (var i = 0; i < paragraphs.length; i++) {
-      final last = i == paragraphs.length - 1;
-      lines.addAll(
-          _wrapText(last ? '${paragraphs[i]} [y/N]' : paragraphs[i], _width - 4));
-    }
-    for (var i = 0; i < lines.length; i++) {
-      final prefix = i == 0 ? '  ⚠ ' : '    ';
-      final yIndex = i == lines.length - 1 ? lines[i].lastIndexOf('[y/N]') : -1;
-      final head = yIndex >= 0 ? lines[i].substring(0, yIndex) : lines[i];
-      final tail = yIndex >= 0 ? lines[i].substring(yIndex) : '';
-      err.write(style(prefix, fg: _peach) +
-          style(head, fg: _peach, bold: true) +
-          style(tail, bold: true));
-      if (i < lines.length - 1) err.write('\n');
-    }
-    err.write(' ');
-  }
-
-  void authorizeResult(bool approved) {
-    err.writeln(style(approved ? 'y' : 'n', bold: true) +
-        style(approved ? ' — allowed for this session' : ' — denied',
-            dim: true, fg: approved ? _green : _red));
   }
 
   /// Stream a chunk of private model reasoning as a dim italic block, prefixed
@@ -439,29 +404,6 @@ String formatDuration(Duration d) {
 String briefText(Object? text, [int max = 100]) {
   final flat = (text ?? '').toString().replaceAll(RegExp(r'\s+'), ' ').trim();
   return flat.length > max ? '${flat.substring(0, max)}…' : flat;
-}
-
-/// Greedy word-wrap [text] to [width] columns, breaking any single word longer
-/// than a line. Returns at least one line.
-List<String> _wrapText(String text, int width) {
-  final limit = width < 8 ? 8 : width;
-  final lines = <String>[];
-  var line = '';
-  for (final word in text.split(' ')) {
-    if (word.isEmpty) continue;
-    if (line.isNotEmpty && line.length + 1 + word.length > limit) {
-      lines.add(line);
-      line = '';
-    }
-    var rest = word;
-    while (rest.length > limit) {
-      lines.add(rest.substring(0, limit));
-      rest = rest.substring(limit);
-    }
-    line = line.isEmpty ? rest : '$line $rest';
-  }
-  if (line.isNotEmpty) lines.add(line);
-  return lines.isEmpty ? [''] : lines;
 }
 
 /// Keep the tail of a path, prefixing `…` when it exceeds [max] columns.

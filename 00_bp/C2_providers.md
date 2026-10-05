@@ -1,6 +1,6 @@
 # C2 — Providers
 
-> Status: draft · Version 0.5 · **Current tier: Prop**
+> Status: draft · Version 0.6 · **Current tier: Prop**
 
 The provider is the model behind the loop: `C2` is the single boundary
 through which the agent reaches an LLM. The loop decides; the provider
@@ -41,12 +41,14 @@ the reply belongs to the loop, not here.
 
 ## Prop
 
-Prop supports exactly one provider, selected from two adapters: an
-OpenAI-compatible HTTP endpoint or ollama. The provider kind is an explicit
-configuration value and never changes during a run; there is no fallback and
-no model catalog. A timeout is returned to the loop as a recoverable
-observation; an unrecoverable provider error is returned as such and blocks
-the run (`reliability`, C8).
+Prop supports exactly one provider, selected from two user-configurable
+adapters: an OpenAI-compatible HTTP endpoint or ollama. The provider kind is
+an explicit configuration value and never changes during a run; there is no
+fallback and no model catalog. The boundary itself is an interface, and the
+build gate injects a third, non-configurable scripted adapter behind it —
+never reachable through config (`agent_prop/gate.md`). A timeout is returned
+to the loop as a recoverable observation; an unrecoverable provider error is
+returned as such and blocks the run (`reliability`, C8).
 
 ```plantuml
 @startuml
@@ -85,7 +87,9 @@ endif
 ```
 
 - **Single adapter.** The configured provider kind selects one of the two
-  adapters; no other provider is reachable at Prop.
+  user-configurable adapters; no other provider is settable at Prop. The
+  scripted gate adapter implements the same boundary but is injected by the
+  harness, not configuration.
 - **Stateless.** The provider holds no conversation state — the prompt is
   passed in full on every call.
 - **Called once per iteration.** The loop (C1) invokes the provider for

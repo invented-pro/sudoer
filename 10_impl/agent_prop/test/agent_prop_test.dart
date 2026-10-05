@@ -172,14 +172,18 @@ void main() {
   });
 
   group('tools (C3)', () {
-    test('a path escaping the workspace is a guard denial', () async {
+    test('a path outside the workspace root resolves and reads (anchor)', () async {
       final temp = Directory.systemTemp.createTempSync('sudoer-test-');
       addTearDown(() => temp.deleteSync(recursive: true));
-      final registry = ToolRegistry(workspaceRoot: temp.path);
+      final workspace = Directory('${temp.path}/ws')..createSync();
+      File('${temp.path}/secret.txt').writeAsStringSync('top secret');
+      final registry = ToolRegistry(workspaceRoot: workspace.path);
       final outcome = await registry.dispatch(
         const ToolCall(name: 'read', arguments: {'path': '../secret.txt'}),
       );
-      expect(outcome.outcome, Outcome.guardDenied);
+      // The root is an anchor, not a fence: the read is an ordinary path.
+      expect(outcome.outcome, Outcome.ok);
+      expect(outcome.text, contains('top secret'));
     });
 
     test('a missing file is a recoverable error', () async {
@@ -438,7 +442,7 @@ void main() {
       expect(result.status, RunStatus.blocked);
     });
 
-    test('a guard denial is retried when the user authorizes it', () async {
+    test('the workspace root is an anchor, not a fence (C3)', () async {
       final temp = Directory.systemTemp.createTempSync('sudoer-test-');
       addTearDown(() => temp.deleteSync(recursive: true));
       final workspace = Directory('${temp.path}/ws')..createSync();
@@ -462,69 +466,16 @@ void main() {
           {'complete': {'text': 'got it'}},
         ]
       });
-      var asked = 0;
-      final agent = PropAgent.assemble(
-        config: config,
-        provider: provider,
-        authorize: (tool, reason) async {
-          asked++;
-          return true;
-        },
-      );
+      final agent = PropAgent.assemble(config: config, provider: provider);
       final result = await agent.run(const RunRequest('read it'));
 
-      expect(asked, 1);
+      // A path outside the workspace root is an ordinary path: the read
+      // succeeds and the run completes; only the network guard denies.
       expect(result.status, RunStatus.complete);
-      expect(agent.session.allowOutsideWorkspace, isTrue);
-      expect(agent.tools.guard.allowOutside, isTrue);
       final observation =
           agent.session.transcript.whereType<ObservationEntry>().first;
       expect(observation.outcome, Outcome.ok);
       expect(observation.text, contains('top secret'));
-    });
-
-    test('a guard denial blocks when authorization is refused', () async {
-      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
-      addTearDown(() => temp.deleteSync(recursive: true));
-      final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
-      final provider = ScriptedProvider.fromJson({
-        'steps': [
-          {
-            'complete': {
-              'text': 'reading',
-              'tool_calls': [
-                {
-                  'type': 'tool_call',
-                  'name': 'read',
-                  'arguments': {'path': '../secret.txt'},
-                }
-              ],
-            }
-          }
-        ]
-      });
-      final agent = PropAgent.assemble(
-        config: config,
-        provider: provider,
-        authorize: (tool, reason) async => false,
-      );
-      final result = await agent.run(const RunRequest('read it'));
-      expect(result.status, RunStatus.blocked);
-      expect(agent.session.allowOutsideWorkspace, isFalse);
-    });
-
-    test('an authorized session stays open across an agent rebuild', () {
-      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
-      addTearDown(() => temp.deleteSync(recursive: true));
-      final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
-      final session = Session.create(workspaceRoot: temp.path)
-        ..allowOutsideWorkspace = true;
-      final agent = PropAgent.assemble(
-        config: config,
-        provider: ScriptedProvider.fromJson({'steps': []}),
-        session: session,
-      );
-      expect(agent.tools.guard.allowOutside, isTrue);
     });
 
     test('applies a plan update from the completion', () async {
@@ -1503,6 +1454,60 @@ void main() {
     });
   });
 
+  group('goal attachments (C7)', () {
+    test('strips @path tokens and loads image bytes', () {
+      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final image = File(p.join(temp.path, 'shot.png'))
+        ..writeAsBytesSync([1, 2, 3]);
+      final parsed = parseGoal('fix this @${image.path} now');
+      expect(parsed.text, 'fix this now');
+      expect(parsed.images, hasLength(1));
+      expect(parsed.images.single.path, image.path);
+      expect(parsed.images.single.bytes, [1, 2, 3]);
+    });
+
+    test('rejects a missing or non-image token', () {
+      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      File(p.join(temp.path, 'notes.txt')).writeAsStringSync('x');
+      expect(() => parseGoal('look @${temp.path}/nope.png'),
+          throwsA(isA<FormatException>()));
+      expect(() => parseGoal('look @${temp.path}/notes.txt'),
+          throwsA(isA<FormatException>()));
+    });
+
+    test('leaves a bare @ and non-leading tokens alone', () {
+      final parsed = parseGoal('email me at a@b.com, or just @');
+      expect(parsed.text, 'email me at a@b.com, or just @');
+      expect(parsed.images, isEmpty);
+    });
+
+    test('the transcript keeps a text reference only', () async {
+      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final image = File(p.join(temp.path, 'shot.png'))
+        ..writeAsBytesSync([1, 2, 3]);
+      final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
+      final agent = PropAgent.assemble(
+        config: config,
+        provider: ScriptedProvider.fromJson({
+          'steps': [
+            {'complete': {'text': 'seen'}}
+          ]
+        }),
+      );
+      await agent.run(RunRequest('look',
+          images: [ImageAttachment(path: image.path, bytes: [1, 2, 3])]));
+      final goal = agent.session.transcript.first;
+      expect(goal, isA<UserEntry>());
+      expect((goal as UserEntry).images, [image.path]);
+      // Only the path is persisted; the bytes never enter the session file.
+      expect(goal.toJson()['images'], [image.path]);
+      expect(jsonEncode(agent.session.toJson()), isNot(contains('base64')));
+    });
+  });
+
   group('provider wire mapping (C2)', () {
     test('binds tool results by id and never dangles', () {
       const request = ProviderRequest(
@@ -1558,6 +1563,53 @@ void main() {
       expect(messages.any((m) => m['role'] == 'tool'), isFalse);
       expect(messages.last['role'], 'user');
       expect(messages.any((m) => m['tool_call_id'] == 'ghost'), isFalse);
+    });
+
+    test('attach goal images to the last user message (openai-compatible)',
+        () {
+      const request = ProviderRequest(
+        model: 'm',
+        system: 'sys',
+        messages: [
+          UserEntry('first'),
+          AssistantEntry(thought: 't', action: Finish('t')),
+          UserEntry('look'),
+        ],
+        tools: [],
+        images: [
+          ImageAttachment(path: 'shot.png', bytes: [1, 2, 3]),
+        ],
+      );
+      final messages = openAiMessages(request);
+      final last = messages.last;
+      expect(last['role'], 'user');
+      final content = last['content'] as List;
+      expect(content.first, {'type': 'text', 'text': 'look'});
+      final part = content.last as Map<String, dynamic>;
+      expect(part['type'], 'image_url');
+      expect((part['image_url'] as Map)['url'],
+          startsWith('data:image/png;base64,'));
+      // Earlier user entries keep plain text.
+      expect(messages[1]['content'], 'first');
+    });
+
+    test('attach goal images to the last user message (ollama)', () {
+      const request = ProviderRequest(
+        model: 'm',
+        system: 'sys',
+        messages: [
+          UserEntry('first'),
+          AssistantEntry(thought: 't', action: Finish('t')),
+          UserEntry('look'),
+        ],
+        tools: [],
+        images: [
+          ImageAttachment(path: 'shot.png', bytes: [1, 2, 3]),
+        ],
+      );
+      final messages = ollamaMessages(request);
+      expect(messages.last['images'], [base64Encode([1, 2, 3])]);
+      expect(messages[1].containsKey('images'), isFalse);
     });
 
     test('dispatch names the catalog when the tool name is empty', () async {
@@ -1752,17 +1804,29 @@ void main() {
         () async {
       final temp = Directory.systemTemp.createTempSync('sudoer-test-');
       addTearDown(() => temp.deleteSync(recursive: true));
-      final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
+      final config = Config.fromJson({
+        'provider': {
+          'kind': 'ollama',
+          'model': 'scripted',
+          'context_window': 8192,
+        },
+        'workspace_root': temp.path,
+        'session_dir': temp.path,
+        'web': {
+          'enabled': true,
+          'deny_hosts': ['evil.example'],
+        },
+      });
       final provider = ScriptedProvider.fromJson({
         'steps': [
           {
             'complete': {
-              'text': 'reading',
+              'text': 'fetching',
               'tool_calls': [
                 {
                   'type': 'tool_call',
-                  'name': 'read',
-                  'arguments': {'path': '../secret.txt'},
+                  'name': 'web_fetch',
+                  'arguments': {'url': 'http://evil.example/notes'},
                 }
               ],
             }
@@ -1772,15 +1836,15 @@ void main() {
       final err = StringBuffer();
       await runRepl(
         config: config,
-        input:
-            Stream.fromIterable(['/verbose on', 'read ../secret.txt', '/exit']),
+        input: Stream.fromIterable(
+            ['/verbose on', 'fetch http://evil.example/notes', '/exit']),
         out: StringBuffer(),
         err: err,
         providerFactory: (_) => provider,
       );
       final text = err.toString();
-      expect(text,
-          contains('[C6 interface] result blocked (path escapes workspace'));
+      expect(text, contains(
+          '[C6 interface] result blocked (web egress to evil.example'));
       expect(text, isNot(contains('Instance of')));
     });
   });
@@ -2049,6 +2113,37 @@ void main() {
     });
   });
 
+  group('build identity (C6)', () {
+    test('the repo constant is baked in; dart test injects no version', () {
+      expect(kRepoUrl, 'https://github.com/invented-pro/sudoer');
+      // `dart test` compiles without defines, so the version is the dev
+      // label; the release build injects it via -DSUDOER_VERSION.
+      expect(kPropVersion, isEmpty);
+      expect(kBuildLabel, 'dev');
+    });
+
+    test('the human greeting leads with version and repo link', () async {
+      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
+      final err = StringBuffer();
+      await runRepl(
+        config: config,
+        input: Stream.fromIterable(['/exit']),
+        out: StringBuffer(),
+        err: err,
+        human: true,
+        providerFactory: (_) =>
+            ScriptedProvider.fromJson({'steps': const []}),
+      );
+      final flat = stripAnsi(err.toString());
+      expect(flat, contains('Sudoer $kBuildLabel'));
+      expect(flat.indexOf('Sudoer $kBuildLabel'),
+          lessThan(flat.indexOf(kRepoUrl)));
+      expect(flat, contains(kRepoUrl));
+    });
+  });
+
   group('console (C6)', () {
     test('context bar fills in proportion', () {
       expect(contextBar(5, 10, 10), '[█████░░░░░]');
@@ -2259,41 +2354,6 @@ void main() {
       final lines = err.toString().trimRight().split('\n');
       expect(lines[0], contains('· 2.4s'));
       expect(lines[1], contains('· 42ms'));
-    });
-
-    test('authorization prompts wrap to the console width', () {
-      final err = StringBuffer();
-      final console =
-          Console(out: StringBuffer(), err: err, ansi: false, width: 40);
-      console.authorizePrompt(
-          'read needs to reach outside the workspace '
-          '(path escapes workspace: /home/s1/src/sudoer/README.md). '
-          'Allow outside-workspace access for this session?');
-      final rendered = err.toString();
-      final lines = rendered.trimRight().split('\n');
-      expect(lines.length, greaterThan(1));
-      for (final line in lines) {
-        expect(line.length, lessThanOrEqualTo(40));
-      }
-      expect(lines.first, startsWith('  ⚠ '));
-      expect(lines[1], startsWith('    '));
-      expect(rendered, contains('[y/N]'));
-    });
-
-    test('authorization prompt keeps the question on its own line', () {
-      final err = StringBuffer();
-      final console =
-          Console(out: StringBuffer(), err: err, ansi: false, width: 80);
-      console.authorizePrompt('read needs to reach outside the workspace '
-          '(path escapes workspace: /home/s1/src/sudoer/README.md).\n'
-          'Allow outside-workspace access for this session?');
-      final lines = err.toString().trimRight().split('\n');
-      final question = lines
-          .firstWhere((line) => line.contains('Allow outside-workspace access'));
-      expect(question.trimLeft(), startsWith('Allow outside-workspace access'));
-      expect(question, contains('[y/N]'));
-      // The question must not share a line with the context sentence.
-      expect(question, isNot(contains('path escapes workspace')));
     });
 
     test('model output is magenta, command output yellow, input default', () {

@@ -1,14 +1,20 @@
 {
   "id": "guard-denied",
-  "description": "A file-tool call that escapes the workspace root is a guard denial and blocks the run.",
-  "goal": "Read ../secret.txt.",
+  "description": "A web_fetch to a host on web.deny_hosts is a network guard denial — the host check runs before any socket opens, so the run stays offline — and blocks the run.",
+  "goal": "Fetch http://evil.example/notes and summarize it.",
+  "config": {
+    "web": {
+      "enabled": true,
+      "deny_hosts": ["evil.example"]
+    }
+  },
   "script": {
     "steps": [
       {
         "complete": {
-          "text": "Reading outside the workspace.",
+          "text": "Fetching the page.",
           "tool_calls": [
-            { "type": "tool_call", "name": "read", "arguments": { "path": "../secret.txt" } }
+            { "type": "tool_call", "name": "web_fetch", "arguments": { "url": "http://evil.example/notes" } }
           ]
         }
       }
@@ -16,6 +22,6 @@
   },
   "expect": {
     "status": "blocked",
-    "tools": ["read"]
+    "tools": ["web_fetch"]
   }
 }

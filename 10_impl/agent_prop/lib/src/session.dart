@@ -36,11 +36,6 @@ final class Session {
   /// it into the in-flight call so it aborts at once (C6, C8).
   final CancelSignal cancel = CancelSignal();
 
-  /// Set when the user authorizes outside-workspace access for this session;
-  /// the tool guard reads it so the grant survives an agent rebuild (C6).
-  /// Not persisted: a resumed session starts confined again.
-  bool allowOutsideWorkspace = false;
-
   static int _counter = 0;
 
   factory Session.create({required String workspaceRoot, String? id}) {

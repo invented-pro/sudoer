@@ -1,6 +1,6 @@
 # Architecture
 
-> Status: draft · Version 0.4 · **Current tier: Prop**
+> Status: draft · Version 0.6 · **Current tier: Prop**
 
 Every agent, at its core, is one loop. Everything else is scope built
 around that loop.
@@ -57,6 +57,51 @@ carry a task — a plan-driven interactive loop at `Prop` that streams and can
 drive both a styled human CLI and a plain automation surface, reflection and
 replanning at `Orbit`; session continuity at `Prop` versus durable recall at
 `Pilot`; on-demand use versus autonomous long-horizon work.
+
+## LLM capability boundary
+
+The loop has exactly one model touchpoint: *decide the next action*. The
+division of labor is that **the model maps ambiguity to structure, and
+everything deterministic is enforced outside it**. Read this way, each
+component exists either to feed the model context or to backstop a weakness
+it cannot carry — the boundary below doubles as a completeness check on the
+component map.
+
+Within sudoer's scope, the model is good at:
+
+- **Ambiguity → structure** — turning goal plus observations into the next
+  tool call or `finish`, and intent into typed arguments (C1, C3,
+  [schemas.md](schemas.md)).
+- **Producing artifacts** — code, prose, summaries, clarifying questions;
+  generation with fast feedback is its best case, which is the whole of
+  `Prop`'s deliverable.
+- **Local reasoning over given context** — interpreting an error
+  observation, choosing a retry or an alternate route, small replans
+  (C1, C8).
+- **Compression and selection** — compaction (C4), relevance judgments for
+  retrieval (C9), best-effort answers.
+
+And not good at — each weakness carried by scaffolding, not by the model:
+
+| Model weakness | What carries it |
+| --- | --- |
+| Determinism and precision (arithmetic, exact strings, verbatim recall) | tools guarantee exactness — edit string-match, `run_command`; never in-context |
+| State and time (cross-run memory, waking unprompted) | sessions (C5), compaction (C4), memory (C9); reminders (C11) are system-fired, the model only reacts |
+| Long-horizon discipline (drift, goal loss) | step ceiling, stall budget, the plan-driven loop; reflection and replanning only at `Orbit` |
+| Knowing when to stop (calibration) | termination belongs to the loop — stall or ceiling still answers, marked incomplete |
+| Trust and safety judgment | guards and policy (C10) are code, not prompts; a denial blocks the run |
+| Reproducibility (same input, different output) | build gates run against a deterministic provider |
+| Cost per decision (tokens, latency) | prompt caching (Pilot), the plain automation surface; never ask the model what a script can decide |
+
+The build ladder therefore runs *against* model-native strength. Coding
+(`Prop`) is verifiable — feedback is cheap and deterministic — so model plus
+tools shine there, which is why coding is the seed. `Pilot`'s everyday tasks
+lack a compiler, so deterministic scaffolding (memory, safety) carries more
+of the weight. `Orbit` targets the model's weakest axis — the long horizon —
+which is why C12–C16 are almost entirely scaffolding around that weakness.
+The true edge of what sudoer can promise is the task with no feedback signal
+at all — no compiler, no test, no user reply — and that edge bounds
+`Pilot`'s "full coverage".
 
 ## Tier scope
 
@@ -186,7 +231,7 @@ text (unchanged)
 ;
 ***:
 **reliability** (C8)
-structured logs, provider retry/backoff, concurrency
+structured logs, provider retry/backoff, concurrent runs
 ;
 ***:
 **memory** (C9)
@@ -283,7 +328,6 @@ for that component's tier. The cross-cutting coding mechanisms today are:
 | Coding need | Mechanism | Component that first named it | Tier that owns it |
 | --- | --- | --- | --- |
 | parallel exploration / context isolation | subagents | `C13` multi-agent | Prop |
-| isolated build & test execution | execution backends (sandbox) | `C12` execution | Prop |
 | dev-tool integration (LSP, linters, debuggers) | MCP client | `C14` extensibility | Prop |
 | UI / frontend visual inspection | vision input | `C7` modality | Prop |
 
@@ -358,9 +402,8 @@ code it writes; it must not be one-shot or memoryless.
 - **Orbit** — autonomy, long-horizon: everything Pilot does, plus fully
   autonomous execution of super-long multi-step tasks, a distinct style and
   voice, skills grown from experience, connectors, extensibility, access
-  control, and multi-agent. Sandboxing that serves coding is Prop's, not
-  reserved here. Out of scope until Pilot is solid; never faked (no stubs or
-  placeholders).
+  control, and multi-agent. Out of scope until Pilot is solid; never faked
+  (no stubs or placeholders).
 
 > Scope boundaries are normative, but they bound the *usage domain*, not the
 > capability. The implementation MUST NOT implement a usage domain beyond the

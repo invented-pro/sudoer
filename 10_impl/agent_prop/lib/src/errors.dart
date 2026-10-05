@@ -30,13 +30,13 @@ class ContextOverflowException implements Exception {
   String toString() => 'ContextOverflowException: $message';
 }
 
-/// Which guard a denial came from. The workspace guard can be opened by the
-/// human for the session; the network guard cannot (C3, C6).
-enum GuardArea { workspace, network }
+/// Which guard a denial came from. The network guard is the only denial
+/// source at Prop and has no interactive override (C3, C6, C8).
+enum GuardArea { network }
 
 /// Raised by a tool (C3) when a call crosses a guard boundary; blocks.
 class GuardDeniedException implements Exception {
-  const GuardDeniedException(this.message, {this.area = GuardArea.workspace});
+  const GuardDeniedException(this.message, {this.area = GuardArea.network});
   final String message;
   final GuardArea area;
   @override

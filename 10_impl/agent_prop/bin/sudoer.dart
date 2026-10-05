@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:args/args.dart';
 
+import 'package:sudoer_prop/src/build_info.dart';
 import 'package:sudoer_prop/src/config.dart';
 import 'package:sudoer_prop/src/errors.dart';
 import 'package:sudoer_prop/src/interface.dart';
@@ -13,6 +14,8 @@ import 'package:sudoer_prop/src/session.dart';
 Future<void> main(List<String> args) async {
   final parser = ArgParser()
     ..addFlag('help', abbr: 'h', negatable: false, help: 'Show this help.')
+    ..addFlag('version',
+        negatable: false, help: 'Print the version and the repo, then exit.')
     ..addOption(
       'config',
       abbr: 'c',
@@ -39,6 +42,13 @@ Future<void> main(List<String> args) async {
 
   if (results['help'] as bool) {
     _printUsage(parser);
+    exit(0);
+  }
+
+  if (results['version'] as bool) {
+    stdout
+      ..writeln('sudoer-prop $kBuildLabel')
+      ..writeln(kRepoUrl);
     exit(0);
   }
 
@@ -141,7 +151,8 @@ Future<void> main(List<String> args) async {
 
 void _printUsage(ArgParser parser, {IOSink? to}) {
   (to ?? stdout)
-    ..writeln('Sudoer — Prop coding agent (interactive).')
+    ..writeln('Sudoer — Prop coding agent $kBuildLabel.')
+    ..writeln(kRepoUrl)
     ..writeln()
     ..writeln('Usage: sudoer-prop [options] [goal]')
     ..writeln()
@@ -156,6 +167,9 @@ void _printUsage(ArgParser parser, {IOSink? to}) {
     ..writeln('With --automate, or when stdin/stdout is not a terminal, runs the')
     ..writeln('plain CLI: each line is a goal or a command (/help, /plan, /exit…).')
     ..writeln()
+    ..writeln('A goal may carry @path tokens to attach images '
+        '(png/jpg/jpeg/gif/webp).')
+    ..writeln()
     ..writeln('Config strings may reference environment variables, e.g.')
     ..writeln('"api_key": "\$OPENAI_API_KEY". An unset variable is an error.')
     ..writeln()
@@ -164,6 +178,7 @@ void _printUsage(ArgParser parser, {IOSink? to}) {
     ..writeln('  sudoer-prop -c ollama.json "Read README.md and summarize it"')
     ..writeln('  sudoer-prop -c ollama.json -s s1a2b3 # resume a session')
     ..writeln()
-    ..writeln('Exit codes: 0 = clean exit; 1 = fatal error;')
-    ..writeln('            2 = usage or config error. (One-shot: 1 = blocked.)');
+    ..writeln('Exit codes: 0 = clean exit (incomplete included);')
+    ..writeln('            1 = fatal error, or the final run was blocked;')
+    ..writeln('            2 = usage or config error.');
 }

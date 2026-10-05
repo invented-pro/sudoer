@@ -1,6 +1,6 @@
 # C5 — Sessions
 
-> Status: draft · Version 0.4 · **Current tier: Prop**
+> Status: draft · Version 0.5 · **Current tier: Prop**
 
 A session is the scope that surrounds a run: `C5` is the container the loop
 executes inside and the rules for what state, if any, persists around it.
@@ -88,10 +88,11 @@ stop
 - **Workspace.** The session records its active `workspace_root`; changing
   the workspace during a session (`C6`) updates and persists it.
 - **Workspace baseline.** When a session opens, `C3` captures a baseline of
-  the workspace (file identities and contents); the session records its handle
-  so `diff` and `restore` (`C3`) survive across runs. It is refreshed only when
-  the workspace root changes (`C6`), is never shown to the model, and is not
-  the transcript — it backs review and undo.
+  the workspace (file identities and contents), lazily — nothing is copied up
+  front, and `diff` falls back to the underlying VCS where one is present; the
+  session records its handle so `diff` and `restore` (`C3`) survive across
+  runs. It is refreshed only when the workspace root changes (`C6`), is never
+  shown to the model, and is not the transcript — it backs review and undo.
 - **Session ≠ memory.** Persistence here is continuity of a conversation and
   its plan. Durable, curated, cross-session *knowledge* is `memory` (C9), a
   Pilot component, and is not built here.
@@ -105,5 +106,6 @@ stop
 One JSON document per session, written under the workspace or a configured
 session directory; it holds at least `id`, `created_at`, `updated_at`,
 `workspace_root`, `plan`, and `transcript`, plus the workspace `baseline`
-handle backing `diff`/`restore` (`C3`). The exact schema is frozen with the
-rest of Prop's contracts (`schemas.md`) and is pending this revision.
+handle backing `diff`/`restore` (`C3`). The exact shape is frozen in
+[session.schema.json](agent_prop/session.schema.json) with the rest of
+Prop's contracts (`schemas.md`).

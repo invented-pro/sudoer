@@ -12,45 +12,33 @@ import '../models.dart';
 import '../platform.dart';
 import '../reliability.dart';
 
-/// The workspace confinement policy (C3, C8). File tools resolve paths through
-/// it; a path that escapes [root] is a guard denial unless the user has
-/// authorized outside-workspace access for the session ([allowOutside]).
+/// The workspace anchor (C3). The root is an anchor, not a fence: relative
+/// paths resolve against it and `run_command` starts there as its working
+/// directory, but paths outside it are ordinary paths — nothing is denied
+/// for reaching past it, and the shell is full-trust. The one built-in
+/// guard is the network guard ([NetworkGuard]).
 final class WorkspaceGuard {
   WorkspaceGuard(this.root);
 
   final String root;
 
-  /// Set once the user approves an out-of-workspace access; the grant lasts
-  /// for the session (C6).
-  bool allowOutside = false;
-
-  File resolve(String path) {
-    final normalizedRoot = p.normalize(p.absolute(root));
-    final resolved = p.normalize(p.join(normalizedRoot, path));
-    if (!allowOutside &&
-        resolved != normalizedRoot &&
-        !p.isWithin(normalizedRoot, resolved)) {
-      throw GuardDeniedException('path escapes workspace: $path');
-    }
-    return File(resolved);
-  }
+  File resolve(String path) => File(_resolve(path));
 
   /// Like [resolve], but for a directory target (glob/search scoping).
-  Directory resolveDir(String path) {
+  Directory resolveDir(String path) => Directory(_resolve(path));
+
+  String _resolve(String path) {
     final normalizedRoot = p.normalize(p.absolute(root));
-    final resolved = p.normalize(p.join(normalizedRoot, path));
-    if (!allowOutside &&
-        resolved != normalizedRoot &&
-        !p.isWithin(normalizedRoot, resolved)) {
-      throw GuardDeniedException('path escapes workspace: $path');
-    }
-    return Directory(resolved);
+    // p.join ignores the root when [path] is already absolute.
+    return p.normalize(p.absolute(p.join(normalizedRoot, path)));
   }
 }
 
 /// The network egress policy (C3). Enabled and open by default; [denyHosts] is
-/// an empty blacklist reserved for later policy. A denial is a hard block:
-/// unlike the workspace guard there is no interactive override.
+/// an empty blacklist reserved for later policy. A denial is a hard block with
+/// no interactive override. The guard binds only the built-in web tools —
+/// `run_command` and `job` are full-trust and can reach any host — so the
+/// deny-list is tool-scoped, not host-scoped.
 final class NetworkGuard {
   NetworkGuard({this.enabled = true, this.denyHosts = const []});
 

@@ -1,6 +1,6 @@
 name: sudoer_prop
 description: Human-written Prop agent (C1–C8) built to the language-agnostic blueprint in 00_bp/.
-version: 0.2.1
+version: 0.3.0
 publish_to: none
 
 environment:

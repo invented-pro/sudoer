@@ -5,6 +5,8 @@
 /// `completion`).
 library;
 
+import 'package:path/path.dart' as p;
+
 import 'errors.dart';
 
 enum RunStatus { complete, incomplete, blocked }
@@ -124,7 +126,13 @@ sealed class Entry {
   const Entry();
 
   factory Entry.fromJson(Map<String, dynamic> json) => switch (json['role']) {
-        'user' => UserEntry(json['text'] as String),
+        'user' => UserEntry(
+            json['text'] as String,
+            images: [
+              for (final image in (json['images'] as List? ?? const []))
+                image as String,
+            ],
+          ),
         'assistant' => AssistantEntry(
             thought: json['thought'] as String,
             action:
@@ -142,11 +150,20 @@ sealed class Entry {
 }
 
 final class UserEntry extends Entry {
-  const UserEntry(this.text);
+  const UserEntry(this.text, {this.images = const []});
   final String text;
 
+  /// Path references of the images attached to this goal (`@path` tokens,
+  /// C7). Text only: the binaries are attached to that goal's provider
+  /// requests at runtime and are never persisted (C4, C5).
+  final List<String> images;
+
   @override
-  Map<String, dynamic> toJson() => {'role': 'user', 'text': text};
+  Map<String, dynamic> toJson() => {
+        'role': 'user',
+        'text': text,
+        if (images.isNotEmpty) 'images': images,
+      };
 }
 
 final class AssistantEntry extends Entry {
@@ -290,16 +307,41 @@ final class ProviderRequest {
     required this.system,
     required this.messages,
     required this.tools,
+    this.images = const [],
   });
   final String model;
   final String system;
   final List<Entry> messages;
   final List<ToolDefinition> tools;
+
+  /// Images attached to the current goal's `@path` tokens (C7). Runtime-only:
+  /// adapters attach them to the goal's user message; the transcript keeps a
+  /// text reference and the binaries are never persisted.
+  final List<ImageAttachment> images;
+}
+
+/// A coding task's image, loaded once at goal submission (C7).
+final class ImageAttachment {
+  const ImageAttachment({required this.path, required this.bytes});
+  final String path;
+  final List<int> bytes;
+
+  /// The MIME type for [path], or null when the extension is unknown.
+  static String? mimeFor(String path) => switch (p.extension(path).toLowerCase()) {
+    '.png' => 'image/png',
+    '.jpg' || '.jpeg' => 'image/jpeg',
+    '.gif' => 'image/gif',
+    '.webp' => 'image/webp',
+    _ => null,
+  };
 }
 
 final class RunRequest {
-  const RunRequest(this.goal);
+  const RunRequest(this.goal, {this.images = const []});
   final String goal;
+
+  /// Images named by `@path` tokens in the goal line (C7).
+  final List<ImageAttachment> images;
 }
 
 final class RunResult {

@@ -30,7 +30,6 @@ final class AgentLoop {
     required this.tools,
     required this.context,
     this.reliability = const Reliability(),
-    this.authorize,
     Diagnostics? diagnostics,
   }) : diagnostics = diagnostics ?? Diagnostics.silent;
 
@@ -39,9 +38,6 @@ final class AgentLoop {
   final ToolRegistry tools;
   final ContextAssembler context;
   final Reliability reliability;
-
-  /// C6: ask the user to approve a guard denial. Null (automation) denies.
-  final Future<bool> Function(String tool, String reason)? authorize;
   final Diagnostics diagnostics;
 
   Future<RunResult> run(
@@ -52,7 +48,10 @@ final class AgentLoop {
     // A fresh goal starts with no pending cancel; a cancel only aborts the
     // call it was raised during.
     session.cancel.reset();
-    session.transcript.add(UserEntry(request.goal));
+    // The transcript keeps a text reference to the goal's `@path` images;
+    // the binaries ride the provider requests of this run only (C7).
+    session.transcript.add(UserEntry(request.goal,
+        images: [for (final image in request.images) image.path]));
     var steps = 0;
     var stalls = 0;
     final seen = <String>{};
@@ -93,6 +92,7 @@ final class AgentLoop {
           tools: tools.definitions,
           transcript: session.transcript,
           plan: session.plan,
+          images: request.images,
         );
       } on ContextOverflowException catch (e) {
         diagnostics.event('C1 loop', 'blocked: ${e.message}');
@@ -244,44 +244,13 @@ final class AgentLoop {
         }
       }
 
-      // A guard denial is a hard block. A workspace denial may be opened by
-      // the human surface for the session, after which the denied calls are
-      // retried in place; a network denial has no override. Automation (no
-      // authorizer) always blocks.
-      final blockReason = <String?>[];
-      final denied = <int>[
-        for (var k = 0; k < results.length; k++)
-          if (results[k]?.outcome?.outcome == Outcome.guardDenied) k,
+      // A guard denial is a hard block with no override (C3, C8): the network
+      // guard is the only denial source at Prop.
+      final denied = [
+        for (final result in results)
+          if (result?.outcome?.outcome == Outcome.guardDenied)
+            result!.outcome!.text,
       ];
-      if (denied.isNotEmpty) {
-        final network = denied
-            .map((k) => results[k]!.outcome!)
-            .where((o) => o.guard == GuardArea.network)
-            .toList();
-        if (network.isNotEmpty) {
-          blockReason.add(network.first.text);
-        } else if (!tools.guard.allowOutside) {
-          final ask = authorize;
-          final granted = ask == null
-              ? false
-              : await ask(calls[denied.first].name,
-                  results[denied.first]!.outcome!.text);
-          if (!granted) {
-            blockReason.add(results[denied.first]!.outcome!.text);
-          } else {
-            tools.guard.allowOutside = true;
-            session.allowOutsideWorkspace = true;
-            diagnostics.event('C3 tools', 'authorized outside the workspace');
-            for (final k in denied) {
-              results[k] = await _dispatch(calls[k], session);
-            }
-            final retry = results[denied.first]?.outcome;
-            if (retry?.outcome == Outcome.guardDenied) {
-              blockReason.add(retry!.text);
-            }
-          }
-        }
-      }
       wall.stop();
 
       // Record the turn: one observation per call, in the listed order, so
@@ -323,10 +292,10 @@ final class AgentLoop {
         timings.add(RunTiming('batch', wall.elapsed));
       }
 
-      if (blockReason.isNotEmpty) {
-        diagnostics.event('C1 loop', 'blocked: ${blockReason.first}');
+      if (denied.isNotEmpty) {
+        diagnostics.event('C1 loop', 'blocked: ${denied.first}');
         observer?.onPhase('blocked');
-        return done(RunStatus.blocked, reason: blockReason.first);
+        return done(RunStatus.blocked, reason: denied.first);
       }
       if (session.cancel.isCancelled) {
         break;

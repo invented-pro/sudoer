@@ -270,5 +270,23 @@ List<Map<String, dynamic>> openAiMessages(ProviderRequest request) {
         }
     }
   }
+  // Attach the goal's `@path` images (C7) to its user message as multimodal
+  // content parts; older entries keep their text references only.
+  if (request.images.isNotEmpty) {
+    final lastUser = out.lastIndexWhere((message) => message['role'] == 'user');
+    if (lastUser >= 0 && out[lastUser]['content'] is String) {
+      out[lastUser]['content'] = [
+        {'type': 'text', 'text': out[lastUser]['content'] as String},
+        for (final image in request.images)
+          if (ImageAttachment.mimeFor(image.path) case final mime?)
+            {
+              'type': 'image_url',
+              'image_url': {
+                'url': 'data:$mime;base64,${base64Encode(image.bytes)}',
+              },
+            },
+      ];
+    }
+  }
   return out;
 }

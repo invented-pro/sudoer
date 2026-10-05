@@ -1,6 +1,6 @@
 # C6 — Interface
 
-> Status: draft · Version 1.4 · **Current tier: Prop**
+> Status: draft · Version 1.5 · **Current tier: Prop**
 
 The interface is how a human reaches the agent: `C6` is the surface that
 takes a goal in and puts an answer out. The loop is the engine; the
@@ -173,6 +173,11 @@ and is not offered here.
   the plain surface; a non-interactive stdin/stdout selects it automatically,
   so scripts, pipes, and the gate never block on a prompt. `--human` forces
   the styled surface when terminal detection is wrong.
+- **Session and one-shot.** `--session <id>` resumes a saved session at
+  startup (C5); without it a new session opens. A positional goal argument
+  runs exactly one goal on the plain surface — even on a terminal — then
+  exits; the exit code follows *Exit codes* below. The one-shot form is what
+  scripts and the gate's CLI smoke drive.
 - **Streaming.** On the human surface the provider streams generated text
   (`C2`) and the loop forwards visible deltas (`C1`), which are written inline
   to stdout, while reasoning deltas (`<think>`, C2) stream dim and italic to
@@ -195,6 +200,12 @@ and is not offered here.
 - **Command vs goal.** A leading `/` marks a local command; everything else
   is a goal for the loop. This keeps interface control from being sent to
   the model.
+- **Attachments.** A goal line may carry `@path` tokens —
+  whitespace-separated paths beginning with `@`. The interface strips them
+  from the line and hands them to `C7`, which validates each (it must exist
+  and be an image) and attaches it to that goal only; a bad token is
+  reported locally and the goal is not submitted. `/help` notes the syntax,
+  and the automate surface accepts the same tokens.
 - **Output channels.** Answers (streamed or whole) go to stdout; reasoning,
   diagnostics, the plan, status, and errors go to stderr, so stdout stays
   machine-readable even on the human surface.
@@ -207,21 +218,17 @@ and is not offered here.
   into a brief on demand (C4), even below the automatic watermark, then
   reports the same `↺ compacted …` line. It works on both surfaces; a session
   with nothing foldable reports that instead of making a call.
-- **Outside-workspace authorization.** A guard denial (C3) on the human
-  surface stops the run and asks in place, e.g.
-  `⚠ read needs to reach outside the workspace … [y/N]`. `y` opens the guard
-  for the rest of the session and retries the call immediately; `n`, `Enter`,
-  or `Esc` blocks as before. The grant lasts for the session and is not
-  persisted; automation never prompts.
 - **Verbose diagnostics.** `/verbose on` makes each component report its
   internal routing and behavior as `[C1]`–`[C8]`-tagged lines on stderr: the
   run/session/provider selection, the assembled prompt fit (`C4`), the tool
   call and its evaluated result (`C3`), plan updates and progress/stall
   accounting (`C1`), guard timeouts (`C8`), and the final status. It is off by default
   and never touches stdout.
-- **Exit codes.** A clean exit is zero; a non-zero code is reserved for a
-  fatal startup or configuration error. Per-run outcomes are reported as
-  status, not exit codes.
+- **Exit codes.** Zero on a clean exit — any final run status that delivered
+  an answer, `incomplete` included. Non-zero on a fatal startup or
+  configuration error, or when the final run is `blocked` and delivered
+  nothing. Complete and incomplete are still reported as status, not exit
+  codes.
 - **Cancellation.** A run is aborted at once (C8) — a model request is cut off
   mid-stream and a running command is killed — so the surface returns
   immediately instead of waiting for the model to finish; the session and its

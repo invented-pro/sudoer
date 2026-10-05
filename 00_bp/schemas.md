@@ -1,6 +1,6 @@
 # Prop Schemas
 
-> Status: draft · Version 0.4 · **Current tier: Prop**
+> Status: draft · Version 0.5 · **Current tier: Prop**
 
 These are the frozen interface contracts for the Prop agent
 ([agent_prop.md](agent_prop.md)). Each component is built against them;
@@ -58,12 +58,15 @@ appear on the per-step path.
 
 Normative; each is grounded in a component doc.
 
-- **Transcript shape.** A transcript begins with a `userEntry` and then
-  alternates `assistantEntry` and `observationEntry`; `C1` appends
-  `(thought, action, observation)` each iteration. The transcript belongs to
-  the session (`C5`), so it spans runs. Context (`C4`) pins the current goal
-  and plan and compacts the oldest entries into a summary to fit the window;
-  the stored transcript is unchanged.
+- **Transcript shape.** A transcript begins with a `userEntry`; an
+  `assistantEntry` is followed by its `observationEntry`s, and `C1` appends
+  `(thought, action, observations)` each iteration. A *harness* observation —
+  a provider timeout or cancel, with no `tool_call_id` — may stand alone
+  without a preceding `assistantEntry` and is replayed to the provider as a
+  user message (`C2`). The transcript belongs to the session (`C5`), so it
+  spans runs. Context (`C4`) pins the current goal and plan and compacts the
+  oldest entries into a summary to fit the window; the stored transcript is
+  unchanged.
 - **Plan.** A session carries a `plan`: a small ordered list of `planItem`.
   A completion may include a `plan`, which replaces it (`C1`). The plan is
   persisted with the session (`C5`). A provider populates `completion.plan`

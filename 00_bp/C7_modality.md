@@ -1,6 +1,6 @@
 # C7 — Modality
 
-> Status: draft · Version 0.3 · **Current tier: Prop**
+> Status: draft · Version 0.4 · **Current tier: Prop**
 
 Modality is the shape of information crossing the boundary: `C7` defines
 what kinds of input the agent accepts and what kinds of output it produces.
@@ -74,7 +74,9 @@ stop
   coding-required image path is enabled at Prop.
 - **Normalized input.** The interface (C6) parses raw input, then modality
   trims and decodes it to text before the loop runs; no structured payloads,
-  and the only binary input is a coding task's image.
+  and the only binary input is a coding task's image, which arrives as an
+  `@path` token on the goal line (C6) — stripped from the text, validated
+  (the path must exist and be an image file), and attached for that goal.
 - **Plain rendering.** The answer is emitted as plain text; no rich
   rendering is required of the caller.
 - **Provider modality.** The provider (C2) is asked for text completions,
@@ -82,6 +84,7 @@ stop
 - **No file attachments.** Files are not accepted as input; the agent reaches
   files through tools (C3). An image a coding task supplies (e.g. a
   screenshot) is the one attachment routed through.
-- **Image attachment.** A coding task's image is passed to the provider
-  request as an attachment; the transcript keeps a text reference only, and
-  the binary is not stored in the session.
+- **Image attachment.** A coding task's image — supplied as an `@path` token
+  (C6) — is passed to that goal's provider requests as an attachment; the
+  transcript keeps a text reference only, and the binary is not stored in the
+  session.

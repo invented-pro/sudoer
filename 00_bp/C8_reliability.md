@@ -1,6 +1,6 @@
 # C8 — Reliability
 
-> Status: draft · Version 0.6 · **Current tier: Prop**
+> Status: draft · Version 0.7 · **Current tier: Prop**
 
 Reliability is what keeps a run bounded and recoverable: `C8` defines the
 guardrails around every step and the rules for turning failures into
@@ -13,7 +13,7 @@ Every tier runs the loop under the same guardrails, and every provider and
 tool call passes through them. The tiers differ in how much recovery and
 observability is added: a progress-driven budget, per-tool-class timeouts,
 in-loop retry, and cancellation at Prop; structured logs, provider
-retry/backoff, and concurrency at Pilot; tracing, cost accounting, and
+retry/backoff, and concurrent runs at Pilot; tracing, cost accounting, and
 self-heal at Orbit.
 
 ```plantuml
@@ -130,4 +130,5 @@ endif
   answer is marked incomplete (C1). If that call fails or comes back empty,
   the answer falls back to a local summary of the plan and last observation.
 - **No logging or backoff.** Structured logs, provider retry/backoff, and
-  concurrency are Pilot concerns.
+  concurrent *runs* are Pilot concerns; at Prop the only parallelism is the
+  read-only calls within one step (*Batch steps*).

@@ -48,15 +48,13 @@ final class PropAgent {
     Session? session,
     List<String>? callLog,
     Diagnostics? diagnostics,
-    Future<bool> Function(String tool, String reason)? authorize,
     JobRegistry? jobs,
     Reliability? reliability,
   }) {
     final diag = diagnostics ?? Diagnostics.silent;
     final current =
         session ?? Session.create(workspaceRoot: config.workspaceRoot);
-    final guard = WorkspaceGuard(config.workspaceRoot)
-      ..allowOutside = current.allowOutsideWorkspace;
+    final guard = WorkspaceGuard(config.workspaceRoot);
     final network = NetworkGuard(
       enabled: config.web.enabled,
       denyHosts: config.web.denyHosts,
@@ -87,7 +85,6 @@ final class PropAgent {
       tools: tools,
       context: context,
       reliability: reliability ?? const Reliability(),
-      authorize: authorize,
       diagnostics: diag,
     );
     return PropAgent._(
