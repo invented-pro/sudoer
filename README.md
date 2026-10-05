@@ -8,6 +8,8 @@ Every single behavior in Sudoer is fully traceable to a human-authored blueprint
 
 <img src="loop.png" alt="Loop Diagram" width="100%" />
 
+> **Viewing the diagrams** — every diagram in this repository is authored in [PlantUML](https://plantuml.com) (the fenced `plantuml` blocks throughout [`00_bp/`](00_bp/)). GitHub renders them as plain code blocks; to view them rendered, open the docs in VS Code with the [PlantUML Local](https://marketplace.visualstudio.com/items?itemName=kkdev92.plantuml-local) extension (local rendering — no diagram ever leaves your machine).
+
 ---
 
 ## Highlights
@@ -99,14 +101,35 @@ The **Prop** agent compiles as a standalone single binary executable that functi
 * **Automate Mode:** Activated with the `--automate` flag. This runs unattended batching scripts to execute the autonomous compilation and implementation routines for **Pilot** and **Orbit**.
 
 #### **Pilot**
-*TODO: Add configuration parameters and local API surface endpoints.*
+*In-progress*
 
 #### **Orbit**
-*TODO: Add cross-platform agent communication layer documentation.*
+*Roadmap*
 
 ---
 
-## Repository Layout
+## Community
+
+* **Discussions:** [GitHub Discussions](https://github.com/invented-pro/sudoer/discussions)
+* **Contributing:** pull requests are welcome. First-time contributors sign the [CLA](./CLA.md) once with a single PR comment.
+
+---
+
+## Contributors
+
+Thanks to everyone who contributes to Sudoer — code, blueprints, docs, and ideas all count.
+
+<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+*(contributor list — populated as the first contributions land)*
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+<!-- ALL-CONTRIBUTORS-LIST:END -->
+
+Want to join them? Start here:
+
+### Repository Layout
 
 The Sudoer repository functions as a unidirectional engineering pipeline. Source code lives exclusively within the `10_impl/` directory:
 
@@ -117,9 +140,7 @@ The Sudoer repository functions as a unidirectional engineering pipeline. Source
 └── 90_dist/     # Deployment pipelines, compilers, and production packaging artifacts.
 ```
 
----
-
-## Workflow: Blueprint First
+### Workflow: Blueprint First
 
 This is a blueprint-driven project, but the blueprint is not magic: at the current **Prop** stage two surfaces are managed by hand.
 
@@ -134,14 +155,7 @@ Always, in order:
 
 Higher tiers are *not* hand-written. Once Prop can self-host, the intent is that Prop generates and implements Pilot, and Pilot generates Orbit, so their code becomes a downstream consequence of the blueprint — fix the structural rule there rather than editing generated output by hand.
 
-Keep the frozen wire schemas frozen: new runtime-only fields must not enter `toJson`.
 
----
-
-## Community
-
-* **Discussions:** [GitHub Discussions](https://github.com/invented-pro/sudoer/discussions)
-* **Contributing:** pull requests are welcome. First-time contributors sign the [CLA](./CLA.md) once with a single PR comment.
 
 ---
 
