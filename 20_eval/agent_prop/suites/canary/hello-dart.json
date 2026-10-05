@@ -1,0 +1,12 @@
+{
+  "id": "hello-dart",
+  "description": "Canary: create a trivial script and verify by running it. Exercises write, run_command, and finish.",
+  "goal": "Create hello.dart so that running `dart hello.dart` prints exactly: Hello, Prop!  Verify by running it before you finish.",
+  "check": {
+    "finished": true,
+    "files": { "hello.dart": { "contains": "Hello, Prop!" } },
+    "command": "dart hello.dart",
+    "commandContains": "Hello, Prop!",
+    "maxSteps": 12
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "fix-wrong-total",
+  "description": "Canary: read a small buggy script, fix it minimally, verify by running. Exercises read, edit, run_command.",
+  "workspace": {
+    "total.dart": "void main() {\n  const n = 9; // amount of numbers to sum\n  var total = 0;\n  for (var i = 1; i <= n; i++) {\n    total += i;\n  }\n  print('total: $total');\n}\n"
+  },
+  "goal": "total.dart is supposed to print `total: 55` (the sum 1..10) but prints the wrong number. Find the bug, fix it with the smallest change, and verify by running `dart total.dart`.",
+  "check": {
+    "finished": true,
+    "command": "dart total.dart",
+    "commandContains": "total: 55",
+    "maxSteps": 12,
+    "maxErrors": 2
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "sum-to-summary",
+  "description": "Canary: aggregate data from a file into a new file with exact content. Exercises read, write, arithmetic.",
+  "workspace": {
+    "data.txt": "12\n7\n3\n40\n15\n22\n8\n"
+  },
+  "goal": "data.txt holds one integer per line. Create summary.txt containing exactly one line: `sum: <N>` where N is the sum of those integers. Verify your result before finishing.",
+  "check": {
+    "finished": true,
+    "files": { "summary.txt": { "equals": "sum: 107" } },
+    "maxSteps": 12
+  }
+}

@@ -1,0 +1,14 @@
+[tools]
+dart = "3.13.5"
+
+[tasks."eval:run"]
+description = "Run a live eval suite against one agent binary (extra args pass through to run.dart)"
+run = "dart run tools/run.dart"
+
+[tasks."eval:check"]
+description = "Score recorded runs against their task checks (extra args pass through to check.dart)"
+run = "dart run tools/check.dart"
+
+[tasks."eval:compare"]
+description = "Compare two recorded versions and write a report (extra args pass through to compare.dart)"
+run = "dart run tools/compare.dart"

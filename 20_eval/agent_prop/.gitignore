@@ -1,0 +1,4 @@
+# Eval artifacts are local; only suites, tools, and reports/ are tracked.
+runs/
+versions/
+tmp/
