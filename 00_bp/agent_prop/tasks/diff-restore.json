@@ -1,0 +1,40 @@
+{
+  "id": "diff-restore",
+  "description": "A write is reviewed with diff and undone with restore against the session baseline.",
+  "goal": "Change a.txt, review the change, then undo it.",
+  "workspace": { "a.txt": "orig\n" },
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "Changing the file.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "write", "arguments": { "path": "a.txt", "content": "changed\n" } }
+          ]
+        }
+      },
+      {
+        "complete": {
+          "text": "Reviewing the change.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "diff", "arguments": { "path": "a.txt" } }
+          ]
+        }
+      },
+      {
+        "complete": {
+          "text": "Undoing it.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "restore", "arguments": { "path": "a.txt" } }
+          ]
+        }
+      },
+      { "complete": { "text": "done" } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "files": { "a.txt": "orig\n" },
+    "tools": ["write", "diff", "restore"]
+  }
+}

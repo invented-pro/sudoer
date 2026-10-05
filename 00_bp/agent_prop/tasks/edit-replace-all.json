@@ -1,0 +1,24 @@
+{
+  "id": "edit-replace-all",
+  "description": "replace_all rewrites every occurrence; exercises edit replace_all.",
+  "goal": "Replace every 'x' in a.txt with 'y'.",
+  "workspace": { "a.txt": "x x x\n" },
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "Replacing all occurrences.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "edit", "arguments": { "path": "a.txt", "old": "x", "new": "y", "replace_all": true } }
+          ]
+        }
+      },
+      { "complete": { "text": "done" } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "files": { "a.txt": "y y y\n" },
+    "tools": ["edit"]
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "id": "search",
+  "description": "search finds a pattern across workspace files; exercises the search tool.",
+  "goal": "Find where TODO appears.",
+  "workspace": { "a.txt": "ok\nTODO: fix\n", "b.txt": "clean\n" },
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "Searching.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "search", "arguments": { "pattern": "TODO" } }
+          ]
+        }
+      },
+      { "complete": { "text": "a.txt" } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "answer": { "equals": "a.txt" },
+    "tools": ["search"],
+    "observations": ["a.txt"]
+  }
+}

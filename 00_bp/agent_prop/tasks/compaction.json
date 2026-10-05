@@ -1,0 +1,56 @@
+{
+  "id": "compaction",
+  "description": "A second goal crosses the 75% watermark at a goal boundary; the older work folds into a scripted brief (one tools-withheld provider call) and the session continues.",
+  "turns": [
+    { "goal": "Run the report and read note.txt." },
+    { "goal": "Read note.txt again." }
+  ],
+  "workspace": { "note.txt": "note content\n" },
+  "config": { "provider": { "context_window": 3600 } },
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "running",
+          "tool_calls": [
+            {
+              "type": "tool_call",
+              "name": "run_command",
+              "arguments": {
+                "command": "i=0; while [ $i -lt 450 ]; do echo \"report line $i\"; i=$((i+1)); done"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "complete": {
+          "text": "reading",
+          "tool_calls": [
+            { "type": "tool_call", "name": "read", "arguments": { "path": "note.txt" } }
+          ]
+        }
+      },
+      { "complete": { "text": "done" } },
+      { "complete": { "text": "BRIEF: ran the report; read note.txt" } },
+      {
+        "complete": {
+          "text": "reading again",
+          "tool_calls": [
+            { "type": "tool_call", "name": "read", "arguments": { "path": "note.txt" } }
+          ]
+        }
+      },
+      { "complete": { "text": "second answer" } }
+    ]
+  },
+  "expect": {
+    "runs": [
+      { "status": "complete", "answer": { "equals": "done" } },
+      { "status": "complete", "answer": { "equals": "second answer" } }
+    ],
+    "tools": ["run_command", "read", "read"],
+    "observations": ["report line 449", "note content", "note content"],
+    "sessionPersisted": true
+  }
+}

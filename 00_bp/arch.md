@@ -75,6 +75,14 @@ the same component list (`C1`–`C16`), so the scopes stack: `Pilot` includes
 every `Prop` capability, and the implementation of a higher tier is a
 superset of the lower one's.
 
+A tier's scope is its **usage domain, not a capability budget**. `Prop` owns
+the coding domain without limit: anything coding requires belongs to `Prop`
+and is driven to top-niche quality there, even when the mechanism is one the
+component map first names at a higher tier. `Pilot` and `Orbit` do not add
+coding power; they add domains — everyday personal tasks, then autonomous
+long-horizon work. A lower tier is never forbidden a mechanism its own domain
+needs.
+
 ```plantuml
 @startuml
 skinparam backgroundColor transparent
@@ -215,7 +223,7 @@ multi-device sync, lineage
 ;
 ***:
 **interface** (C6)
-gateway daemon, TUI/desktop, chat apps, IDE
+gateway daemon, TUI/desktop, chat apps
 ;
 ***:
 **modality** (C7)
@@ -231,7 +239,7 @@ vector / semantic long-term store, pluggable
 ;
 ***:
 **safety** (C10)
-scoped capabilities, sandbox isolation, audit log
+configurable policy, scoped capabilities, audit log
 ;
 ***:
 **autonomy** (C11)
@@ -266,6 +274,22 @@ on one horizon (`loop` is always `C1`, `sessions` always `C5`, and so on).
 This component map is the *implementation* view; the tier names and the table
 above are the *function* view. Prop enforces a fixed set of built-in guards;
 `safety` (`C10`) is where those become configurable policy.
+
+The numbering is therefore an *introduction order*, not a scope fence. When a
+mechanism first named at a higher component is required for coding, `Prop`
+implements it at `Prop` and holds it to top-niche quality; it does not wait
+for that component's tier. The cross-cutting coding mechanisms today are:
+
+| Coding need | Mechanism | Component that first named it | Tier that owns it |
+| --- | --- | --- | --- |
+| parallel exploration / context isolation | subagents | `C13` multi-agent | Prop |
+| isolated build & test execution | execution backends (sandbox) | `C12` execution | Prop |
+| dev-tool integration (LSP, linters, debuggers) | MCP client | `C14` extensibility | Prop |
+| UI / frontend visual inspection | vision input | `C7` modality | Prop |
+
+Only a mechanism whose purpose is a *higher domain* — personal connectors,
+general user-authored plugins, audio, multi-device sync, autonomous
+scheduling — is withheld from `Prop`.
 
 ## Build ladder
 
@@ -333,11 +357,17 @@ code it writes; it must not be one-shot or memoryless.
   This is the shipping target.
 - **Orbit** — autonomy, long-horizon: everything Pilot does, plus fully
   autonomous execution of super-long multi-step tasks, a distinct style and
-  voice, skills grown from experience, connectors, sandboxing, extensibility,
-  access control, and multi-agent. Out of scope until Pilot is solid; never
-  faked (no stubs or placeholders).
+  voice, skills grown from experience, connectors, extensibility, access
+  control, and multi-agent. Sandboxing that serves coding is Prop's, not
+  reserved here. Out of scope until Pilot is solid; never faked (no stubs or
+  placeholders).
 
-> Scope boundaries are normative. The implementation MUST NOT implement a
-> tier higher than the current one (`Prop`, declared at the top of this
-> document); a tier becomes current only when this document is updated to
-> promote it.
+> Scope boundaries are normative, but they bound the *usage domain*, not the
+> capability. The implementation MUST NOT implement a usage domain beyond the
+> current one — `Prop` must not become a personal assistant (`Pilot`) or an
+> autonomous long-horizon scheduler (`Orbit`) — and a tier becomes current
+> only when this document is updated to promote it. Within its domain it has
+> no ceiling: `Prop` MUST implement any capability coding requires, including
+> a mechanism a higher component first names, and drive it to top-niche
+> quality. Withholding a coding-required capability from `Prop` is a Prop
+> defect, not a scope rule.

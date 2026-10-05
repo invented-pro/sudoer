@@ -1,0 +1,25 @@
+{
+  "id": "read-range",
+  "description": "Read a line range of a file; exercises read offset/limit.",
+  "goal": "Read lines 2 and 3 of data.txt.",
+  "workspace": { "data.txt": "L0\nL1\nL2\nL3\n" },
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "Reading the range.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "read", "arguments": { "path": "data.txt", "offset": 1, "limit": 2 } }
+          ]
+        }
+      },
+      { "complete": { "text": "L1 and L2" } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "answer": { "equals": "L1 and L2" },
+    "tools": ["read"],
+    "observations": ["L1\nL2"]
+  }
+}

@@ -34,6 +34,18 @@
           "description": "Model context size in tokens, used by context fitting (C4).",
           "type": "integer",
           "minimum": 1
+        },
+        "sampling": {
+          "description": "Optional sampling parameters for the configured model (C2), sent where the adapter supports them; omitted keys use the endpoint defaults.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "temperature": { "type": "number", "minimum": 0, "maximum": 2 },
+            "top_p": { "type": "number", "minimum": 0, "maximum": 1 },
+            "top_k": { "type": "integer", "minimum": 1 },
+            "seed": { "type": "integer" },
+            "max_tokens": { "type": "integer", "minimum": 1 }
+          }
         }
       },
       "allOf": [

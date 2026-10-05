@@ -1,0 +1,25 @@
+{
+  "id": "run-command",
+  "description": "run_command has a workspace effect and observable output; assumes the POSIX host shell.",
+  "goal": "Use a command to write out.txt with 'built' and print it.",
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "Running the command.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "run_command", "arguments": { "command": "printf built > out.txt; printf built" } }
+          ]
+        }
+      },
+      { "complete": { "text": "built" } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "answer": { "equals": "built" },
+    "files": { "out.txt": "built" },
+    "tools": ["run_command"],
+    "observations": ["built"]
+  }
+}

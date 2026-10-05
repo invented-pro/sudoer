@@ -1,0 +1,34 @@
+{
+  "id": "multi-edit",
+  "description": "multi_edit applies an ordered batch of edits in one step.",
+  "goal": "In a.txt replace foo with baz everywhere and bar with qux.",
+  "workspace": { "a.txt": "foo\nbar\nfoo\n" },
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "Batching the edits.",
+          "tool_calls": [
+            {
+              "type": "tool_call",
+              "name": "multi_edit",
+              "arguments": {
+                "path": "a.txt",
+                "edits": [
+                  { "old": "foo", "new": "baz", "replace_all": true },
+                  { "old": "bar", "new": "qux" }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      { "complete": { "text": "done" } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "files": { "a.txt": "baz\nqux\nbaz\n" },
+    "tools": ["multi_edit"]
+  }
+}

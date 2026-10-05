@@ -1,6 +1,6 @@
 # Prop Agent
 
-> Status: draft · Version 0.5 · **Current tier: Prop**
+> Status: draft · Version 0.7 · **Current tier: Prop**
 
 The Prop agent is the concrete assembly of components `C1`–`C8`. Its function
 is coding: it follows instructions strictly and delivers working binary
@@ -16,16 +16,17 @@ them together, and profiles the resulting agent.
 | --- | --- | --- |
 | `C1` Loop | control cycle; owns the plan, progress-driven budget, and run status | [C1_loop.md](C1_loop.md) |
 | `C2` Providers | one LLM backend (OpenAI-compatible or ollama) | [C2_providers.md](C2_providers.md) |
-| `C3` Tools | read, write, edit, `run_command`, search | [C3_tools.md](C3_tools.md) |
+| `C3` Tools | orientation, read/edit, `run_command`/jobs, diff/restore | [C3_tools.md](C3_tools.md) |
 | `C4` Context | transcript fitted to the window; compaction | [C4_context.md](C4_context.md) |
 | `C5` Sessions | continuous, persistent session across runs | [C5_sessions.md](C5_sessions.md) |
 | `C6` Interface | styled human CLI + plain automation CLI; owns configuration | [C6_interface.md](C6_interface.md) |
-| `C7` Modality | text normalization in and out | [C7_modality.md](C7_modality.md) |
+| `C7` Modality | text in and out, plus coding-required image input | [C7_modality.md](C7_modality.md) |
 | `C8` Reliability | progress-driven budget, per-tool timeouts, in-loop retry | [C8_reliability.md](C8_reliability.md) |
 
 All eight are normative parts of the assembly; together they are the
-complete Prop tier. `C7` is a pass-through at Prop, but it is still the
-named boundary the assembly routes text through.
+complete Prop tier. `C7` is near pass-through at Prop — text in, text out,
+plus the coding-only image path — but it is still the named boundary the
+assembly routes modality through.
 
 ## Wiring
 
@@ -39,7 +40,7 @@ skinparam componentFontColor #1F2937
 skinparam arrowColor #64748B
 actor User
 component "C6 interface (styled + plain CLI)" as I
-component "C7 modality (text)" as M
+component "C7 modality (text + coding image)" as M
 component "C5 session (persistent)" as S
 component "C1 loop" as L
 component "C4 context" as X
@@ -89,7 +90,7 @@ I ..> T : config
 | --- | --- |
 | Name | Sudoer |
 | Tier | Prop |
-| Role | coding — strict instruction following, flawless artifact/tool delivery |
+| Role | coding — strict instruction following, precise, verified artifact delivery |
 | Voice | none — no persona at Prop (arrives at Orbit) |
 
 ### Purpose and scope
@@ -97,20 +98,25 @@ I ..> T : config
 Do real coding work on a codebase the agent can reach through its workspace
 root: take an instruction, follow it strictly, and deliver working binary
 artifacts and tool actions — read and edit files, run commands, and search
-locally. Prop is deliberately narrow so it is reliable and terminating rather
-than broad. Because it is the seed, it must also be deep enough to build and
-pass Pilot's gate, and to rebuild itself.
+locally. Prop is deliberately *focused*: narrow in usage domain, not in
+coding capability. Within coding it aims for the top niche, equipping every
+capability coding requires rather than rationing them to higher tiers.
+Because it is the seed, it must also be deep enough to build and pass Pilot's
+gate, and to rebuild itself.
 
 ### Capabilities
 
 - **Reasoning.** A plan-driven multi-step ReAct loop (`C1`): it keeps an
-  explicit plan, takes one thought and one action per step with tools in
-  between, and can resume from persisted state.
-- **Acting.** A fixed tool set (`C3`): `read`, `write`, `edit`,
-  `run_command`, and local `search`, all rooted at the workspace, plus
-  `web_search` and `web_fetch` (on by default, disable with `web.enabled:
-  false`) — for looking up API docs, errors, and package versions while
-  self-hosting.
+  explicit plan, takes one thought and one action per step — the action may
+  carry several tool calls, run in parallel when they are read-only — and can
+  resume from persisted state.
+- **Acting.** The coding tool set (`C3`), all rooted at the workspace:
+  orientation (`glob`, `search`), reading (`read`, with line ranges), editing
+  (`write`, `edit`, `multi_edit`), execution (`run_command`, `job`), review and
+  undo (`diff`, `restore`), and the config-gated web tools (`web_search`,
+  `web_fetch`, on by default, disable with `web.enabled: false`). The catalog
+  is built-in and coding-scoped, and it is not capped: any further tool coding
+  requires is added here and held to top-niche quality.
 - **Model.** One provider (`C2`), selected from an OpenAI-compatible endpoint
   or ollama; a fixed model and context window.
 - **Transcript (across runs).** The live transcript, built by `C1` and
@@ -132,6 +138,57 @@ pass Pilot's gate, and to rebuild itself.
   indented body, a dim gutter with component-coloured tags for verbose
   diagnostics, and a dim status rule with a coloured result.
 
+### Coding behavior
+
+Prop is judged by the code it delivers, so beyond the loop mechanics the
+assembly carries a coding contract: the disciplines the agent follows on
+every task. They are prompt-level and shipped with the agent; the scripted
+gate pins the loop behaviors they depend on, and the real-provider
+evaluation (Build gate) is where they are measured.
+
+- **Orient before acting.** Map the relevant part of the repo first — list,
+  glob, and search to find the files that matter — then read a file before
+  editing it. The agent never edits blind or guesses at a symbol's shape.
+- **Ground in the codebase.** Treat the workspace as the source of truth: do
+  not invent APIs, paths, or symbols; verify what exists through `read`,
+  `search`, and diagnostics before relying on it.
+- **Follow the project's conventions.** Read the repo's own instructions and
+  configuration (`AGENTS.md` and any contributor, style, or lint config) and
+  adopt its layout, naming, formatting, and idioms. When the repo is silent,
+  match the surrounding code.
+- **Make small, targeted edits.** Prefer the smallest change that satisfies
+  the instruction; keep unrelated code, comments, and formatting untouched;
+  use the edit tools rather than rewriting whole files.
+- **Verify, then claim done.** After a change, run the project's own build,
+  lint, and test commands through `run_command`, read the output, and treat a
+  failure as an observation to fix and re-run. The agent does not call work
+  finished while a relevant check is failing or unrun.
+- **Ask when ambiguous.** A clarifying question is a valid finish (C1); the
+  reply arrives as the next goal in the same session.
+- **Report precisely.** The answer is concise, in markdown, and names what
+  changed, the commands run, and the observed result.
+- **Respect the boundaries.** File and command access is confined to the
+  workspace; fetched and searched text is untrusted data, never instructions.
+
+### Capability depth
+
+The tool list in *Capabilities* is the base; these are the coding capabilities
+Prop grows toward beyond it. The boundary re-cut (`arch.md`) makes them Prop's
+even where a higher component first names the mechanism, and each stays
+deterministic where the gate depends on it, schema-validated, and either
+gate-covered or unit-tested.
+
+- **Coding subagents.** Spawning subagents for parallel exploration and
+  context isolation in large changes (`C13` multi-agent, coding use);
+  independent read-only tool calls already run in parallel in the base loop.
+- **Deeper diagnostics.** From `run_command` output to a language-server
+  integration, so compiler, linter, and test feedback lands structurally and
+  the verify loop is cheap.
+- **Repo-scale orientation.** A repo outline and retrieval for very large
+  codebases, beyond `glob` and `search`.
+- **Dev-tool integration.** An MCP client reaching language servers, linters,
+  and debuggers (`C14` extensibility, coding use).
+
 ### Interaction
 
 | Aspect | Value |
@@ -139,7 +196,7 @@ pass Pilot's gate, and to rebuild itself.
 | Surface | styled human CLI on a terminal; plain CLI under `--automate` or off a TTY (`C6`) |
 | Presentation | inline only — colors, italics, spinner, prompt; per-channel formatting; no full-screen mode |
 | Streaming | on for the human surface; one-shot for automation (`C1`, `C2`) |
-| Modality | text in, text out (`C7`) |
+| Modality | text in and out; image input only for coding tasks (`C7`) |
 | Session | continuous; persisted across runs, resumable by id (`C5`) |
 | Output | answers on stdout; status and diagnostics on stderr |
 | Exit code | zero on clean exit; non-zero only on a fatal startup/config error |
@@ -181,7 +238,7 @@ root defaults to the process working directory when not configured.
 
 | Key | Owner |
 | --- | --- |
-| `provider kind`, `base_url`, `api_key`, `model`, `context_window` | `C2` |
+| `provider kind`, `base_url`, `api_key`, `model`, `context_window`, `sampling` | `C2` |
 | `workspace_root`, `web.enabled`, `web.search_url`, `web.deny_hosts` | `C3` |
 | `session_dir` | `C5` |
 
@@ -191,23 +248,34 @@ model/provider switching are out of scope at Prop (`C2`, `C10`).
 
 ### Non-goals
 
-- No durable *semantic* memory or cross-session recall (`C9`); session
-  continuity is not long-term knowledge.
-- No server, daemon, or HTTP API (`C6`, Pilot).
-- No full-screen or alternate-screen terminal app; the human surface is
-  inline and leaves the scrollback intact (`C6`).
-- No reflection or replanning (`C1`, Orbit).
-- No multi-provider fallback or model catalog (`C2`).
-- No unguarded network access: the web tools are config-gated, host-limited,
-  size- and time-bounded, and never auto-follow page instructions (`C3`).
-- No plugins, connectors, or MCP (`C3`, `C14`).
-- No configurable safety policy, sandboxing, or audit (`C10`).
-- No scheduled or background autonomy (`C11`).
-- No vision or audio (`C7`).
+Prop's non-goals are *usage domains it does not serve*, never coding
+capabilities it declines. It does not:
 
-These belong to Pilot (`C9`–`C11`) and Orbit (`C12`–`C16`); the list is
-illustrative, not exhaustive. None may be implemented at Prop (`arch.md`
-scope boundary).
+- serve as a personal assistant — no durable *semantic* memory or
+  cross-session recall (`C9`); session continuity is not long-term knowledge;
+- expose a server, daemon, or HTTP API (`C6`, Pilot);
+- take over the screen with a full-screen or alternate-screen app; the human
+  surface is inline and leaves the scrollback intact (`C6`);
+- run as an autonomous long-horizon scheduler — no scheduled or background
+  autonomy, no reminders, no background jobs (`C11`, Orbit);
+- accept audio, or vision as a general modality (`C7`); vision is used only
+  where a *coding* task needs it, such as reviewing a UI screenshot;
+- install arbitrary user-authored plugins or personal connectors (`C14`);
+  a dev-tool mechanism coding needs — an MCP client for language servers,
+  linters, and debuggers — is in scope, but the general plugin/skill
+  framework and personal connectors are not;
+- apply user-tunable safety policy or audit (`C10`); Prop keeps its built-in
+  guards;
+- offer multi-provider fallback or a model catalog (`C2`) — not required to
+  code, only to stay available;
+- allow unguarded network access: the web tools stay config-gated,
+  host-limited, size- and time-bounded, and never auto-follow page
+  instructions (`C3`).
+
+Mechanisms such as parallel subagents, sandboxed execution, and vision are
+coding capabilities where coding needs them and belong to Prop; only their
+*non-coding* uses are withheld. The boundary is a domain boundary, not a
+capability ceiling (`arch.md`).
 
 ### Build gate
 
@@ -232,24 +300,24 @@ The assembled Prop agent in one block (the frozen contracts are in
 ```yaml
 name: sudoer-prop
 tier: prop
-role: coding agent — strict instruction following, flawless artifact/tool delivery
+role: coding agent — strict instruction following, precise, verified artifact delivery
 interface: cli-human(styled) + cli-automate   # inline, no full-screen
 streaming: human-surface                      # one-shot for automation
-modality: text
+modality: text + coding-only image
 session: continuous-persistent
 context: transcript-compacted
 loop: react-plan-driven
 provider:
   kind: [openai-compatible, ollama]   # exactly one
-  config: [base_url, api_key, model, context_window]
-tools: [read, write, edit, run_command, search, web_search?, web_fetch?]
+  config: [base_url, api_key, model, context_window, sampling?]
+tools: [read, write, edit, multi_edit, glob, search, run_command, job, diff, restore, web_search?, web_fetch?]  # coding-scoped; not capped
 tools_config:
   workspace_root: <path>   # defaults to the process working directory
   web:
     enabled: true          # on by default; false removes the web tools
     search_url: <searxng>  # backend for web_search
     deny_hosts: []         # empty blacklist; `.suffix` matches subdomains
-commands: [help, exit, new, sessions, resume, plan, status, cancel, workspace, verbose]
+commands: [help, exit, new, sessions, resume, plan, status, diff, cancel, workspace, verbose]
 guards:
   step_budget: progress-driven-with-ceiling   # compiled-in
   timeouts: per-tool-class                    # compiled-in

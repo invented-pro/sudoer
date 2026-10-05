@@ -15,6 +15,10 @@
     "created_at": { "type": "string", "format": "date-time" },
     "updated_at": { "type": "string", "format": "date-time" },
     "workspace_root": { "type": "string", "minLength": 1 },
+    "baseline": {
+      "description": "Opaque handle to the workspace baseline captured at session open, backing diff/restore (C3).",
+      "type": "string"
+    },
     "plan": {
       "description": "The agent's plan (C1): a small ordered task list.",
       "type": "array",

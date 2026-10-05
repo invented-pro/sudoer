@@ -1,6 +1,6 @@
 # C6 — Interface
 
-> Status: draft · Version 1.3 · **Current tier: Prop**
+> Status: draft · Version 1.4 · **Current tier: Prop**
 
 The interface is how a human reaches the agent: `C6` is the surface that
 takes a goal in and puts an answer out. The loop is the engine; the
@@ -12,7 +12,7 @@ Every tier exposes the agent through some surface, and every surface funnels
 into the same session (C5) and loop (C1) with a goal and an answer. The
 tiers differ in the surfaces offered: a human terminal UI and a line CLI for
 automation at Prop, an HTTP API beside them at Pilot, and a gateway
-daemon with desktop, chat, and IDE clients at Orbit.
+daemon with desktop and chat clients at Orbit.
 
 ```plantuml
 @startuml
@@ -95,6 +95,7 @@ repeat while (still running?) is (yes)
 | `/resume <id>` | switch to a saved session |
 | `/plan` | print the current plan (C1) |
 | `/status` | print the current run status and budget use (C1, C8) |
+| `/diff` | show the workspace's changes against the session baseline (C3) |
 | `/cancel` | cancel the in-flight run (C1, C8); automate surface only |
 | `/compact` | fold earlier context into a brief now (C4) |
 | `/workspace [path]` | print or change the workspace root (C3) |
@@ -251,7 +252,7 @@ process exits non-zero. The user can create the file in place and retry.
 
 | Key | Owner |
 | --- | --- |
-| `provider kind`, `base_url`, `api_key`, `model`, `context_window` | providers (C2) |
+| `provider kind`, `base_url`, `api_key`, `model`, `context_window`, `sampling` | providers (C2) |
 | `workspace_root`, `web.enabled`, `web.search_url`, `web.deny_hosts` | tools (C3) |
 | `session_dir` | sessions (C5) |
 

@@ -1,6 +1,6 @@
 # Prop Build Gate
 
-> Status: draft · Version 0.4 · **Current tier: Prop**
+> Status: draft · Version 0.6 · **Current tier: Prop**
 
 The gate is how Prop is judged done. Per [arch.md](../arch.md), every rung
 must pass its eval suite before it may build the next: the gate is a fixed
@@ -34,7 +34,13 @@ blueprint change, not a test bug.
   gate injects it after wire parsing, so `<think>` extraction itself is
   unit-tested per adapter, not here.
 - A task scripts every call the session makes, including the best-effort
-  call after the run stalls or hits the step ceiling.
+  call after a run stalls or hits the step ceiling and the tools-withheld
+  summarization call when compaction fires (the watermark is reached
+  deterministically via a small `context_window` override and bulk
+  `run_command` output, whose tokens are not re-fetchable and so do count).
+- A completion may carry several `tool_calls` (`C1`): the suite exercises
+  both a single call and a batch, and read-only calls in a batch run in
+  parallel. The ordered tool-call log records every call and its observation.
 - No network, no wall-clock: identical output every run.
 - **Web tools stay out of scope.** The gate config sets `web.enabled: false`,
   so the web tools are not assembled and no task can reach the network. Their
@@ -45,6 +51,11 @@ blueprint change, not a test bug.
   is out of gate scope and unit-tested per adapter. It does exercise `C2`'s
   completion-to-action normalization, including *no tool call becomes a
   finish*.
+- **Other out-of-gate behavior.** `job` needs runtime-generated ids and
+  timing, and the host shell is platform-specific; background jobs and the
+  Windows/macOS shell paths are unit-tested with an injected clock and
+  process, not here. The suite's `run_command` tasks assume the POSIX host
+  shell.
 
 ## Procedure
 
@@ -60,10 +71,11 @@ blueprint change, not a test bug.
    takes the one-shot path. Streaming and the wire formats are unit-tested per
    adapter.
 4. Capture the per-goal `runResult`s, the final session (transcript and
-   plan), the final workspace, and the ordered tool-call log.
+   plan), the final workspace, and the ordered tool-call log with each
+   call's observation.
 5. Compare against `expect`: `status`/`answer`/`runs`, `plan`,
-   `sessionPersisted`, `stdoutContains`, `files`, and `tools`. Record
-   pass/fail.
+   `sessionPersisted`, `stdoutContains`, `files`, `tools`, and
+   `observations`. Record pass/fail.
 
 ## Pass criteria
 
@@ -80,11 +92,16 @@ The concrete argument shapes the scripts rely on, frozen in
 
 | Tool | Arguments |
 | --- | --- |
-| `read` | `{path}` |
+| `read` | `{path, offset?, limit?}` — 0-based `offset` plus `limit` lines, returned as text |
 | `write` | `{path, content}` |
-| `edit` | `{path, old, new}` — replace the unique occurrence; error if absent or ambiguous |
-| `run_command` | `{command}` |
+| `edit` | `{path, old, new, replace_all?}` — replace the unique occurrence; error if absent or ambiguous |
+| `multi_edit` | `{path, edits:[{old, new, replace_all?}]}` — an ordered batch in one step |
+| `glob` | `{pattern, path?}` |
 | `search` | `{pattern, path?}` |
+| `run_command` | `{command}` |
+| `job` | `{action, command?, id?}` — out of gate scope (needs runtime ids) |
+| `diff` | `{path?}` — changes against the session baseline |
+| `restore` | `{path?}` — revert to the session baseline |
 
 ## Coverage
 
@@ -93,6 +110,15 @@ The concrete argument shapes the scripts rely on, frozen in
 | [answer-from-read](tasks/answer-from-read.json) | end-to-end path; `finish` |
 | [write-file](tasks/write-file.json) | `C3` write; workspace effect |
 | [edit-file](tasks/edit-file.json) | `C3` edit; workspace effect |
+| [glob-orientation](tasks/glob-orientation.json) | `C3` glob; orientation |
+| [read-range](tasks/read-range.json) | `C3` read line range |
+| [edit-replace-all](tasks/edit-replace-all.json) | `C3` edit `replace_all` |
+| [multi-edit](tasks/multi-edit.json) | `C3` multi_edit batch; workspace effect |
+| [edit-ambiguous-recovery](tasks/edit-ambiguous-recovery.json) | `C3` edit ambiguity error; `C1` re-iterate |
+| [search](tasks/search.json) | `C3` search |
+| [run-command](tasks/run-command.json) | `C3` run_command; workspace effect |
+| [diff-restore](tasks/diff-restore.json) | `C3` baseline `diff`/`restore`; `C5` baseline |
+| [parallel-reads](tasks/parallel-reads.json) | `C1`/`C2` batch tool calls; parallel read-only |
 | [tool-error-recovery](tasks/tool-error-recovery.json) | `C3` error observation; `C1` re-iterate |
 | [guard-denied](tasks/guard-denied.json) | `C3` guard denial; `C1`/`C8` block |
 | [provider-timeout-recovery](tasks/provider-timeout-recovery.json) | `C2`/`C8` recoverable; `C1` re-iterate |
@@ -101,6 +127,7 @@ The concrete argument shapes the scripts rely on, frozen in
 | [timeout-stall](tasks/timeout-stall.json) | `C1`/`C8` stall on non-progress timeouts; local best-effort summary |
 | [sustained-progress](tasks/sustained-progress.json) | `C1`/`C8` productive steps run past the old step cap to a finish |
 | [context-overflow](tasks/context-overflow.json) | `C4` overflow; `C1` block |
+| [compaction](tasks/compaction.json) | `C4` watermark fold at a goal boundary (scripted brief); `C5` continuity |
 | [session-continuity](tasks/session-continuity.json) | `C5` continuous session; two goals; persistence |
 | [plan-persistence](tasks/plan-persistence.json) | `C1` plan update; `C5` persistence |
 | [repl-command](tasks/repl-command.json) | `C6` command handling; `/plan` |

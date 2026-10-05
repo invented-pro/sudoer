@@ -1,6 +1,6 @@
 # C2 — Providers
 
-> Status: draft · Version 0.4 · **Current tier: Prop**
+> Status: draft · Version 0.5 · **Current tier: Prop**
 
 The provider is the model behind the loop: `C2` is the single boundary
 through which the agent reaches an LLM. The loop decides; the provider
@@ -11,8 +11,9 @@ turns a prompt into a thought and an action.
 A provider adapts the agent's request shape to one LLM API. Every tier
 reaches models through this boundary, so the loop never knows which backend
 is in use. The tiers differ in how many providers exist and how they are
-selected: one at Prop, several with fallback and a model catalog at
-Pilot, and a registry with OAuth and per-model parameters at Orbit.
+selected: one at Prop, which may set the per-model parameters coding needs
+(sampling, context); several with fallback and a model catalog at Pilot; and
+a registry with OAuth at Orbit.
 
 ```plantuml
 @startuml
@@ -89,8 +90,16 @@ endif
   passed in full on every call.
 - **Called once per iteration.** The loop (C1) invokes the provider for
   exactly one step's decision; the provider never loops on its own.
+- **Multiple tool calls.** One completion may request several tool calls; the
+  adapter normalizes them into a single action carrying a tool-call batch
+  (`message` `action`), preserving the model's order. Independent read-only
+  calls may then run in parallel (C1). Streaming merges each call's deltas by
+  its index, so interleaved calls reassemble into the same batch.
 - **Fixed model and window.** The configured model also fixes the context
   window size that `context` (C4) fits the prompt against.
+- **Coding-scoped per-model parameters.** The context window and, where the
+  adapter supports them, sampling parameters are part of Prop's model config;
+  selecting among models, fallback, and OAuth are not.
 - **No fallback.** There is one endpoint; a failure is returned rather than
   retried against another backend. A timeout is retried by the loop
   re-iterating, not by switching providers.
@@ -146,9 +155,10 @@ endif
   through unchanged.
 - **Tool-call binding.** A tool call keeps the provider's id; the loop (C1)
   binds the matching observation to it. Replaying a transcript sends an
-  assistant `tool_calls` message paired with its `role: tool` result, and
-  never sends a tool result whose tool call is absent — harness observations
-  such as a provider timeout are replayed as user messages instead. A tool
+  assistant `tool_calls` message paired with its `role: tool` results (one per
+  call), and never sends a tool result whose tool call is absent — harness
+  observations such as a provider timeout are replayed as user messages
+  instead. A tool
   call with an empty name is malformed and is replayed as plain assistant
   text (with its observation as a user message), since an empty
   `function.name` is rejected by the endpoint. Streaming a tool call merges

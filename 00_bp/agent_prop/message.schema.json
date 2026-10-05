@@ -15,11 +15,25 @@
       }
     },
     "action": {
-      "description": "What the model chose to do this step: call a tool, or finish.",
+      "description": "What the model chose to do this step: finish, or call one or more tools (C1).",
       "oneOf": [
-        { "$ref": "tool.schema.json#/$defs/toolCall" },
-        { "$ref": "#/$defs/finish" }
+        { "$ref": "#/$defs/finish" },
+        { "$ref": "#/$defs/toolBatch" }
       ]
+    },
+    "toolBatch": {
+      "description": "One or more tool calls emitted in a single step; independent read-only calls may run in parallel (C1).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "tool_calls"],
+      "properties": {
+        "type": { "const": "tool_calls" },
+        "tool_calls": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "tool.schema.json#/$defs/toolCall" }
+        }
+      }
     },
     "userEntry": {
       "description": "A goal supplied by the human (normalized to text by C7).",

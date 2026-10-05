@@ -1,0 +1,33 @@
+{
+  "id": "edit-ambiguous-recovery",
+  "description": "An ambiguous edit errors, the loop re-iterates, and replace_all resolves it.",
+  "goal": "Rename every 'cat' in a.txt to 'dog'.",
+  "workspace": { "a.txt": "cat\ncat\n" },
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "Trying a single edit.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "edit", "arguments": { "path": "a.txt", "old": "cat", "new": "dog" } }
+          ]
+        }
+      },
+      {
+        "complete": {
+          "text": "Ambiguous match; replacing all.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "edit", "arguments": { "path": "a.txt", "old": "cat", "new": "dog", "replace_all": true } }
+          ]
+        }
+      },
+      { "complete": { "text": "done" } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "files": { "a.txt": "dog\ndog\n" },
+    "tools": ["edit", "edit"],
+    "observations": ["ambiguous"]
+  }
+}

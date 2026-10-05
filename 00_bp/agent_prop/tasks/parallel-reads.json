@@ -1,0 +1,26 @@
+{
+  "id": "parallel-reads",
+  "description": "One completion carries two tool calls; both are dispatched (read-only, in parallel).",
+  "goal": "Read a.txt and b.txt.",
+  "workspace": { "a.txt": "A", "b.txt": "B" },
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "Reading both.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "read", "arguments": { "path": "a.txt" } },
+            { "type": "tool_call", "name": "read", "arguments": { "path": "b.txt" } }
+          ]
+        }
+      },
+      { "complete": { "text": "A and B" } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "answer": { "equals": "A and B" },
+    "tools": ["read", "read"],
+    "observations": ["A", "B"]
+  }
+}

@@ -1,6 +1,6 @@
 # C8 — Reliability
 
-> Status: draft · Version 0.5 · **Current tier: Prop**
+> Status: draft · Version 0.6 · **Current tier: Prop**
 
 Reliability is what keeps a run bounded and recoverable: `C8` defines the
 guardrails around every step and the rules for turning failures into
@@ -114,6 +114,14 @@ endif
 - **Deep abort.** Aborting a timed-out provider call cancels the HTTP
   request; aborting a timed-out `run_command` (C3) must terminate the whole
   child process tree so no processes leak.
+- **Batch steps.** A step's tool calls each run under their class timeout; the
+  independent read-only calls run in parallel, so the step's wall time is the
+  longest call rather than their sum, and one call's timeout or denial does not
+  discard its already-completed siblings' observations.
+- **Background jobs.** A `job` (C3) runs under the same host shell as
+  `run_command`; a job that exceeds its class budget is stopped and reported,
+  and every job is reaped when the run is cancelled or the session closes, so
+  no child process outlives the agent.
 - **Blocking.** An unrecoverable error or a guard denial marks the run
   blocked and the loop aborts.
 - **Best-effort finish.** If the run stalls or hits the step ceiling, the loop

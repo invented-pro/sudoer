@@ -1,6 +1,6 @@
 # C4 — Context
 
-> Status: draft · Version 0.8 · **Current tier: Prop**
+> Status: draft · Version 0.9 · **Current tier: Prop**
 
 Context is what the model actually sees: `C4` is the assembly of the prompt
 sent to the provider on every turn. The loop decides; context frames the
@@ -177,4 +177,44 @@ endif
 - **Usage is reported.** The estimate for the last assembled prompt is
   exposed to the loop and, through it, to the interface (C6), so the human
   surface can show context used against the window.
+
+### System prompt
+
+The system prompt is a versioned, pinned artifact, owned here and shipped
+with the agent — not assembled ad hoc. It is the coding contract made
+executable: the disciplines stated in `agent_prop.md`, expressed as
+instructions, plus the conventions of the current workspace. Keeping it fixed
+with the build rather than user-tunable (`C10`) is what makes behavior
+reproducible and reviewable.
+
+It has stable sections:
+
+- **Identity and role** — Sudoer, a coding agent; strict instruction
+  following, verified artifact delivery.
+- **Tool guidance** — what each tool is for, and the coding habits the tools
+  support: orient with `glob`/`search`, read before editing, prefer
+  `multi_edit`, review with `diff`, verify with `run_command`.
+- **Coding contract** — the behavior disciplines: orient, ground in the
+  codebase, follow conventions, make small edits, verify then claim done, ask
+  when ambiguous, report precisely.
+- **Plan convention** — the fenced `plan` block the model uses to drive the
+  plan (C2), stated for a text-only model.
+- **Output format** — concise markdown naming what changed, the commands run,
+  and the observed result.
+- **Workspace conventions** — the project's own instructions (`AGENTS.md` or
+  equivalent) and its detected build, lint, and test commands, inlined so the
+  model follows the repo rather than its own defaults.
+
+The prompt is:
+
+- **Pinned and versioned.** The system prompt and the tool definitions are
+  pinned — never clipped, cleared, or folded (*above*) — and the prompt carries
+  a version stamp. The session records which version produced a run, so a
+  prompt change is reviewable and evaluation results stay attributable.
+- **Workspace-aware.** At session open, and when the workspace changes (C6),
+  the runtime reads the project's instruction file and detected command set
+  into the prompt. A workspace with no such file simply omits that section.
+- **Image attachments.** When a coding task supplies an image (`modality`,
+  C7), the image is attached to the provider request; the transcript stores a
+  text reference, and the binary is not persisted in the session.
 

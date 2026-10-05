@@ -31,7 +31,7 @@
       }
     },
     "providerResponse": {
-      "description": "The parsed completion: a thought and the chosen action. A completion with no parseable action is returned as a finish (C2).",
+      "description": "The parsed completion: a thought and the chosen action — a finish or a batch of tool calls. A completion with no parseable tool call is returned as a finish (C2).",
       "type": "object",
       "additionalProperties": false,
       "required": ["thought", "action"],

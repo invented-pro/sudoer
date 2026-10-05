@@ -1,6 +1,6 @@
 # C1 — Loop
 
-> Status: draft · Version 0.4 · **Current tier: Prop**
+> Status: draft · Version 0.5 · **Current tier: Prop**
 
 Every agent, at its core, is one loop. Everything else is scope built
 around that loop. `C1` is that core: the control cycle that turns a goal
@@ -11,8 +11,9 @@ into actions, observations, and finally an answer.
 A goal is one user request; a run is one execution of the loop over it.
 The loop is what every tier shares — Prop, Pilot, and Orbit all run
 the same cycle. The tiers differ only in how far each stage can go: a
-plan-driven multi-step loop at Prop, streaming at Pilot, reflection and
-replanning at Orbit. The diagram below is that shared, conceptual cycle;
+plan-driven, streaming multi-step loop at Prop, with coding-scoped
+self-correction, deepening into open-ended reflection and replanning at
+Orbit. The diagram below is that shared, conceptual cycle;
 the Prop section that follows gives the normative detail.
 
 ```plantuml
@@ -32,8 +33,8 @@ while (not stalled AND steps < ceiling AND not blocked) is (yes)
     :answer;
     stop
   else (no)
-    :act — call a tool;
-    :observe the result;
+    :act — call tools (read-only in parallel);
+    :observe the results;
   endif
 endwhile (no)
 if (blocked?) then (yes)
@@ -96,7 +97,7 @@ while (stalls < stall budget AND steps < ceiling AND not blocked) is (yes)
       :status := complete;
       stop
     else (no)
-      :dispatch action to tool under its tool-class timeout (C3);
+      :dispatch the action's tool calls (read-only in parallel) under their timeouts (C3);
       if (unrecoverable error or guard denied?) then (yes)
         :blocked := true;
       elseif (tool error?) then (yes)
@@ -105,7 +106,7 @@ while (stalls < stall budget AND steps < ceiling AND not blocked) is (yes)
         :observation := tool output;
       endif
       if (not blocked?) then (yes)
-        :append (thought, action, observation) to transcript;
+        :append (thought, action, observations) to transcript;
         :update the plan;
         :steps := steps + 1;
         if (progress? [plan advanced or a novel observation]) then (yes)
@@ -133,12 +134,17 @@ endif
   updated after each observation, and shown by `interface` (C6) on demand.
   The plan, not the transcript alone, is what keeps long work on track.
 - **Multi-step, bounded.** The loop iterates until `finish`, the run stalls,
-  hits the step ceiling, or is blocked. `steps` increments once per completed
-  iteration and a high compiled-in ceiling bounds the total, so every run is
-  guaranteed to terminate.
-- **ReAct shape.** Each iteration emits a thought and a single action; the
-  action is dispatched, its result returned as an observation, and the
-  thought, action, and observation are appended to the transcript.
+  hits the step ceiling, or is blocked. `steps` increments once per provider
+  decision — a step may carry several tool calls — and a high compiled-in
+  ceiling bounds the total, so every run is guaranteed to terminate.
+- **ReAct shape.** Each iteration emits a thought and an action; the action is
+  either `finish` or one or more tool calls. A step's calls are dispatched
+  together: independent read-only calls (`read`, `glob`, `search`, `diff`,
+  `web_fetch`, `web_search`) run in parallel, while calls with side effects or
+  order dependence (`write`, `edit`, `multi_edit`, `run_command`, `job`,
+  `restore`) run sequentially in listed order. Each result returns as an
+  observation bound to its call, and the thought, action, and observations are
+  appended to the transcript as one turn.
 - **Live progress.** When a human surface is attached, the loop forwards the
   streamed reply text and reports step, context use, tool calls, and
   observations as they happen, so the interface (C6) can render them live.
@@ -149,8 +155,12 @@ endif
 - **Continuous sessions.** `transcript` and the plan belong to the session
   (`sessions`, C5), not to the run. A run appends to them and they persist
   across runs and invocations, so a later goal continues the work.
-- **No reflection.** Prop decides the *next* action and updates its plan;
-  it does not critique or rewrite its own output (that arrives at Orbit).
+- **Coding-scoped correction.** Prop decides the *next* action and updates
+  its plan, and may self-check and correct its output as coding requires;
+  open-ended reflection and replanning over long horizons is Orbit.
+- **Review and undo.** Within a run the loop may review its changes with
+  `diff` and revert with `restore` (C3) before finishing, so self-correction
+  is grounded in the actual workspace delta rather than in recollection.
 - **Progress-driven guards.** A run is bounded by *stalls*, not by raw step
   count: it continues while steps make progress (a plan item newly completed,
   or an observation not seen before in the run) and ends after a compiled-in

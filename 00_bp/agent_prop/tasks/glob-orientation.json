@@ -1,0 +1,33 @@
+{
+  "id": "glob-orientation",
+  "description": "Orient with glob, read the file it finds, then finish; exercises the glob tool.",
+  "goal": "Find the source text files and read the one that exists.",
+  "workspace": { "README.md": "hello\n", "src/main.txt": "code\n" },
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "Finding source files.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "glob", "arguments": { "pattern": "**/*.txt" } }
+          ]
+        }
+      },
+      {
+        "complete": {
+          "text": "Reading it.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "read", "arguments": { "path": "src/main.txt" } }
+          ]
+        }
+      },
+      { "complete": { "text": "code" } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "answer": { "equals": "code" },
+    "tools": ["glob", "read"],
+    "observations": ["main.txt"]
+  }
+}

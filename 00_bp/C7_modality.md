@@ -1,6 +1,6 @@
 # C7 — Modality
 
-> Status: draft · Version 0.2 · **Current tier: Prop**
+> Status: draft · Version 0.3 · **Current tier: Prop**
 
 Modality is the shape of information crossing the boundary: `C7` defines
 what kinds of input the agent accepts and what kinds of output it produces.
@@ -13,8 +13,8 @@ runtime normalizes input to a form the loop and provider can consume and
 renders output back to the caller. Modality sits between the interface (C6)
 and the loop (C1): the interface parses raw input, modality normalizes it to
 text, and the loop runs on text. Every tier speaks text; the tiers differ in
-what else is possible: text only at Prop and Pilot, and vision plus
-audio at Orbit.
+what else is possible: text at Prop and Pilot, image input at Prop only where
+a coding task needs it, and general vision plus audio at Orbit.
 
 ```plantuml
 @startuml
@@ -44,9 +44,10 @@ runs inside a session.
 
 ## Prop
 
-Prop is text in, text out. Input is normalized to a plain string before the
-loop sees it, and the answer is rendered as plain text. There are no
-attachments, no images, and no audio.
+Prop is text-first. Input is normalized to text before the loop sees it, and
+the answer is rendered as plain text. Image input is supported only where a
+*coding* task requires it — reviewing a UI screenshot or a diagram — never as
+a general modality; audio is not supported.
 
 ```plantuml
 @startuml
@@ -66,15 +67,21 @@ stop
 @enduml
 ```
 
-- **Text only.** The only supported input and output modality is text.
-- **Pass-through.** Beyond normalization the component adds no transformation; it
-  is the fixed boundary that vision and audio extend at Orbit.
+- **Text-first.** Text is the default input and the output modality; image
+  input is a coding-only exception, not a general capability.
+- **Pass-through.** Beyond normalization the component adds no transformation;
+  it is the boundary that general vision and audio extend at Orbit, while the
+  coding-required image path is enabled at Prop.
 - **Normalized input.** The interface (C6) parses raw input, then modality
-  trims and decodes it to text before the loop runs; no structured or binary
-  payloads.
+  trims and decodes it to text before the loop runs; no structured payloads,
+  and the only binary input is a coding task's image.
 - **Plain rendering.** The answer is emitted as plain text; no rich
   rendering is required of the caller.
-- **Text-only provider.** The provider (C2) is asked for text completions
-  only.
-- **No attachments.** Files are not accepted as input; the agent reaches
-  files through tools (C3) instead.
+- **Provider modality.** The provider (C2) is asked for text completions,
+  plus image input only when a coding task supplies one.
+- **No file attachments.** Files are not accepted as input; the agent reaches
+  files through tools (C3). An image a coding task supplies (e.g. a
+  screenshot) is the one attachment routed through.
+- **Image attachment.** A coding task's image is passed to the provider
+  request as an attachment; the transcript keeps a text reference only, and
+  the binary is not stored in the session.

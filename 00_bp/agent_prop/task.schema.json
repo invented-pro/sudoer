@@ -55,6 +55,11 @@
           "type": "array",
           "items": { "type": "string" }
         },
+        "observations": {
+          "description": "Expected substrings of the tool observations, in call order: entry i must appear in the i-th observation. Shorter than the tool-call log means only the prefix is checked.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
         "runs": {
           "description": "Expected result of each goal run, in order.",
           "type": "array",
