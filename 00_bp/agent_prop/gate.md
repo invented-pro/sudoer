@@ -1,6 +1,6 @@
 # Prop Build Gate
 
-> Status: draft · Version 0.6 · **Current tier: Prop**
+> Status: draft · Version 0.7 · **Current tier: Prop**
 
 The gate is how Prop is judged done. Per [arch.md](../arch.md), every rung
 must pass its eval suite before it may build the next: the gate is a fixed
@@ -54,8 +54,10 @@ blueprint change, not a test bug.
 - **Other out-of-gate behavior.** `job` needs runtime-generated ids and
   timing, and the host shell is platform-specific; background jobs and the
   Windows/macOS shell paths are unit-tested with an injected clock and
-  process, not here. The suite's `run_command` tasks assume the POSIX host
-  shell.
+  process, not here. A task whose `run_command` strings assume the POSIX
+  host shell declares `"host_shell": "posix"`; the runner skips such tasks
+  (reported as SKIP, never as failures) on platforms without a POSIX host
+  shell, where the shell paths are unit-tested instead.
 
 ## Procedure
 
@@ -116,7 +118,7 @@ The concrete argument shapes the scripts rely on, frozen in
 | [multi-edit](tasks/multi-edit.json) | `C3` multi_edit batch; workspace effect |
 | [edit-ambiguous-recovery](tasks/edit-ambiguous-recovery.json) | `C3` edit ambiguity error; `C1` re-iterate |
 | [search](tasks/search.json) | `C3` search |
-| [run-command](tasks/run-command.json) | `C3` run_command; workspace effect |
+| [run-command](tasks/run-command.json) | `C3` run_command; workspace effect (POSIX shell) |
 | [diff-restore](tasks/diff-restore.json) | `C3` baseline `diff`/`restore`; `C5` baseline |
 | [parallel-reads](tasks/parallel-reads.json) | `C1`/`C2` batch tool calls; parallel read-only |
 | [tool-error-recovery](tasks/tool-error-recovery.json) | `C3` error observation; `C1` re-iterate |
@@ -127,7 +129,7 @@ The concrete argument shapes the scripts rely on, frozen in
 | [timeout-stall](tasks/timeout-stall.json) | `C1`/`C8` stall on non-progress timeouts; local best-effort summary |
 | [sustained-progress](tasks/sustained-progress.json) | `C1`/`C8` productive steps run past the old step cap to a finish |
 | [context-overflow](tasks/context-overflow.json) | `C4` overflow; `C1` block |
-| [compaction](tasks/compaction.json) | `C4` watermark fold at a goal boundary (scripted brief); `C5` continuity |
+| [compaction](tasks/compaction.json) | `C4` watermark fold at a goal boundary (scripted brief); `C5` continuity (POSIX shell) |
 | [session-continuity](tasks/session-continuity.json) | `C5` continuous session; two goals; persistence |
 | [plan-persistence](tasks/plan-persistence.json) | `C1` plan update; `C5` persistence |
 | [repl-command](tasks/repl-command.json) | `C6` command handling; `/plan` |

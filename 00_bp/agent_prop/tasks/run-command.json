@@ -1,6 +1,7 @@
 {
   "id": "run-command",
   "description": "run_command has a workspace effect and observable output; assumes the POSIX host shell.",
+  "host_shell": "posix",
   "goal": "Use a command to write out.txt with 'built' and print it.",
   "script": {
     "steps": [

@@ -1,6 +1,7 @@
 {
   "id": "compaction",
   "description": "A second goal crosses the 75% watermark at a goal boundary; the older work folds into a scripted brief (one tools-withheld provider call) and the session continues.",
+  "host_shell": "posix",
   "turns": [
     { "goal": "Run the report and read note.txt." },
     { "goal": "Read note.txt again." }

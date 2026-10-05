@@ -59,6 +59,7 @@ final class Task {
     required this.configOverride,
     required this.script,
     required this.expect,
+    this.hostShellPosix = false,
   });
 
   final String id;
@@ -67,6 +68,11 @@ final class Task {
   final Map<String, dynamic> configOverride;
   final Map<String, dynamic> script;
   final Expect expect;
+
+  /// True when the task's `run_command` strings assume the POSIX host shell
+  /// (`host_shell: "posix"`); skipped on Windows, where the shell paths are
+  /// unit-tested instead (C3).
+  final bool hostShellPosix;
 
   factory Task.fromJson(Map<String, dynamic> json) {
     final turns = <Turn>[];
@@ -98,6 +104,7 @@ final class Task {
       configOverride:
           ((json['config'] as Map?) ?? {}).cast<String, dynamic>(),
       script: (json['script'] as Map).cast<String, dynamic>(),
+      hostShellPosix: json['host_shell'] == 'posix',
       expect: Expect(
         status: _status(expect['status']),
         answerEquals: answer?['equals'] as String?,

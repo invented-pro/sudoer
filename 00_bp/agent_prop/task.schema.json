@@ -28,6 +28,10 @@
       "description": "Partial configuration, deep-merged over the gate defaults.",
       "type": "object"
     },
+    "host_shell": {
+      "description": "Host shell the task's run_command strings assume (C3). A task marked posix is skipped on platforms without a POSIX host shell (Windows); those paths are unit-tested instead.",
+      "enum": ["posix"]
+    },
     "script": { "$ref": "script.schema.json" },
     "expect": {
       "type": "object",

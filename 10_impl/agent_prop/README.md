@@ -366,7 +366,10 @@ mise run gate:suite    # suite only
 - Tasks live in [`00_bp/agent_prop/tasks/`](../../00_bp/agent_prop/tasks)
   (24 tasks: reading, editing, orientation, execution, baseline diff/restore,
   batch/parallel calls, error/denial/timeout paths, context overflow and
-  watermark compaction, sessions, plans, and the REPL).
+  watermark compaction, sessions, plans, and the REPL). A task whose
+  `run_command` strings assume the POSIX host shell declares
+  `"host_shell": "posix"` and is skipped (not failed) on Windows, where the
+  host-shell paths are unit-tested.
 - The runner injects a `ScriptedProvider`; each task may script a completion
   with several `tool_calls` (one batch step). The runner compares the ordered
   tool-call log **and each call's observation** against `expect.tools` and

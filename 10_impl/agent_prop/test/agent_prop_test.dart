@@ -34,6 +34,20 @@ Config _config({
 String _blockingCommand() =>
     Platform.isWindows ? 'ping -n 30 127.0.0.1 > NUL' : 'sleep 30';
 
+/// Delete a temp directory, tolerating Windows holding a just-killed
+/// process's working directory inside it for a moment (errno 32).
+Future<void> _deleteTemp(Directory dir) async {
+  for (var attempt = 0;; attempt++) {
+    try {
+      dir.deleteSync(recursive: true);
+      return;
+    } on FileSystemException {
+      if (attempt >= 10) rethrow;
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+  }
+}
+
 /// The rightmost cursor-forward column (`ESC[nC`) written so far — the column
 /// the editor last placed the cursor at, counting the two-column prompt.
 int? _lastCursorColumn(StringBuffer out) {
@@ -3199,7 +3213,7 @@ void main() {
     test('a sibling timeout does not discard completed observations (C8)',
         () async {
       final temp = Directory.systemTemp.createTempSync('sudoer-batch-');
-      addTearDown(() => temp.deleteSync(recursive: true));
+      addTearDown(() => _deleteTemp(temp));
       File(p.join(temp.path, 'a.txt')).writeAsStringSync('A');
       final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
       final provider = ScriptedProvider.fromJson({
@@ -3441,8 +3455,11 @@ void main() {
   group('background jobs (C3/C8)', () {
     test('start, poll, and stop a background command by id', () async {
       final temp = Directory.systemTemp.createTempSync('sudoer-job-');
-      addTearDown(() => temp.deleteSync(recursive: true));
+      addTearDown(() => _deleteTemp(temp));
       final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
+      final command = Platform.isWindows
+          ? 'echo job-output & ping -n 30 127.0.0.1 > NUL'
+          : 'echo job-output; sleep 30';
       final provider = ScriptedProvider.fromJson({
         'steps': [
           {
@@ -3453,7 +3470,7 @@ void main() {
                   'name': 'job',
                   'arguments': {
                     'action': 'start',
-                    'command': 'echo job-output; sleep 5',
+                    'command': command,
                   },
                 }
               ],
@@ -3483,10 +3500,26 @@ void main() {
           .whereType<ObservationEntry>()
           .map((o) => o.text)
           .toList();
+      // Every stage answers with the job's status line, which always names
+      // the id (the poll's output capture is asserted deterministically in
+      // the unit test below, free of an output-arrival race).
       expect(observations[0], contains('job1'));
-      expect(observations[1], contains('job-output'));
+      expect(observations[1], contains('job1'));
       expect(observations[2], contains('job1'));
       await agent.dispose();
+    });
+
+    test('a job captures its output between polls and dies on stop', () async {
+      final registry = JobRegistry();
+      final job = await registry.start(
+        Platform.isWindows ? 'echo job-output' : 'echo job-output',
+        Directory.systemTemp.createTempSync('sudoer-job-').path,
+      );
+      await job.outputClosed.timeout(const Duration(seconds: 10));
+      expect(job.drainOutput(), contains('job-output'));
+      // The job has exited on its own; stop is a no-op that still reports.
+      await job.stop();
+      expect(job.statusLine(), contains('job1'));
     });
 
     test('validate rejects a poll without an id', () async {

@@ -187,7 +187,9 @@ void _checkAnswer(
   }
 }
 
-/// Run every task in [tasksDir]. Returns the number of failures.
+/// Run every task in [tasksDir]. Returns the number of failures. A task
+/// marked `host_shell: "posix"` is skipped (not failed) on platforms without
+/// a POSIX host shell; those paths are unit-tested instead (C3).
 Future<int> runSuite(String tasksDir) async {
   final files = Directory(tasksDir)
       .listSync()
@@ -200,9 +202,15 @@ Future<int> runSuite(String tasksDir) async {
     return 1;
   }
   var failed = 0;
+  final skipped = <String>[];
   for (final file in files) {
     final task = Task.fromJson(
         jsonDecode(file.readAsStringSync()) as Map<String, dynamic>);
+    if (task.hostShellPosix && Platform.isWindows) {
+      skipped.add(task.id);
+      print('SKIP  ${task.id} (POSIX host shell; unit-tested on Windows)');
+      continue;
+    }
     final report = await runTask(task);
     if (report.passed) {
       print('PASS  ${report.id}');
@@ -215,7 +223,9 @@ Future<int> runSuite(String tasksDir) async {
     }
   }
   print('');
-  print('${files.length - failed}/${files.length} tasks passed');
+  final runnable = files.length - skipped.length;
+  print('$runnable tasks, ${runnable - failed} passed'
+      '${skipped.isEmpty ? '' : ', ${skipped.length} skipped (POSIX host shell)'}');
   return failed;
 }
 
