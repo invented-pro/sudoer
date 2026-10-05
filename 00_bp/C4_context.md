@@ -1,6 +1,6 @@
 # C4 — Context
 
-> Status: draft · Version 0.7 · **Current tier: Prop**
+> Status: draft · Version 0.8 · **Current tier: Prop**
 
 Context is what the model actually sees: `C4` is the assembly of the prompt
 sent to the provider on every turn. The loop decides; context frames the
@@ -39,15 +39,19 @@ outlive a run belongs to `sessions` (C5) or `memory` (C9), not here.
 
 ## Prop
 
-Prop fits the session transcript to the window by folding older work into a
-small, **structured memory** — never by dropping it silently. The prompt is
-the system prompt plus the pinned current goal and plan, a structured brief
-of earlier work, and a **verbatim recent tail**. Folding happens at a
-milestone — the first step of a new goal past a watermark of the window, or
-mid-run past a higher high-water mark — so it is deliberate rather than a
-last-second scramble. The brief is written by the model in one tools-withheld
-call under the model timeout, and falls back to a deterministic digest when
-that call is unavailable (offline, the gate, or a failure). Folding is
+Prop fits the session transcript to the window by climbing a ladder of
+levers — clip, clear, then fold — never by dropping history silently. The
+prompt is the system prompt plus the pinned current goal and plan, a
+structured brief of folded work, a **thinned middle** of older but unfolded
+turns (oversized observations clipped, stale tool results cleared to
+re-fetchable placeholders), and a **verbatim recent tail**. Clipping and
+clearing are deterministic and run on every assembly; folding is the only
+model-assisted step. Folding happens at a milestone — the first step of a
+new goal past a watermark of the window, or mid-run past a higher high-water
+mark — so it is deliberate rather than a last-second scramble. The brief is
+written by the model in one tools-withheld call under the model timeout, and
+falls back to a deterministic digest when that call is unavailable (offline,
+the gate, or a failure). Folding is
 *sticky*: once history is folded it stays folded rather than re-expanding on
 the next step. Folding is turn-aligned, so a tool call is never separated from
 its observation. There is no prompt caching — that arrives at Pilot.
@@ -63,6 +67,9 @@ start
 :gather system prompt + tool definitions (C3);
 :gather pinned current goal and plan (C1, C5);
 :estimate prompt tokens over the full transcript (C5);
+:clip oversized observations to head + tail (elision marked);
+:clear re-fetchable tool results outside the tail to placeholders;
+:re-estimate;
 if (past high-water? or (past watermark? and at a goal boundary?)) then (yes)
   :choose a turn-aligned tail that fits the retain budget;
   :ask the model (tools withheld, model timeout) for a brief
@@ -90,9 +97,23 @@ endif
 @enduml
 ```
 
-- **Three-part prompt.** The assembled prompt is the pinned goal and plan, the
-  brief of older work, and the verbatim recent tail, all under the system
-  prompt and tool definitions. Only the older work is folded.
+- **Zoned prompt.** The assembled prompt is the pinned goal and plan, the
+  brief of folded work, the thinned middle, and the verbatim recent tail,
+  all under the system prompt and tool definitions. Only the middle and the
+  folded region are thinned; the tail is never summarized.
+- **Observation truncation.** Any observation above a size cap (default 4k
+  tokens) is clipped to its head and tail with an elision marker
+  (`… N tokens elided …`), keeping the command echo and the final error and
+  dropping the bulky middle. The cap applies everywhere, including the
+  recent tail, so one huge read cannot crowd out live work.
+- **Tool-result clearing.** Outside the recent tail, the outputs of
+  re-fetchable tools (`read`, `search`, `web_fetch`) are swapped for a
+  one-line placeholder naming the tool and its path, query, or URL, so a
+  later step can re-run the tool and recover the content. Mutating tools
+  (`write`, `edit`, `run_command`) keep their command and outcome, thinned
+  only by the cap above; clearing never removes an exchange, only its bulk.
+  Both levers are deterministic — no model call — and run before any fold
+  is considered.
 - **Model-written brief.** At a fold the loop makes one provider call with no
   tools, under the model timeout, asking for a brief that preserves the goals,
   the files touched and their current state, the commands and outcomes,
@@ -114,9 +135,9 @@ endif
 - **Working set.** The file section is the run's working set: for each path the
   latest action (`read`, `write`, `edit`, …) and outcome, so a later step can
   still find the files that matter without the full transcript.
-- **Verbatim recent tail.** The most recent turns are kept raw, up to a retain
-  budget of the window, so the current thread of work is never summarized
-  while it is still live.
+- **Verbatim recent tail.** The most recent turns are kept raw — subject only
+  to the observation cap — up to a retain budget of the window, so the
+  current thread of work is never summarized while it is still live.
 - **Turn-aligned folding.** A fold boundary only ever lands before a goal or
   before a tool-call reply, never between a tool call and its observation, so
   the provider always receives a well-formed exchange.
@@ -130,21 +151,25 @@ endif
 - **Compaction is reported.** When a new fold happens, the loop surfaces it
   (C6), so the interface can tell the user context was shortened — and whether
   the brief was model-written or the local fallback — rather than silently
-  dropping history.
+  dropping history. Clipped observations carry their elision marker and
+  cleared results their re-run pointer, so the model itself sees what was
+  thinned and can recover it.
 - **Pinned goal and plan.** The current goal and the plan (`C1`) survive
   compaction; the goal is kept even when the fold boundary moves past it.
 - **Plan convention in the prompt.** The system prompt instructs the model
   to report plan updates with the fenced `plan` block (the wire convention
   owned by `C2`), so a text-only model can drive the plan without a dedicated
   API field.
-- **Bounded, then dropped, then error.** The system prompt and tool
-  definitions are pinned. If the folded prompt still overflows, more of the
-  tail is folded turn-aligned; only if no turn-aligned fold remains are the
-  oldest non-pinned segments dropped, and a prompt that still overflows is
-  returned to the loop as an error (`reliability`, C8).
-- **The stored transcript is unchanged.** Folding is an assembly-time view on
-  top of `sessions` (C5); the persisted transcript is never rewritten, and the
-  brief is not persisted — it is rebuilt (one call) on resume if needed.
+- **Cheapest lever first.** The system prompt and tool definitions are pinned;
+  everything else thins in cost order — clip, clear, fold, drop. If the
+  prompt still overflows after clipping and clearing, more of the tail is
+  folded turn-aligned; only if no turn-aligned fold remains are the oldest
+  non-pinned segments dropped, and a prompt that still overflows is returned
+  to the loop as an error (`reliability`, C8).
+- **The stored transcript is unchanged.** Clipping, clearing, and folding are
+  assembly-time views on top of `sessions` (C5); the persisted transcript is
+  never rewritten, and the brief is not persisted — it is rebuilt (one call)
+  on resume if needed.
 - **No caching.** The prompt is rebuilt on every iteration; only the brief is
   kept between steps. Prompt-cache reuse across calls arrives at Pilot.
 - **Approximate fit.** The token estimate may be approximate; the window is

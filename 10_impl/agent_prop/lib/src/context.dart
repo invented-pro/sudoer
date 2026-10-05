@@ -39,6 +39,18 @@ const double kRetainFraction = 0.45;
 /// The share of the window the fallback digest may occupy.
 const double kDigestFraction = 0.25;
 
+/// Cap on a single observation in the assembled prompt (C4): oversized tool
+/// outputs are clipped to head and tail with an elision marker, keeping the
+/// command echo and the final error and dropping the bulky middle. The cap
+/// applies everywhere, including the recent tail; the stored transcript is
+/// unchanged.
+const int kObservationCapTokens = 4096;
+
+/// Tools whose outputs can be recovered by re-running them (C4). Outside the
+/// verbatim tail their successful results are cleared to a one-line re-run
+/// placeholder; mutating tools keep their command and outcome.
+const Set<String> kRefetchableTools = {'read', 'search', 'web_fetch'};
+
 /// What the last fold compacted.
 final class CompactionInfo {
   const CompactionInfo({
@@ -72,9 +84,10 @@ final class CompactionTask {
   final int beforeTokens;
 }
 
-/// C4: rebuilds the prompt each iteration and fits it to the window by folding
-/// older work into a brief; the current goal and plan are pinned, and an
-/// unfittable prompt is an error.
+/// C4: rebuilds the prompt each iteration and fits it to the window by
+/// climbing a ladder of levers — clip oversized observations, clear stale
+/// re-fetchable tool results, then fold older work into a brief; the current
+/// goal and plan are pinned, and an unfittable prompt is an error.
 final class ContextAssembler {
   ContextAssembler({
     required this.contextWindow,
@@ -99,6 +112,10 @@ final class ContextAssembler {
 
   /// The brief for transcript[0:_foldedThrough]; null means nothing folded.
   String? _brief;
+
+  /// How many observations the last view clipped / cleared (diagnostics).
+  int _lastClipped = 0;
+  int _lastCleared = 0;
 
   /// The full prompt estimate measured when the pending fold was planned.
   int _plannedBefore = 0;
@@ -125,7 +142,7 @@ final class ContextAssembler {
         .map((text) => text.trim())
         .where((text) => text.isNotEmpty)
         .join('\n');
-    _plannedBefore = _estimate(system, toolsJson, transcript);
+    _plannedBefore = _estimate(system, toolsJson, _view(transcript));
     final prior = _brief;
     final body = StringBuffer();
     if (prior != null && prior.trim().isNotEmpty) {
@@ -158,14 +175,7 @@ final class ContextAssembler {
     return CompactionInfo(
       steps: through,
       beforeTokens: _plannedBefore,
-      afterTokens: _estimate(
-        systemPrompt,
-        '[]',
-        <Entry>[
-          ObservationEntry(text: _brief ?? '', outcome: Outcome.ok),
-          ...transcript.sublist(_foldedThrough),
-        ],
-      ),
+      afterTokens: _estimate(systemPrompt, '[]', _view(transcript)),
     );
   }
 
@@ -177,8 +187,8 @@ final class ContextAssembler {
   }) {
     final system = _systemWithPlan(plan);
     final toolsJson = jsonEncode([for (final tool in tools) tool.toJson()]);
-    final lastUser = transcript.lastIndexWhere((entry) => entry is UserEntry);
-    final startTokens = _estimate(system, toolsJson, transcript);
+
+    final startTokens = _estimate(system, toolsJson, _view(transcript));
 
     // Fallback folding: when the loop did not pre-summarize a warranted fold
     // (or a direct caller has no loop), fold deterministically so the prompt
@@ -191,16 +201,16 @@ final class ContextAssembler {
       _brief = _digest(transcript.sublist(0, cut)).text;
     }
 
-    var messages = _build(transcript, lastUser, _foldedThrough);
-    // If the prompt still overflows, fold more of the tail turn-aligned before
-    // ever dropping a segment.
+    var messages = _view(transcript);
+    // If the prompt still overflows after clipping and clearing, fold more of
+    // the tail turn-aligned before ever dropping a segment.
     while (_estimate(system, toolsJson, messages) > contextWindow &&
         _foldedThrough < transcript.length) {
       final next = _nextBoundary(transcript, _foldedThrough);
       if (next <= _foldedThrough) break;
       _foldedThrough = next;
       _brief = _digest(transcript.sublist(0, _foldedThrough)).text;
-      messages = _build(transcript, lastUser, _foldedThrough);
+      messages = _view(transcript);
     }
 
     // Last resort: drop the oldest non-pinned segments, but never the goal and
@@ -236,7 +246,9 @@ final class ContextAssembler {
     diagnostics?.event(
       'C4 context',
       'prompt ${messages.length} messages, ~$used/$contextWindow tokens, '
-      '${_foldedThrough > 0 ? 'folded $_foldedThrough entries' : 'no folding'}',
+      '${_foldedThrough > 0 ? 'folded $_foldedThrough entries' : 'no folding'}'
+      '${_lastClipped > 0 ? ', $_lastClipped clipped' : ''}'
+      '${_lastCleared > 0 ? ', $_lastCleared cleared' : ''}',
     );
     return ProviderRequest(
       model: model,
@@ -246,30 +258,111 @@ final class ContextAssembler {
     );
   }
 
-  List<Entry> _build(List<Entry> transcript, int lastUser, int through) {
-    if (through <= 0) return List<Entry>.of(transcript);
-    return <Entry>[
-      ObservationEntry(
-          text: _brief ?? _digest(transcript.sublist(0, through)).text,
-          outcome: Outcome.ok),
-      if (lastUser >= 0 && lastUser < through) transcript[lastUser],
-      ...transcript.sublist(through),
+  /// The assembly-time view of [transcript] under the current fold (C4): the
+  /// brief for folded work, a thinned middle whose re-fetchable tool results
+  /// are cleared to placeholders, and the verbatim recent tail. Oversized
+  /// observations are clipped everywhere. The stored transcript is never
+  /// rewritten; thinning is a view, not a mutation.
+  List<Entry> _view(List<Entry> transcript) {
+    final clipped = _clipAll(transcript);
+    var tailStart =
+        _chooseCut(clipped, (contextWindow * kRetainFraction).round());
+    if (tailStart < _foldedThrough) tailStart = _foldedThrough;
+    final lastUser = transcript.lastIndexWhere((entry) => entry is UserEntry);
+    final view = <Entry>[
+      if (_foldedThrough > 0)
+        ObservationEntry(
+            text: _brief ?? _digest(transcript.sublist(0, _foldedThrough)).text,
+            outcome: Outcome.ok),
+      if (_foldedThrough > 0 && lastUser >= 0 && lastUser < _foldedThrough)
+        transcript[lastUser],
     ];
+    _lastClipped = 0;
+    _lastCleared = 0;
+    ToolCall? pending;
+    for (var i = _foldedThrough; i < clipped.length; i++) {
+      final entry = clipped[i];
+      if (entry is! ObservationEntry) {
+        pending = entry is AssistantEntry && entry.action is ToolCall
+            ? entry.action as ToolCall
+            : null;
+        view.add(entry);
+        continue;
+      }
+      final call = pending;
+      pending = null;
+      if (i < tailStart &&
+          call != null &&
+          entry.outcome == Outcome.ok &&
+          kRefetchableTools.contains(call.name)) {
+        _lastCleared++;
+        view.add(ObservationEntry(
+            text: _clearedPlaceholder(call),
+            outcome: entry.outcome,
+            toolCallId: entry.toolCallId));
+        continue;
+      }
+      if (!identical(entry, transcript[i])) _lastClipped++;
+      view.add(entry);
+    }
+    return view;
+  }
+
+  /// Clip every oversized observation (C4); indices stay aligned with the
+  /// transcript so pairing and fold boundaries are unaffected.
+  static List<Entry> _clipAll(List<Entry> transcript) =>
+      [for (final entry in transcript) _clipEntry(entry)];
+
+  static Entry _clipEntry(Entry entry) {
+    if (entry is! ObservationEntry) return entry;
+    final clipped = _clip(entry.text);
+    if (identical(clipped, entry.text)) return entry;
+    return ObservationEntry(
+        text: clipped, outcome: entry.outcome, toolCallId: entry.toolCallId);
+  }
+
+  /// Clip [text] to its head and tail with an elision marker when it exceeds
+  /// the observation cap (C4).
+  static String _clip(String text) {
+    final capChars = kObservationCapTokens * 4;
+    if (text.length <= capChars) return text;
+    final head = (capChars * 0.6).round();
+    final tail = capChars - head;
+    final elided = ((text.length - capChars) / 4).ceil();
+    return '${text.substring(0, head)}\n… $elided tokens elided …\n'
+        '${text.substring(text.length - tail)}';
+  }
+
+  /// The one-line replacement for a cleared re-fetchable tool result (C4):
+  /// name the tool and its path, query, or URL so a later step can re-run it.
+  static String _clearedPlaceholder(ToolCall call) {
+    final target = switch (call.name) {
+      'read' => call.arguments['path'],
+      'search' => call.arguments['pattern'],
+      'web_fetch' => call.arguments['url'],
+      _ => null,
+    };
+    final what =
+        target is String && target.trim().isNotEmpty ? ' $target' : '';
+    return '[cleared: ${call.name}$what — re-run to recover the output]';
   }
 
   /// The index to fold through when a fold is warranted, or [_foldedThrough]
-  /// when it is not.
+  /// when it is not. The watermark ratio is measured on the thinned view —
+  /// after clipping and clearing — so a fold is only warranted when the
+  /// cheaper levers were not enough (C4).
   int _desiredCut(String system, String toolsJson, List<Entry> transcript,
       {bool force = false}) {
     if (contextWindow <= 0 || transcript.length <= 1) return _foldedThrough;
-    final ratio = _estimate(system, toolsJson, transcript) / contextWindow;
+    final ratio =
+        _estimate(system, toolsJson, _view(transcript)) / contextWindow;
     final atGoalBoundary = transcript.last is UserEntry;
     final shouldFold = force ||
         ratio >= kCompactHighWater ||
         (atGoalBoundary && ratio >= kCompactWatermark);
     if (!shouldFold) return _foldedThrough;
-    final chosen =
-        _chooseCut(transcript, (contextWindow * kRetainFraction).round());
+    final chosen = _chooseCut(
+        _clipAll(transcript), (contextWindow * kRetainFraction).round());
     return chosen > _foldedThrough ? chosen : _foldedThrough;
   }
 

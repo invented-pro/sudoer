@@ -935,6 +935,72 @@ void main() {
       );
     });
 
+    test('clips an oversized observation, even in the recent tail', () {
+      final assembler =
+          ContextAssembler(contextWindow: 100000, systemPrompt: 'sys');
+      // Head and tail are wider than the clip keeps, so both survive intact
+      // while the middle is elided (C4).
+      final text = 'H' * 10000 + 'M' * 4000 + 'T' * 7000;
+      final transcript = <Entry>[
+        const UserEntry('goal'),
+        AssistantEntry(
+            thought: '',
+            action:
+                ToolCall(name: 'run_command', arguments: {'command': 'make'})),
+        ObservationEntry(text: text, outcome: Outcome.ok, toolCallId: 'c1'),
+      ];
+      final request = assembler.assemble(
+          model: 'm', tools: const [], transcript: transcript);
+      final shown = request.messages.whereType<ObservationEntry>().single.text;
+      expect(shown, contains('HHHH'));
+      expect(shown, contains('TTTT'));
+      expect(shown, contains('tokens elided'));
+      expect(shown.contains('MMMM'), isFalse);
+      expect(shown.length, lessThanOrEqualTo(kObservationCapTokens * 4 + 60));
+      // Clipping is a view; the stored transcript is unchanged.
+      expect((transcript[2] as ObservationEntry).text, same(text));
+    });
+
+    test('clears stale re-fetchable results outside the verbatim tail', () {
+      final assembler =
+          ContextAssembler(contextWindow: 600, systemPrompt: 'sys');
+      final transcript = <Entry>[
+        const UserEntry('goal'),
+        AssistantEntry(
+            thought: '',
+            action: ToolCall(name: 'read', arguments: {'path': 'lib/a.dart'})),
+        ObservationEntry(text: 'a' * 800, outcome: Outcome.ok, toolCallId: 'c0'),
+        AssistantEntry(
+            thought: '',
+            action:
+                ToolCall(name: 'read', arguments: {'path': 'lib/missing.dart'})),
+        ObservationEntry(
+            text: 'E' * 800, outcome: Outcome.error, toolCallId: 'c1'),
+        AssistantEntry(
+            thought: '',
+            action: ToolCall(name: 'read', arguments: {'path': 'lib/c.dart'})),
+        ObservationEntry(text: 'c' * 800, outcome: Outcome.ok, toolCallId: 'c2'),
+        const UserEntry('current goal'),
+      ];
+      final request = assembler.assemble(
+          model: 'm', tools: const [], transcript: transcript);
+      final texts =
+          request.messages.whereType<ObservationEntry>().map((o) => o.text);
+      // The middle read is a one-line, re-runnable placeholder...
+      expect(texts.first, contains('[cleared: read lib/a.dart'));
+      expect(texts.first, contains('re-run to recover the output'));
+      // ...an error observation survives verbatim even for a re-fetchable
+      // tool, and the recent tail is untouched.
+      expect(texts.skip(1).first, contains('EEEE'));
+      expect(texts.last, contains('cccc'));
+      expect(assembler.lastCompaction, isNull);
+      // The exchange stays paired and the stored transcript is unchanged.
+      expect(
+          request.messages.whereType<AssistantEntry>().map((a) => a.action),
+          everyElement(isA<ToolCall>()));
+      expect((transcript[2] as ObservationEntry).text, 'a' * 800);
+    });
+
     test('compacts at a goal boundary past the watermark, not mid-run', () {
       List<Entry> history(int n) => [
             const UserEntry('old goal'),
@@ -1016,7 +1082,7 @@ void main() {
             action: ToolCall(
                 name: 'edit', arguments: {'path': 'lib/a.dart'})),
         ObservationEntry(
-            text: 'x' * 400, outcome: Outcome.error, toolCallId: 'c2'),
+            text: 'x' * 800, outcome: Outcome.error, toolCallId: 'c2'),
         const UserEntry('current goal'),
       ];
       final request = assembler
@@ -1031,16 +1097,18 @@ void main() {
 
     test('folding never splits a tool call from its observation', () {
       final assembler =
-          ContextAssembler(contextWindow: 200, systemPrompt: 'sys');
+          ContextAssembler(contextWindow: 500, systemPrompt: 'sys');
       final transcript = <Entry>[
         const UserEntry('goal'),
         for (var i = 0; i < 6; i++) ...[
           AssistantEntry(
               thought: '',
               action: ToolCall(
-                  id: 'c$i', name: 'read', arguments: {'path': 'f$i'})),
+                  id: 'c$i',
+                  name: 'run_command',
+                  arguments: {'command': 'cmd $i'})),
           ObservationEntry(
-              text: 'x' * 200, outcome: Outcome.ok, toolCallId: 'c$i'),
+              text: 'x' * 400, outcome: Outcome.ok, toolCallId: 'c$i'),
         ],
         const UserEntry('current goal'),
       ];
