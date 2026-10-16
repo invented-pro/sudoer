@@ -1,0 +1,24 @@
+{
+  "id": "session-search",
+  "description": "The session index finds an earlier session by its title text through /sessions (C5).",
+  "turns": [
+    { "goal": "Plan the Lisbon trip." },
+    { "command": "/new" },
+    { "goal": "Hello." },
+    { "command": "/sessions Lisbon" }
+  ],
+  "script": {
+    "steps": [
+      { "complete": { "text": "Planned: three days in Lisbon." } },
+      { "complete": { "text": "Hi." } }
+    ]
+  },
+  "expect": {
+    "runs": [
+      { "status": "complete" },
+      { "status": "complete" }
+    ],
+    "stdoutContains": "Lisbon",
+    "sessionPersisted": true
+  }
+}

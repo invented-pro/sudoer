@@ -1,0 +1,32 @@
+{
+  "id": "prompt-prefix-stability",
+  "description": "Consecutive steps of a run reuse the previous prompt as a prefix — the C4 append-stability contract, asserted from recorded prompts.",
+  "goal": "Read notes.txt twice, then answer.",
+  "workspace": { "notes.txt": "alpha\nbeta\n" },
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "First read.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "read", "arguments": { "path": "notes.txt" } }
+          ]
+        }
+      },
+      {
+        "complete": {
+          "text": "Second read.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "read", "arguments": { "path": "notes.txt" } }
+          ]
+        }
+      },
+      { "complete": { "text": "Done." } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "tools": ["read", "read"],
+    "prefixStable": true
+  }
+}

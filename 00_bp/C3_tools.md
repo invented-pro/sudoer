@@ -1,6 +1,6 @@
 # C3 — Tools
 
-> Status: draft · Version 0.6 · **Current tier: Prop**
+> Status: draft · Version 0.7 · **Current tier: Prop**
 
 Tools are how the loop acts on the world: `C3` is the fixed catalog of
 built-in capabilities the model can invoke and the dispatch path that runs
@@ -12,8 +12,8 @@ A tool is a named function with a description and an argument schema. The
 model chooses a tool and arguments; the runtime validates and executes it
 and returns the result as an observation. Every tier acts through this same
 boundary. The tiers differ in the *domain* of the catalog: coding tools plus
-guarded, config-gated web access at Prop; personal filesystem and service
-connectors at Pilot; and app, messaging, and browser connectors at Orbit. A
+guarded, config-gated web access at Prop; personal service, messaging, and
+scheduling connectors at Pilot; and app and browser connectors at Orbit. A
 tool coding requires is a Prop tool whatever its mechanism, even when a
 higher component first names that mechanism.
 
@@ -190,3 +190,46 @@ host-shell abstraction, so the same agent runs on Linux, macOS, and Windows:
 - **Build per host.** The agent compiles to a native executable
   (`sudoer-prop`, or `sudoer-prop.exe` on Windows); Dart does not
   cross-compile, so each platform's binary is built on that platform.
+
+## Pilot
+
+Pilot widens the catalog's *domain*, not its disciplines: the same
+built-in registry, the same schema validation, the same dispatch path —
+now with a policy layer (`C10`) between validation and execution.
+
+| Tool | Purpose |
+| --- | --- |
+| `http` | One HTTP request (`method`, `url`, `headers?`, `body?`, `auth?`) under the network policy; the everyday connector for configured services. |
+| `notify` | Deliver a desktop notification (`title?`, `message`) through the host's notifier. |
+| `send` | Deliver a message to a registered channel (`{to, message, channel?}`, `C6`), under policy; the agent's outbound path to any messenger or the web page. |
+| `schedule` | Enrol a user task (`{when, goal, repeat?, channel?}`) in the scheduler (C11); one-shot or recurring. |
+| `secrets` | List secret *names* from the store (C10); values are never returned. |
+| `memory_write` / `memory_search` / `memory_read` | The memory store's tools (C9). |
+
+- **`http` under policy.** The request is checked against the network
+  policy (`C10`) — merged deny list, optional allow list — before any
+  socket opens, bounded by the web-class timeout and size cap (`C8`).
+  `auth` names a secret that the runtime injects as a header at
+  execution; the observation records the name, never the value. Response
+  text is untrusted data, like fetched web content.
+- **`send` under policy.** The outbound message goes to a registered
+  channel (`C6`); the target channel is validated against the channel
+  registry, the call passes the same policy path as any egress tool, and
+  it can require confirmation. Adapter credentials are injected at the
+  channel, never shown.
+- **`schedule` is user-directed.** The tool records a task; it never
+  causes the agent to invent work (`C11`). A `channel` argument routes
+  the eventual result (default: where the goal came from).
+- **`notify` is best-effort.** The notification goes out through the
+  host's notifier (Linux `notify-send`, macOS `osascript`, Windows
+  PowerShell toast). Failure or absence of a notifier is a recoverable
+  observation, not a block. The gate verifies delivery through an
+  injected recorder, not a real notifier.
+- **Multiple anchors.** `workspace_roots` (`C10`) generalizes the
+  workspace root: read-type file tools resolve a relative path against
+  the first root where it exists; writes and `run_command` use the
+  first (primary) root. The roots are anchors, never fences — the Prop
+  rule stands.
+- **App and browser connectors remain Orbit** (`C3` overview); Pilot's
+  connector surface is the generic `http` tool, the desktop `notify`,
+  and the channel API (`send` plus the inbound REST half in `C6`).

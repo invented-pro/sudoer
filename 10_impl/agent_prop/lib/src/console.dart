@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:dart_tui/dart_tui.dart' show RgbColor, Style;
 
 import 'config.dart';
+import 'diagnostics.dart';
 import 'markdown_render.dart';
 import 'models.dart';
 
@@ -389,16 +390,6 @@ String outcomeMark(Outcome outcome) => switch (outcome) {
       Outcome.error => '✗',
       Outcome.guardDenied => '⛔',
     };
-
-/// A compact human duration: `840ms`, `3.2s`, `2m03s`.
-String formatDuration(Duration d) {
-  final ms = d.inMilliseconds;
-  if (ms < 1000) return '${ms}ms';
-  if (ms < 60000) return '${(ms / 1000).toStringAsFixed(1)}s';
-  final minutes = d.inMinutes;
-  final seconds = d.inSeconds - minutes * 60;
-  return '${minutes}m${seconds.toString().padLeft(2, '0')}s';
-}
 
 /// Collapse [text] to one line and cap it at [max] characters.
 String briefText(Object? text, [int max = 100]) {

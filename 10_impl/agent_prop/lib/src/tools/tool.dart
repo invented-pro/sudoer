@@ -252,6 +252,7 @@ const Set<String> kWorkspaceSkipDirs = {
   '.sudoer',
   '.mise',
   '.dart_tool',
+  '.pub-cache',
   'node_modules',
   'build',
   'dist',

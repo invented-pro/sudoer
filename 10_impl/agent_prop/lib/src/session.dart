@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:path/path.dart' as p;
 
@@ -36,7 +37,7 @@ final class Session {
   /// it into the in-flight call so it aborts at once (C6, C8).
   final CancelSignal cancel = CancelSignal();
 
-  static int _counter = 0;
+  static final Random _rand = Random();
 
   factory Session.create({required String workspaceRoot, String? id}) {
     final now = DateTime.now().toUtc();
@@ -110,7 +111,16 @@ final class Session {
       ..sort();
   }
 
-  static String _newId() =>
-      's${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}'
-      '${(_counter++).toRadixString(36)}';
+  /// A new session id: a sortable UTC timestamp plus a short random suffix,
+  /// e.g. `20261006-064018-4f`. Readable and stable enough to recognise and
+  /// resume at a glance, unlike an opaque hash; the suffix keeps two sessions
+  /// opened in the same second distinct.
+  static String _newId() {
+    final now = DateTime.now().toUtc();
+    String two(int n) => n.toString().padLeft(2, '0');
+    final stamp = '${now.year}${two(now.month)}${two(now.day)}-'
+        '${two(now.hour)}${two(now.minute)}${two(now.second)}';
+    final suffix = _rand.nextInt(36 * 36).toRadixString(36).padLeft(2, '0');
+    return '$stamp-$suffix';
+  }
 }

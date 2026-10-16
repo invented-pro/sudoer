@@ -1,0 +1,27 @@
+{
+  "id": "catchup-missed",
+  "description": "An overdue one-shot is fired late, labeled, when catch_up is fire (C11).",
+  "clock": { "now": "2026-10-06T12:00:00Z" },
+  "config": { "autonomy": { "catch_up": "fire" } },
+  "tasks": [
+    { "id": "call", "when": "2026-10-06T09:00:00Z", "goal": "Call the dentist", "channel": "notify", "status": "pending", "created": "2026-10-05T09:00:00Z", "updated": "2026-10-05T09:00:00Z" }
+  ],
+  "ticks": [{ "tick": true }],
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "Calling is due.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "notify", "arguments": { "message": "[late] Call the dentist" } }
+          ]
+        }
+      },
+      { "complete": { "text": "Done." } }
+    ]
+  },
+  "expect": {
+    "tasks": { "dentist": { "status": "done" } },
+    "fired": [{ "task": "call", "due": "2026-10-06T09:00:00Z" }]
+  }
+}

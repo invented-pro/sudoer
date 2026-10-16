@@ -1,0 +1,136 @@
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
+
+import 'package:path/path.dart' as p;
+
+import 'cancellation.dart';
+import 'models.dart';
+
+/// C5: a continuous, persistent session. It holds the transcript and plan
+/// that survive across runs and can be resumed by id (see
+/// `00_bp/agent_prop/session.schema.json`).
+final class Session {
+  Session({
+    required this.id,
+    required this.workspaceRoot,
+    required this.createdAt,
+    required this.updatedAt,
+    required this.transcript,
+    required this.plan,
+    this.baseline,
+    this.channel,
+  });
+
+  final String id;
+  String workspaceRoot;
+  DateTime createdAt;
+  DateTime updatedAt;
+  final List<Entry> transcript;
+  List<PlanItem> plan;
+
+  /// Opaque handle to the workspace baseline captured at session open,
+  /// backing diff/restore (C3/C5). Refreshed when the workspace root changes;
+  /// never shown to the model.
+  String? baseline;
+
+  /// C5 Pilot: the registered channel this session is bound to (the web
+  /// page or a messenger adapter); null for a CLI session. One session per
+  /// channel; the mapping lives in the derived index.
+  String? channel;
+
+  /// Raised when the user cancels (`/cancel`, a double `Esc`); the loop passes
+  /// it into the in-flight call so it aborts at once (C6, C8). A server that
+  /// owns the session's run swaps the signal so a cancel POST reaches it.
+  CancelSignal cancel = CancelSignal();
+
+  static final Random _rand = Random();
+
+  factory Session.create({required String workspaceRoot, String? id, String? channel}) {
+    final now = DateTime.now().toUtc();
+    return Session(
+      id: id ?? _newId(),
+      workspaceRoot: workspaceRoot,
+      createdAt: now,
+      updatedAt: now,
+      transcript: <Entry>[],
+      plan: <PlanItem>[],
+      channel: channel,
+    );
+  }
+
+  factory Session.fromJson(Map<String, dynamic> json) => Session(
+        id: json['id'] as String,
+        workspaceRoot: json['workspace_root'] as String,
+        createdAt: DateTime.parse(json['created_at'] as String),
+        updatedAt: DateTime.parse(json['updated_at'] as String),
+        transcript: [
+          for (final entry in (json['transcript'] as List? ?? const []))
+            Entry.fromJson((entry as Map).cast<String, dynamic>()),
+        ],
+        plan: [
+          for (final item in (json['plan'] as List? ?? const []))
+            PlanItem.fromJson((item as Map).cast<String, dynamic>()),
+        ],
+        baseline: json['baseline'] as String?,
+        channel: json['channel'] as String?,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'created_at': createdAt.toIso8601String(),
+        'updated_at': updatedAt.toIso8601String(),
+        'workspace_root': workspaceRoot,
+        if (baseline != null) 'baseline': baseline,
+        if (channel != null) 'channel': channel,
+        'plan': [for (final item in plan) item.toJson()],
+        'transcript': [for (final entry in transcript) entry.toJson()],
+      };
+
+  /// Write this session to [sessionDir]; returns the file path.
+  String save(String sessionDir) {
+    final dir = Directory(sessionDir)..createSync(recursive: true);
+    final file = File(p.join(dir.path, '$id.json'));
+    file.writeAsStringSync(
+      const JsonEncoder.withIndent('  ').convert(toJson()),
+    );
+    return file.path;
+  }
+
+  /// Load a session by [id] from [sessionDir].
+  static Session load(String sessionDir, String id) {
+    final file = File(p.join(sessionDir, '$id.json'));
+    if (!file.existsSync()) {
+      throw StateError('session not found: $id');
+    }
+    return Session.fromJson(
+      (jsonDecode(file.readAsStringSync()) as Map).cast<String, dynamic>(),
+    );
+  }
+
+  /// List saved session ids in [sessionDir], sorted.
+  static List<String> list(String sessionDir) {
+    final dir = Directory(sessionDir);
+    if (!dir.existsSync()) return const [];
+    return dir
+        .listSync()
+        .whereType<File>()
+        .where((f) => f.path.endsWith('.json'))
+        .map((f) => p.basenameWithoutExtension(f.path))
+        .toList()
+      ..sort();
+  }
+
+  /// A new session id: a sortable UTC timestamp plus a short random suffix,
+  /// e.g. `20261006-064018-4f`. Readable and stable enough to recognise and
+  /// resume at a glance, unlike an opaque hash; the suffix keeps two sessions
+  /// opened in the same second distinct.
+  static String _newId() {
+    final now = DateTime.now().toUtc();
+    String two(int n) => n.toString().padLeft(2, '0');
+    final stamp = '${now.year}${two(now.month)}${two(now.day)}-'
+        '${two(now.hour)}${two(now.minute)}${two(now.second)}';
+    final suffix = _rand.nextInt(36 * 36).toRadixString(36).padLeft(2, '0');
+    return '$stamp-$suffix';
+  }
+}

@@ -3,15 +3,28 @@
 .dart_tool/
 build/
 
-# Compiled artifacts (dist/ + the published binary in the eval instance;
-# `sudoer-prop` on POSIX, `sudoer-prop.exe` on Windows)
-10_impl/agent_prop/dist/
+# Compiled artifacts: final builds live in 90_dist/ (not tracked);
+# 10_impl and 20_eval call them through symlinks, re-pointed per build
+10_impl/agent_prop/sudoer-prop
+10_impl/agent_prop/sudoer-prop.exe
+10_impl/agent_pilot/sudoer-pilot
+10_impl/agent_pilot/sudoer-pilot.exe
+10_impl/agent_orbit/sudoer-orbit
+10_impl/agent_orbit/sudoer-orbit.exe
 20_eval/agent_prop/sudoer-prop
 20_eval/agent_prop/sudoer-prop.exe
+20_eval/agent_pilot/sudoer-pilot
+20_eval/agent_pilot/sudoer-pilot.exe
+20_eval/agent_orbit/sudoer-orbit
+20_eval/agent_orbit/sudoer-orbit.exe
 
 # Release staging (keep the directory, ignore its contents)
 90_dist/*
 !90_dist/.gitkeep
+
+# Builder runtime state and archived generated/ trees (10_impl/agent_pilot)
+10_impl/agent_pilot/.build/
+10_impl/agent_pilot/.archive/
 
 # Runtime sessions
 .sudoer/

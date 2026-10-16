@@ -7,8 +7,13 @@ import '../config.dart';
 import '../interface.dart';
 import '../models.dart';
 import '../providers/scripted.dart';
+import '../reliability.dart';
 import '../session.dart';
 import 'task.dart';
+
+/// The gate never waits: the provider-retry backoff sleep is pinned to a no-op
+/// so a scripted timeout is retried instantly and runs stay deterministic (C8).
+Future<void> _noSleep(Duration _) async {}
 
 const Map<String, dynamic> _gateDefaults = {
   'provider': {'kind': 'ollama', 'model': 'scripted', 'context_window': 8192},
@@ -59,6 +64,7 @@ Future<TaskReport> runTask(Task task) async {
       err: err,
       providerFactory: (_) => provider,
       callLog: callLog,
+      reliability: const Reliability(sleep: _noSleep),
     );
 
     final last = outcome.runs.isEmpty ? null : outcome.runs.last;

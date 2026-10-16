@@ -1,0 +1,44 @@
+{
+  "id": "concurrent-sessions",
+  "description": "Two sessions served over the API both persist and appear in the store — one process, several sessions (C5, C6).",
+  "workspace": { "a.txt": "apple\n", "b.txt": "banana\n" },
+  "config": {
+    "http": { "token": "gatetoken-0123456789abcdef", "port": 0 }
+  },
+  "api": {
+    "steps": [
+      { "createSession": "alpha" },
+      { "createSession": "beta" },
+      { "run": "alpha", "goal": "Read a.txt and summarize it." },
+      { "run": "beta", "goal": "Read b.txt and summarize it." }
+    ]
+  },
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "Reading.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "read", "arguments": { "path": "a.txt" } }
+          ]
+        }
+      },
+      { "complete": { "text": "It says: apple." } },
+      {
+        "complete": {
+          "text": "Reading.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "read", "arguments": { "path": "b.txt" } }
+          ]
+        }
+      },
+      { "complete": { "text": "It says: banana." } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "answer": { "contains": "banana" },
+    "tools": ["read", "read"],
+    "sessionPersisted": true
+  }
+}

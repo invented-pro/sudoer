@@ -1,0 +1,25 @@
+{
+  "id": "send-confirm",
+  "description": "A confirm matcher on the outbound send tool on a non-interactive drive denies the send and blocks the run (C10).",
+  "goal": "Message Bob that I am running late.",
+  "config": {
+    "policy": { "confirm": [{ "tool": "send" }] }
+  },
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "Sending.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "send", "arguments": { "channel": "telegram", "to": "bob", "message": "Running late." } }
+          ]
+        }
+      }
+    ]
+  },
+  "expect": {
+    "status": "blocked",
+    "tools": ["send"],
+    "policy": [{ "event": "confirm_denied", "tool": "send" }]
+  }
+}

@@ -1,6 +1,6 @@
 # C5 — Sessions
 
-> Status: draft · Version 0.5 · **Current tier: Prop**
+> Status: draft · Version 0.6 · **Current tier: Prop**
 
 A session is the scope that surrounds a run: `C5` is the container the loop
 executes inside and the rules for what state, if any, persists around it.
@@ -85,6 +85,11 @@ stop
 - **Resumable.** A session has an id; `C6` resumes a saved session and
   continues from its transcript and plan, re-adopting the session's recorded
   `workspace_root`.
+- **Readable id.** A new session's default id is a UTC timestamp
+  `YYYYMMDD-HHMMSS` plus a short random suffix (e.g. `20261006-064828-5i`):
+  sortable, recognisable at a glance, and safe as a filename. The suffix
+  keeps two sessions opened in the same second distinct. A caller may pin an
+  explicit id (`--session`, `C6`), which is used verbatim.
 - **Workspace.** The session records its active `workspace_root`; changing
   the workspace during a session (`C6`) updates and persists it.
 - **Workspace baseline.** When a session opens, `C3` captures a baseline of
@@ -109,3 +114,32 @@ session directory; it holds at least `id`, `created_at`, `updated_at`,
 handle backing `diff`/`restore` (`C3`). The exact shape is frozen in
 [session.schema.json](agent_prop/session.schema.json) with the rest of
 Prop's contracts (`schemas.md`).
+
+## Pilot
+
+Pilot turns the session directory into a **store**: an index over saved
+sessions with search, and a registry allowing several sessions to be open
+at once. Session files themselves keep the Prop shape — the index is
+derived and rebuildable, never a second source of truth.
+
+- **Index.** `index.json` in the session directory records, per session:
+  `id`, `title` (first goal, first line), `workspace_root`, `channel?`,
+  `created`, `updated`, `runs`, and `last_status`. Updated atomically
+  (temp + rename) whenever a session file is written.
+- **Channel-keyed sessions.** A session may be bound to a channel — a
+  registered REST client (the web page or a messenger adapter, `C6`).
+  An inbound message resolves its channel's session (creating one on
+  first contact), so each messenger or thread keeps continuous history;
+  a scheduled task (`C11`) runs in its channel's session. The mapping
+  lives in the derived index, so it is rebuildable and never a second
+  source of truth.
+- **Search.** `/sessions [query]` (`C6`) and the HTTP API filter the
+  index by id, title substring, or date, then optionally grep matching
+  session files' transcripts — deterministic text search, capped
+  results, like `search` (`C3`). Conversations are searched here;
+  knowledge lives in memory (`C9`).
+- **Concurrent sessions.** One process may hold several open sessions
+  (the HTTP API requires it); runs within one session are serialized —
+  a second run on a busy session is rejected, not queued (`C6`) — while
+  runs across sessions proceed in parallel (`C8`). Every store write is
+  atomic.

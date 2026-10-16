@@ -1,6 +1,6 @@
 # C2 — Providers
 
-> Status: draft · Version 0.6 · **Current tier: Prop**
+> Status: draft · Version 0.7 · **Current tier: Prop**
 
 The provider is the model behind the loop: `C2` is the single boundary
 through which the agent reaches an LLM. The loop decides; the provider
@@ -174,3 +174,41 @@ endif
   fixed for the process.
 - **Model timeout.** The HTTP call is wrapped by the model-call timeout
   defined in `reliability` (C8).
+
+## Pilot
+
+Pilot replaces the single provider with an ordered **chain** and a small
+role catalog, for availability — not for new coding power (arch.md: the
+mechanism exists to stay reachable, which personal tasks need and coding
+does not).
+
+- **Chain.** `providers` (config) lists entries in failover order; the
+  Prop `provider` key remains valid as the one-element form. Index 0 is
+  primary. Every entry is a full Prop provider block; the configured kind
+  of each selects its adapter, so the chain may mix adapters.
+- **Roles.** `roles` maps names to `{provider index, model?}`. `main`
+  (default: index 0) serves the loop; `fast`, when set, is used for
+  tools-withheld calls — the compaction brief (`C4`) — reusing a smaller
+  model without changing loop behavior. `/model` (C6) switches `main`
+  at a goal boundary; a run always starts and finishes on one provider.
+- **Embedding role.** `embed`, when set, names the provider+model used
+  for memory embeddings (`C9`); it may point outside the failover chain
+  (an embeddings-only endpoint). When it is unset, memory uses the
+  configured `memory.embedder` directly (`C9`). The embedder is a
+  separate adapter path from the chat completion boundary: it shares
+  no loop state and never consumes the chain's failover.
+- **Retry, then failover.** A call first retries in place with bounded,
+  compiled-in backoff (`C8`). If it still fails — timeout or
+  unrecoverable — and the chain has a next entry, the *same assembled
+  prompt* is sent to it: the provider is stateless, so failover is
+  exact. Only when the chain is exhausted does the failure surface, with
+  Prop's semantics (timeout recoverable, unrecoverable blocks).
+- **Streamed failover.** A streamed call fails over only while no
+  visible chunk has arrived; once text has been delivered, an
+  inactivity timeout surfaces as a recoverable observation rather than
+  re-streaming a partial answer from another backend.
+- **Failover is observable.** A failover is reported through the
+  structured log (`C8`) and the verbose diagnostics, never silently.
+- **Scripted chain.** The gate injects a chain of scripted providers the
+  same way Prop injects one — harness-injected, never config-reachable
+  (`agent_pilot/gate.md`).

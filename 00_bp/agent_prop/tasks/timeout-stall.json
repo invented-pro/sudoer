@@ -1,9 +1,15 @@
 {
   "id": "timeout-stall",
-  "description": "Recoverable provider timeouts make no progress; after the stall budget the run ends incomplete with a local summary.",
+  "description": "A provider timeout is retried in place a bounded number of times, then counts as no progress; after the stall budget the run ends incomplete with a local summary.",
   "goal": "Answer the question.",
   "script": {
     "steps": [
+      { "error": "timeout" },
+      { "error": "timeout" },
+      { "error": "timeout" },
+      { "error": "timeout" },
+      { "error": "timeout" },
+      { "error": "timeout" },
       { "error": "timeout" },
       { "error": "timeout" },
       { "error": "timeout" },

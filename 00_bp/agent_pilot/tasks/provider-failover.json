@@ -1,0 +1,43 @@
+{
+  "id": "provider-failover",
+  "description": "The primary times out through its retries; the chain fails over and the same prompt completes on the secondary (C2, C8).",
+  "goal": "Read notes.txt and tell me the first line.",
+  "workspace": { "notes.txt": "first line: hello\n" },
+  "config": {
+    "providers": [
+      { "kind": "ollama", "model": "primary-scripted", "context_window": 8192 },
+      { "kind": "ollama", "model": "secondary-scripted", "context_window": 8192 }
+    ]
+  },
+  "scripts": [
+    {
+      "steps": [
+        { "error": "timeout" },
+        { "error": "timeout" },
+        { "error": "timeout" }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "complete": {
+            "text": "Reading.",
+            "tool_calls": [
+              { "type": "tool_call", "name": "read", "arguments": { "path": "notes.txt" } }
+            ]
+          }
+        },
+        { "complete": { "text": "The first line is: hello" } }
+      ]
+    }
+  ],
+  "expect": {
+    "status": "complete",
+    "answer": { "contains": "hello" },
+    "tools": ["read"],
+    "logs": [
+      { "kind": "provider_call" },
+      { "kind": "run_end", "status": "complete" }
+    ]
+  }
+}

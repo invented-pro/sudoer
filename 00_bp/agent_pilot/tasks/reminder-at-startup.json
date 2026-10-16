@@ -1,0 +1,14 @@
+{
+  "id": "reminder-at-startup",
+  "description": "A task that came due while the agent was away is reported at startup and stays pending under the default report policy — never auto-run (C11).",
+  "clock": { "now": "2026-10-06T09:00:00Z" },
+  "workspace": {
+    ".sudoer/tasks.json": "{\n  \"tasks\": [\n    { \"id\": \"stretch\", \"when\": \"2026-10-06T08:00:00Z\", \"next_due\": \"2026-10-06T08:00:00Z\", \"goal\": \"Stretch.\", \"status\": \"pending\", \"created\": \"2026-10-05T08:00:00Z\", \"updated\": \"2026-10-05T08:00:00Z\" }\n  ]\n}\n"
+  },
+  "turns": [{ "command": "/exit" }],
+  "script": { "steps": [] },
+  "expect": {
+    "stdoutContains": "Stretch",
+    "tasks": { "Stretch.": { "status": "pending" } }
+  }
+}

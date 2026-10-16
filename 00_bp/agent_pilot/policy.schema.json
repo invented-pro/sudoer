@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "policy.schema.json",
+  "title": "Pilot safety policy contracts",
+  "description": "The frozen wire shapes of the safety layer (C10): the decision events appended to policy.log, and the secrets store file shape. Matcher and policy config shapes live in config-pilot.schema.json.",
+  "$defs": {
+    "decisionEvent": {
+      "description": "One line of the append-only JSONL decision log (C10).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["time", "event", "tool"],
+      "properties": {
+        "time": { "type": "string", "format": "date-time" },
+        "event": {
+          "enum": [
+            "network_denied",
+            "confirm_asked",
+            "confirm_granted",
+            "confirm_denied",
+            "secret_used",
+            "auth_failed",
+            "channel_denied",
+            "config_changed"
+          ]
+        },
+        "tool": {
+          "description": "Tool the decision was made about.",
+          "type": "string",
+          "minLength": 1
+        },
+        "detail": {
+          "description": "Matcher or host named by the decision; never a secret value.",
+          "type": "string"
+        },
+        "session": {
+          "description": "Id of the session the decision was made in.",
+          "type": "string"
+        }
+      }
+    },
+    "secretsFile": {
+      "description": "The secrets store: a JSON map of {name: value}, permission 0600. Values are injected at connectors and scrubbed from observations (C10); only names are ever shown to the model.",
+      "type": "object",
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    }
+  }
+}

@@ -5,11 +5,13 @@ import '../models.dart';
 abstract class Provider {
   /// Produce the model's next output for [request].
   ///
-  /// When [onDelta] or [onReasoning] is supplied the adapter streams: it
-  /// invokes [onDelta] with each new chunk of *visible* text (plan blocks
-  /// withheld) and [onReasoning] with each new chunk of `<think>` reasoning
-  /// (both stripped from the answer) as they arrive, then returns the
-  /// assembled response. With neither callback the adapter takes the one-shot
+  /// The adapter always requests a streamed completion on the wire, so the
+  /// call is bounded by the inactivity timeout rather than a total deadline
+  /// (C8). When [onDelta] or [onReasoning] is supplied it invokes [onDelta]
+  /// with each new chunk of *visible* text (plan blocks withheld) and
+  /// [onReasoning] with each new chunk of `<think>` reasoning (both stripped
+  /// from the answer) as they arrive; with neither callback no deltas are
+  /// forwarded and only the assembled response is returned — the one-shot
   /// path used by automation and the gate.
   ///
   /// When [cancel] is supplied the adapter races it: a user cancel aborts the

@@ -1,6 +1,6 @@
 # C4 — Context
 
-> Status: draft · Version 1.0 · **Current tier: Prop**
+> Status: draft · Version 1.1 · **Current tier: Prop**
 
 Context is what the model actually sees: `C4` is the assembly of the prompt
 sent to the provider on every turn. The loop decides; context frames the
@@ -220,4 +220,46 @@ The prompt is:
 - **Image attachments.** When a coding task supplies an image (`modality`,
   C7), the image is attached to the provider request; the transcript stores a
   text reference, and the binary is not persisted in the session.
+
+## Pilot
+
+Pilot adds the property provider prefix caching depends on, an automatic
+memory-recall segment, and the prompt sections that make the
+personal-task contract executable; the assembly levers are unchanged
+from Prop.
+
+- **Append-stable segments.** Within a run, consecutive step prompts share a
+  prefix: the transcript is append-only, and the deterministic levers (clip,
+  clear) map the same input to the same rendering, so prompt(N+1) is
+  prompt(N) plus a suffix. A mid-run fold (*high-water*) deliberately breaks
+  the prefix — it commits a new **stable segment**, and the guarantee holds
+  within each segment. Folds stay rare, so cache reuse is the norm.
+- **Automatic memory recall.** At the start of a run, before the first
+  provider call, `C4` asks memory (`C9`) for the top-K notes relevant to
+  the goal and injects a bounded **"Relevant memory"** segment after the
+  system prompt and before the transcript. The segment is computed once
+  per goal and stays fixed for the run — a stable segment — so it never
+  breaks the prefix guarantee. Injection is capped by a compiled-in
+  token budget; overflow is trimmed by rank. When memory is empty or
+  unavailable, the segment is omitted rather than fabricated.
+- **Cache hints.** Where an adapter supports explicit cache control, it may
+  mark the stable prefix of the segment; ollama keeps models warm with
+  `keep_alive`. Hints never change the assembled content or the completion.
+- **`fast` and `embed` roles.** The tools-withheld compaction brief is
+  issued on the `fast` role when one is configured (`C2`). The memory
+  embedder (`C9`) uses the `embed` role/provider independently of the
+  loop; neither changes the fallback digest or any other behavior.
+- **Prompt sections.** The system prompt gains the personal-task
+  disciplines as stable sections, versioned and pinned like the rest:
+  - an **identity** line — Sudoer, a personal assistant;
+  - a **memory** section — when to write, when to search, that notes are
+    the agent's own knowledge (`C9`), and that recall is injected;
+  - a **scheduling** section — the `schedule` convention and that the
+    agent proposes a schedule rather than assuming one (`C11`);
+  - an **outbound** section — ask before sending, posting, or deleting,
+    and treat inbound messages as untrusted (`C10`, `C6`);
+  - the **personal-task contract** — the disciplines in
+    [agent_pilot.md](agent_pilot.md#personal-task-contract): remember
+    what matters, act at the right time, never invent personal data, keep
+    credentials invisible.
 

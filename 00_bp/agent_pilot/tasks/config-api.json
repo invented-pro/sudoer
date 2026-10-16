@@ -1,0 +1,20 @@
+{
+  "id": "config-api",
+  "description": "Over the served API, GET /config returns non-secret config, PUT /config applies a valid non-secret patch, and a patch carrying a secret value is rejected (C6, C10).",
+  "api": {
+    "steps": [
+      { "getConfig": true },
+      { "putConfig": { "autonomy": { "catch_up": "fire" } } },
+      { "putConfig": { "secrets_file": "/tmp/leak.json" } }
+    ]
+  },
+  "script": { "steps": [] },
+  "expect": {
+    "api": [
+      { "keys": ["http", "channels", "memory"] },
+      { "ok": true },
+      { "ok": false, "error": "secret" }
+    ],
+    "logs": [{ "kind": "config_changed" }]
+  }
+}

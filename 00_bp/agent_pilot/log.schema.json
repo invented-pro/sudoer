@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "log.schema.json",
+  "title": "Pilot structured log events",
+  "description": "The append-only JSONL event log (C8): one line per event to log_file. Times come from the injected clock; secret values are always scrubbed (C10).",
+  "$defs": {
+    "logEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["time", "kind", "data"],
+      "properties": {
+        "time": { "type": "string", "format": "date-time" },
+        "kind": {
+          "enum": [
+            "run_start",
+            "run_end",
+            "step",
+            "tool_call",
+            "provider_call",
+            "policy_decision",
+            "task_scheduled",
+            "task_fired",
+            "task_done",
+            "channel_in",
+            "channel_out",
+            "config_changed",
+            "service_start",
+            "service_stop"
+          ]
+        },
+        "session": { "type": "string" },
+        "data": { "type": "object" }
+      }
+    },
+    "runStartData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal"],
+      "properties": {
+        "goal": { "type": "string" },
+        "origin": { "enum": ["user", "system"] }
+      }
+    },
+    "runEndData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "steps"],
+      "properties": {
+        "status": { "enum": ["complete", "incomplete", "blocked", "cancelled"] },
+        "steps": { "type": "integer", "minimum": 0 },
+        "answer": { "type": "string" }
+      }
+    },
+    "toolCallData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "outcome"],
+      "properties": {
+        "tool": { "type": "string" },
+        "outcome": { "enum": ["ok", "error", "guard_denied"] },
+        "detail": { "type": "string" }
+      }
+    },
+    "providerCallData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "outcome"],
+      "properties": {
+        "provider": { "type": "integer", "minimum": 0 },
+        "outcome": { "enum": ["ok", "timeout", "unrecoverable"] },
+        "failover": { "type": "boolean" }
+      }
+    },
+    "taskData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task", "action"],
+      "properties": {
+        "task": { "type": "string" },
+        "action": {
+          "enum": ["scheduled", "fired", "done", "rescheduled", "cancelled", "reported"]
+        },
+        "due": { "type": "string", "format": "date-time" },
+        "repeat": { "type": "string" }
+      }
+    },
+    "channelData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channel", "action"],
+      "properties": {
+        "channel": { "type": "string" },
+        "action": { "enum": ["in", "out", "denied", "unknown"] },
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "task": { "type": "string" }
+      }
+    },
+    "configData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action"],
+      "properties": {
+        "action": { "enum": ["changed", "rejected"] },
+        "keys": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "serviceData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action"],
+      "properties": {
+        "action": { "enum": ["start", "stop", "wake_armed"] },
+        "next_due": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

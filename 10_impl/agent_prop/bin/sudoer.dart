@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:args/args.dart';
+import 'package:path/path.dart' as p;
 
 import 'package:sudoer_prop/src/build_info.dart';
 import 'package:sudoer_prop/src/config.dart';
@@ -22,7 +23,7 @@ Future<void> main(List<String> args) async {
       help: 'Path to a JSON config file.',
       defaultsTo: Platform.environment['SUDOER_CONFIG'] ?? 'sudoer.json',
     )
-    ..addOption('session', abbr: 's', help: 'Resume a saved session by id.')
+    ..addOption('session', abbr: 's', help: 'Resume (or create) a session by id.')
     ..addFlag('automate', negatable: false,
         help: 'Use the line-oriented surface (for scripts); the default is '
             'the human TUI.')
@@ -75,16 +76,28 @@ Future<void> main(List<String> args) async {
       ) ==
       UiMode.human;
   try {
+    // `--session` names the session on every surface, not just the REPL: a
+    // one-shot goal must resume it too. Resume the named session if it is
+    // saved, otherwise start a new one under that id (so a caller that
+    // pins an id gets one stable session across runs).
+    final resumeId = results['session'] as String?;
+    Session? session;
+    if (resumeId != null) {
+      final saved = File(p.join(config.sessionDir, '$resumeId.json'));
+      session = saved.existsSync()
+          ? Session.load(config.sessionDir, resumeId)
+          : Session.create(
+              workspaceRoot: config.workspaceRoot, id: resumeId);
+    }
+
     // A positional goal is a one-shot convenience.
     if (goal.isNotEmpty) {
       exit(await runCli(
-          config: config, goal: goal, verbose: verbose, human: human));
-    }
-
-    Session? session;
-    final resumeId = results['session'] as String?;
-    if (resumeId != null) {
-      session = Session.load(config.sessionDir, resumeId);
+          config: config,
+          goal: goal,
+          verbose: verbose,
+          human: human,
+          session: session));
     }
 
     // On a real terminal the human surface reads raw keys itself (line
@@ -176,9 +189,10 @@ void _printUsage(ArgParser parser, {IOSink? to}) {
     ..writeln('Examples:')
     ..writeln('  sudoer-prop -c ollama.json          # interactive session')
     ..writeln('  sudoer-prop -c ollama.json "Read README.md and summarize it"')
-    ..writeln('  sudoer-prop -c ollama.json -s s1a2b3 # resume a session')
+    ..writeln('  sudoer-prop -c ollama.json -s s1a2b3 "and now the tests"')
     ..writeln()
-    ..writeln('Exit codes: 0 = clean exit (incomplete included);')
-    ..writeln('            1 = fatal error, or the final run was blocked;')
+    ..writeln('Exit codes: 0 = the final run completed;')
+    ..writeln('            1 = the final run was incomplete or blocked,')
+    ..writeln('                or a fatal error occurred;')
     ..writeln('            2 = usage or config error.');
 }

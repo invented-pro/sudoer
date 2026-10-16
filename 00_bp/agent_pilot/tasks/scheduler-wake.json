@@ -1,0 +1,28 @@
+{
+  "id": "scheduler-wake",
+  "description": "The OS wake path: with no interactive session, a tick fires a due task and delivers it (C11).",
+  "clock": { "now": "2026-10-06T09:00:00Z" },
+  "tasks": [
+    { "id": "stretch", "when": "2026-10-06T08:59:00Z", "goal": "Stretch and roll your shoulders", "channel": "notify", "status": "pending", "created": "2026-10-05T09:00:00Z", "updated": "2026-10-05T09:00:00Z" }
+  ],
+  "ticks": [{ "tick": true }],
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "Reminder sent.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "notify", "arguments": { "title": "Reminder", "message": "Stretch." } }
+          ]
+        }
+      },
+      { "complete": { "text": "Done." } }
+    ]
+  },
+  "expect": {
+    "tasks": { "Stretch and roll": { "status": "done" } },
+    "notifications": [{ "message": "Stretch" }],
+    "logs": [{ "kind": "task_fired" }, { "kind": "task_done" }],
+    "scheduler": ["sudoer-pilot tick"]
+  }
+}

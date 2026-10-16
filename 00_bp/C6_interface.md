@@ -1,6 +1,6 @@
 # C6 — Interface
 
-> Status: draft · Version 1.5 · **Current tier: Prop**
+> Status: draft · Version 1.7 · **Current tier: Prop**
 
 The interface is how a human reaches the agent: `C6` is the surface that
 takes a goal in and puts an answer out. The loop is the engine; the
@@ -11,8 +11,10 @@ interface is the dashboard.
 Every tier exposes the agent through some surface, and every surface funnels
 into the same session (C5) and loop (C1) with a goal and an answer. The
 tiers differ in the surfaces offered: a human terminal UI and a line CLI for
-automation at Prop, an HTTP API beside them at Pilot, and a gateway
-daemon with desktop and chat clients at Orbit.
+automation at Prop; a **web page** for non-technical users and a
+**REST server** that everything else (messenger adapters, scripts, the
+scheduler) plugs into, at Pilot; and a multi-user gateway with desktop
+clients at Orbit.
 
 ```plantuml
 @startuml
@@ -173,11 +175,18 @@ and is not offered here.
   the plain surface; a non-interactive stdin/stdout selects it automatically,
   so scripts, pipes, and the gate never block on a prompt. `--human` forces
   the styled surface when terminal detection is wrong.
-- **Session and one-shot.** `--session <id>` resumes a saved session at
-  startup (C5); without it a new session opens. A positional goal argument
-  runs exactly one goal on the plain surface — even on a terminal — then
-  exits; the exit code follows *Exit codes* below. The one-shot form is what
-  scripts and the gate's CLI smoke drive.
+- **Session and one-shot.** `--session <id>` names the session on both
+  surfaces: it resumes that saved session, or opens a new one under that id if
+  none exists yet (so a caller that pins an id gets one stable session across
+  runs). Without it a new session opens with a readable id (C5). A positional
+  goal argument runs exactly one goal on the plain surface — even on a
+  terminal — then exits; the exit code follows *Exit codes* below. The
+  one-shot form is what scripts and the gate's CLI smoke drive.
+- **Resume hint.** On the automate surface the interface logs the session id
+  on exit (stderr, alongside the timings) as
+  `session <id> (resume: --session <id>)`, so a scripted or one-shot run is
+  easy to pick up again by copy-pasting the flag. Stdout stays the clean
+  answer surface.
 - **Streaming.** On the human surface the provider streams generated text
   (`C2`) and the loop forwards visible deltas (`C1`), which are written inline
   to stdout, while reasoning deltas (`<think>`, C2) stream dim and italic to
@@ -224,11 +233,14 @@ and is not offered here.
   call and its evaluated result (`C3`), plan updates and progress/stall
   accounting (`C1`), guard timeouts (`C8`), and the final status. It is off by default
   and never touches stdout.
-- **Exit codes.** Zero on a clean exit — any final run status that delivered
-  an answer, `incomplete` included. Non-zero on a fatal startup or
-  configuration error, or when the final run is `blocked` and delivered
-  nothing. Complete and incomplete are still reported as status, not exit
-  codes.
+- **Exit codes.** Zero only when the final run status is `complete`. A run
+  that did not complete — `incomplete` (a stall or the step ceiling; it may
+  still have delivered a best-effort answer) or `blocked` — exits non-zero, so
+  scripts and the build button treat it as failure rather than success; a fatal
+  startup or configuration error also exits non-zero. The status string
+  (`complete` / `incomplete` / `blocked`) still distinguishes *why* for callers
+  that need more than success/failure, but the exit code never reports a
+  non-`complete` run as clean.
 - **Cancellation.** A run is aborted at once (C8) — a model request is cut off
   mid-stream and a running command is killed — so the surface returns
   immediately instead of waiting for the model to finish; the session and its
@@ -273,3 +285,119 @@ settings are fixed for the process; session-level, non-policy settings
 (active session, workspace root, verbosity) may change during a session via
 commands. User-tunable policy and model/provider switching arrive with
 `safety` (C10) and the Pilot catalog (C2).
+
+## Pilot
+
+Pilot keeps both Prop surfaces untouched and makes the **REST API the
+spine**: one resident server hosts a built-in web page and everything
+else — messenger adapters, scripts, other machines — connects to it as a
+client. New CLI commands cover the Pilot components; new config keys are
+frozen in [config-pilot.schema.json](agent_pilot/config-pilot.schema.json).
+
+| Command | Effect |
+| --- | --- |
+| `/schedule <when> <goal>` | set a scheduled task, one-shot or recurring (C11) |
+| `/remind <when> <goal>` | one-shot sugar for `/schedule` (C11) |
+| `/tasks [cancel <id> \| run <id>]` | list pending tasks; cancel or fire one (C11) |
+| `/memory [query \| rebuild]` | list or search memory notes; rebuild the embedding index (C9) |
+| `/model [name]` | show the catalog, or switch `main` at the next goal boundary (C2) |
+| `/channels` | list registered channels and their status (C6) |
+
+### REST server (the spine)
+
+`sudoer-pilot serve` runs a single-owner REST server. The web page,
+messenger adapters, scripts, and the scheduler/background runner all
+live in or talk to this one process. It is what makes Pilot a personal
+assistant rather than a REPL you must keep open. `serve`, `tick`,
+`install`, `uninstall`, and `status` are CLI **subcommands**, dispatched
+before any goal is parsed; the binary identifies itself as
+`sudoer-pilot` in `--version` and `--help`, never Prop's name.
+
+- **Auth.** One bearer token (`http.token`, generated and printed once
+  to stderr when absent). API clients send
+  `Authorization: Bearer <token>`; the web page logs in with the token
+  and receives a signed, `HttpOnly`, `SameSite` session cookie. It is a
+  **single owner**: no accounts, no per-user permissions (multi-user
+  access is `C15`, Orbit). Every endpoint but the login page and static
+  assets requires auth.
+- **Bind.** Loopback by default; `http.bind` may name a LAN/interface
+  address so adapters on another host can connect. When it is not
+  loopback, the token is the only gate, so the server refuses to start
+  without a token.
+- **Endpoints.** Frozen in
+  [http-api.schema.json](agent_pilot/http-api.schema.json): sessions
+  list/search/new/info; one streamed run per session (SSE events
+  `delta`, `tool`, `result`), cancel; channels list/register/remove;
+  inbound `POST /channels/{id}/messages`; scheduled tasks; non-secret
+  config get/update; secret *names*; service status. A run POSTed to a
+  busy session is `409`. The server reuses the automate run machinery
+  and the human surface's delta callbacks; it never renders styled
+  output.
+- **Supervision.** The service reloads the task store, arms the next
+  wake (`C11`), and resumes unfinished background runs on start
+  (`C8`). It shuts down cleanly on SIGTERM.
+- **Wake-only mode.** The same binary serves `sudoer-pilot tick` — a
+  one-shot fire-and-exit used by the OS scheduler (`C11`) — and
+  `sudoer-pilot install` / `uninstall` / `status` manage the OS hook.
+
+### Web page
+
+The first-party non-technical client, served by the server at `/`. It is
+a client of the REST API, not a special path.
+
+- **Pages.** `chat` (talk to the agent), `config` (view and edit
+  non-secret configuration; secrets appear as names only), and `status`
+  (service state, next fire, channels).
+- **Auth.** A login form takes the bearer token once and sets the
+  session cookie; subsequent page and `fetch` calls ride the cookie.
+- **Chat.** Streams the reply over SSE from the same run endpoint;
+  history is the channel's session (`C5`).
+- **Config.** Reads `GET /config` and writes `PUT /config` for
+  non-secret keys only; the server validates the merged object against
+  the config schema before it takes effect, and a change is logged
+  (`C10`). Secret values are never sent to the page, in either
+  direction.
+- **Presentation.** Basic, server-rendered HTML, inline; no full-screen
+  takeover.
+
+### Channels and messenger adapters
+
+A **channel** is a registered REST client with a stable id. The built-in
+`web` channel is the web page; a **messenger adapter** is an external
+program (possibly on another machine) that implements the same contract
+for a messaging service. This is how non-CLI users reach the agent, and
+how new messengers are added without touching Pilot.
+
+- **Registration.** Channels come from config (`channels: [...]`, `C6`)
+  or are registered over the API; each is
+  `{id, kind?, outbound_url?, outbound_secret?, allow_from?, enabled?}`,
+  frozen in [channel.schema.json](agent_pilot/channel.schema.json).
+- **Inbound.** An adapter POSTs `{from, text}` to
+  `/channels/{id}/messages`. If the channel is enabled and the sender is
+  permitted (`allow_from`, empty = any), the text becomes a goal in that
+  channel's session (`C5`, channel-keyed) and runs exactly like a CLI
+  goal. Otherwise the request is refused (`403`) and logged; its text
+  never reaches the model (`C10`).
+- **Outbound.** Pilot delivers a reply, or a scheduled/background
+  result, by POSTing `{to, text, at, task?}` to the channel's
+  `outbound_url`; the `web` channel delivers over SSE instead. The
+  adapter must expose an endpoint Pilot can reach (loopback or LAN).
+- **Adapters.** Telegram and Signal are first-party reference adapters,
+  specified by [adapter.md](agent_pilot/adapter.md) and generated by the
+  builder from that blueprint; each bridges its service to this contract
+  and sits outside the agent core and outside the gate. An adapter's own
+  service credentials live with the adapter, never in Pilot; a channel's
+  optional `outbound_secret` is the shared secret Pilot injects as a
+  bearer header on outbound delivery (`C10`).
+- **Outbound from the agent.** The `send` tool (`C3`) delivers to a
+  channel under policy (`C10`); a scheduled task or background run
+  delivers to its task channel the same way (`C11`).
+- **Untrusted input.** Inbound channel text is data, not instructions,
+  exactly like fetched web content (`C3`).
+
+### Tasks in the surface
+
+At startup, tasks that came due while away are listed or fired per
+`autonomy.catch_up` (`C11`). Between runs, a fired task is echoed like a
+goal and its run proceeds exactly like a user goal. On the web page a
+proactive message is marked so the user can tell it from a reply.

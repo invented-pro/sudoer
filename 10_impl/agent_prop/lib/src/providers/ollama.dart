@@ -33,14 +33,17 @@ final class OllamaProvider implements Provider {
     if (cancel?.isCancelled ?? false) {
       throw const StepFailure.cancelled('cancelled by user');
     }
-    final streaming = onDelta != null || onReasoning != null;
     final http.Request httpRequest;
     try {
       httpRequest = http.Request('POST', Uri.parse('$_base/api/chat'))
         ..headers['content-type'] = 'application/json'
         ..body = jsonEncode({
           'model': request.model,
-          'stream': streaming,
+          // Always stream on the wire so the call is bounded by the
+          // inactivity timeout rather than a total deadline (C8): a long
+          // generation is never cut off while it is producing. Callers
+          // without callbacks simply receive no deltas.
+          'stream': true,
           'messages': ollamaMessages(request),
           if (request.tools.isNotEmpty) 'tools': _toolJson(request.tools),
           if (config.sampling != null) 'options': config.sampling!.ollamaJson(),
@@ -60,12 +63,6 @@ final class OllamaProvider implements Provider {
       final body = await response.stream.bytesToString();
       throw StepFailure.unrecoverable(
           'provider HTTP ${response.statusCode}: $body');
-    }
-    if (!streaming) {
-      final decoded =
-          jsonDecode(await response.stream.bytesToString()) as Map<String, dynamic>;
-      final message = (decoded['message'] as Map).cast<String, dynamic>();
-      return parseCompletion(_completion(message));
     }
     return _stream(response, onDelta, onReasoning, cancel);
   }
@@ -137,18 +134,6 @@ final class OllamaProvider implements Provider {
             },
           }
       ];
-
-  Completion _completion(Map<String, dynamic> message) {
-    final toolCalls = _parseToolCalls(message['tool_calls']);
-    final think = parseThinkBlock(message['content'] as String? ?? '');
-    final parsed = parsePlanBlock(think.text);
-    return Completion(
-      text: parsed.text,
-      toolCalls: toolCalls,
-      plan: parsed.plan,
-      reasoning: think.reasoning,
-    );
-  }
 }
 
 List<ToolCall> _parseToolCalls(Object? raw) {

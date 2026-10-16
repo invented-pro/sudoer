@@ -1,0 +1,17 @@
+{
+  "id": "embedding-index-rebuild",
+  "description": "The embedding index is derived: /memory rebuild produces the same ids from the note files (C9).",
+  "workspace": {
+    ".sudoer/memory/a.md": "---\nid: a\ntitle: Alpha\ntags: one\ncreated: 2026-10-01T10:00:00Z\nupdated: 2026-10-01T10:00:00Z\n---\nAlpha note.\n",
+    ".sudoer/memory/b.md": "---\nid: b\ntitle: Beta\ntags: two\ncreated: 2026-10-01T10:00:00Z\nupdated: 2026-10-01T10:00:00Z\n---\nBeta note.\n"
+  },
+  "embedder": "fake",
+  "turns": [
+    { "command": "/memory rebuild" },
+    { "command": "/exit" }
+  ],
+  "script": { "steps": [] },
+  "expect": {
+    "embeddings": { "model": "fake-embed", "ids": ["a", "b"] }
+  }
+}

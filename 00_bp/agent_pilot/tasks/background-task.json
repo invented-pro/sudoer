@@ -1,0 +1,26 @@
+{
+  "id": "background-task",
+  "description": "A delegated background run continues after the CLI exits and reports through notify (C11).",
+  "clock": { "now": "2026-10-06T09:00:00Z" },
+  "turns": [
+    { "goal": "Run the test suite in the background and tell me when it is done." }
+  ],
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "Queueing it.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "schedule", "arguments": { "when": "+0m", "goal": "Run the test suite and report the result", "channel": "notify" } }
+          ]
+        }
+      },
+      { "complete": { "text": "I will report back." } },
+      { "complete": { "text": "Tests passed." } }
+    ]
+  },
+  "expect": {
+    "tasks": { "Run the test suite": { "status": "done" } },
+    "notifications": [{ "message": "Tests passed" }]
+  }
+}

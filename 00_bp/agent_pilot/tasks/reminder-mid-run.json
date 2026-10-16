@@ -1,0 +1,33 @@
+{
+  "id": "reminder-mid-run",
+  "description": "A scheduled task due now fires between runs as a system goal and is delivered through notify (C11, C3).",
+  "clock": { "now": "2026-10-06T09:00:00Z" },
+  "turns": [
+    { "command": "/remind +0m Stretch and roll your shoulders" },
+    { "goal": "Working." }
+  ],
+  "script": {
+    "steps": [
+      { "complete": { "text": "Working on it." } },
+      {
+        "complete": {
+          "text": "A task is due.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "notify", "arguments": { "title": "Reminder", "message": "Stretch and roll your shoulders." } }
+          ]
+        }
+      },
+      { "complete": { "text": "Reminder delivered." } }
+    ]
+  },
+  "expect": {
+    "runs": [
+      { "status": "complete", "answer": { "equals": "Working on it." } },
+      { "status": "complete", "answer": { "equals": "Reminder delivered." } }
+    ],
+    "tools": ["notify"],
+    "tasks": { "Stretch and roll": { "status": "done" } },
+    "notifications": [{ "message": "Stretch and roll" }],
+    "logs": [{ "kind": "task_fired" }]
+  }
+}

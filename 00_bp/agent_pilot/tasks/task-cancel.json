@@ -1,0 +1,17 @@
+{
+  "id": "task-cancel",
+  "description": "A pending task can be cancelled from the interface and is logged (C11).",
+  "clock": { "now": "2026-10-06T09:00:00Z" },
+  "tasks": [
+    { "id": "stretch", "when": "2026-10-07T09:00:00Z", "goal": "Stretch", "channel": "notify", "status": "pending", "created": "2026-10-06T09:00:00Z", "updated": "2026-10-06T09:00:00Z" }
+  ],
+  "turns": [
+    { "command": "/tasks cancel stretch" },
+    { "command": "/exit" }
+  ],
+  "script": { "steps": [] },
+  "expect": {
+    "stdoutContains": "cancel",
+    "tasks": { "Stretch": { "status": "cancelled" } }
+  }
+}

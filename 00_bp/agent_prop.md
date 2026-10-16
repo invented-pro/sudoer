@@ -21,7 +21,7 @@ them together, and profiles the resulting agent.
 | `C5` Sessions | continuous, persistent session across runs | [C5_sessions.md](C5_sessions.md) |
 | `C6` Interface | styled human CLI + plain automation CLI; owns configuration | [C6_interface.md](C6_interface.md) |
 | `C7` Modality | text in and out, plus coding-required image input | [C7_modality.md](C7_modality.md) |
-| `C8` Reliability | progress-driven budget, per-tool timeouts, in-loop retry | [C8_reliability.md](C8_reliability.md) |
+| `C8` Reliability | progress-driven budget, per-tool timeouts, in-loop retry with provider-timeout backoff | [C8_reliability.md](C8_reliability.md) |
 
 All eight are normative parts of the assembly; together they are the
 complete Prop tier. `C7` is near pass-through at Prop — text in, text out,
@@ -201,20 +201,23 @@ gate-covered or unit-tested.
 | Modality | text in and out; image input only for coding tasks (`C7`) |
 | Session | continuous; persisted across runs, resumable by id (`C5`) |
 | Output | answers on stdout; status and diagnostics on stderr |
-| Exit code | zero on clean exit (any status that delivered an answer, `incomplete` included); non-zero on a fatal startup/config error or a blocked final run |
+| Exit code | zero only on a `complete` run; non-zero when the final run is `incomplete` or `blocked`, or on a fatal startup/config error (the status string distinguishes them) |
 
 ### Guards and contract
 
 - **Budget.** A progress-driven budget enforced by `C1`: a run continues while
   steps make progress and ends after a compiled-in number of consecutive
-  non-progress steps (a repeat, a recoverable error, or a timeout). A much
+  non-progress steps (a repeat, a recoverable error, or an exhausted provider
+  timeout). A much
   larger compiled-in step ceiling is only a runaway safety net, so long
   productive work is never cut off by step count. On a stall or the ceiling
   the agent answers best-effort and marks the result incomplete.
 - **Timeout.** A per-tool-class timeout around every provider and tool call
   (`C8`): one-shot provider calls use a total model timeout, streamed calls
   use an inactivity timeout reset on each chunk, and `run_command` uses a
-  longer build timeout so it can run compilers and tests.
+  longer build timeout so it can run compilers and tests. A provider *timeout*
+  is retried in place with exponential backoff before it counts as a
+  non-progress step, so a brief endpoint outage is survived.
 - **Cancellation.** The user may cancel an in-flight run (`C6`); the run
   stops at once, its partial transcript is kept in the session, and the
   interface returns to the prompt. The automate surface reads input
@@ -259,7 +262,7 @@ capabilities it declines. It does not:
 - take over the screen with a full-screen or alternate-screen app; the human
   surface is inline and leaves the scrollback intact (`C6`);
 - run as an autonomous long-horizon scheduler — no scheduled or background
-  autonomy, no reminders, no background jobs (`C11`, Orbit);
+  autonomy, no reminders, no background jobs (`C11`, Pilot);
 - accept audio, or vision as a general modality (`C7`); vision is used only
   where a *coding* task needs it, such as reviewing a UI screenshot;
 - install arbitrary user-authored plugins or personal connectors (`C14`);

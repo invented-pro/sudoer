@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "channel.schema.json",
+  "title": "Pilot channel contracts",
+  "description": "The frozen shapes of the REST channel surface (C6): a registered channel, an inbound message that becomes a goal, and an outbound message Pilot delivers. A channel is a REST client — the built-in web page or an external messenger adapter. Adapter service tokens live in secrets_file (C10), never in these shapes.",
+  "$defs": {
+    "channel": {
+      "description": "One registered channel (C6): a REST client that may reach the agent.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": {
+          "description": "Stable channel id, used in the REST path /channels/{id} and as the session key.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "kind": {
+          "description": "Adapter kind, informational (e.g. `web`, `telegram`, `signal`).",
+          "type": "string",
+          "minLength": 1
+        },
+        "outbound_url": {
+          "description": "Where Pilot POSTs outbound messages for this channel; omit for a pull-only adapter.",
+          "type": "string",
+          "format": "uri"
+        },
+        "outbound_secret": {
+          "description": "Name of the secret (in secrets_file) Pilot injects as a bearer header on outbound POSTs to this channel (C10). Omit if the adapter's endpoint is unauthenticated.",
+          "type": "string",
+          "minLength": 1
+        },
+        "allow_from": {
+          "description": "Permitted inbound sender ids. Empty or absent means any sender on this channel.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "enabled": { "type": "boolean", "default": true }
+      }
+    },
+    "inboundMessage": {
+      "description": "A message an adapter POSTs to /channels/{id}/messages (C6). If the channel is enabled and the sender is permitted it becomes a goal in the channel's session; otherwise it is refused and never reaches the model.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "text"],
+      "properties": {
+        "from": {
+          "description": "Sender id within the channel.",
+          "type": "string",
+          "minLength": 1
+        },
+        "text": { "type": "string", "minLength": 1 },
+        "at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "outboundMessage": {
+      "description": "A message Pilot delivers to a channel (C3 send, or a task's delivery, C11): POSTed to the channel's outbound_url.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["to", "text", "at"],
+      "properties": {
+        "to": { "type": "string", "minLength": 1 },
+        "text": { "type": "string", "minLength": 1 },
+        "at": { "type": "string", "format": "date-time" },
+        "task": {
+          "description": "Task id when the message was delivered by a scheduled task (C11).",
+          "type": "string"
+        }
+      }
+    }
+  }
+}

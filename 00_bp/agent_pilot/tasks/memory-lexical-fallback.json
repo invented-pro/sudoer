@@ -1,0 +1,19 @@
+{
+  "id": "memory-lexical-fallback",
+  "description": "When the embedder is unavailable, memory degrades to deterministic lexical recall and reports it (C9).",
+  "goal": "What is the cabin Wi-Fi?",
+  "workspace": {
+    ".sudoer/memory/wifi.md": "---\nid: wifi\ntitle: Cabin Wi-Fi\ntags: cabin\ncreated: 2026-10-01T10:00:00Z\nupdated: 2026-10-01T10:00:00Z\n---\nThe cabin Wi-Fi is norse-fjord-92.\n"
+  },
+  "embedder": "fallback",
+  "script": {
+    "steps": [
+      { "complete": { "text": "It is norse-fjord-92." } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "recall": ["wifi"],
+    "embeddings": { "rebuilt": true }
+  }
+}

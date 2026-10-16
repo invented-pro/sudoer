@@ -1,0 +1,19 @@
+{
+  "id": "semantic-recall",
+  "description": "A note sharing few words with the goal is recalled through the deterministic fake embedder and injected into the first prompt (C9, C4).",
+  "goal": "Where do I keep the spare key?",
+  "workspace": {
+    ".sudoer/memory/key-place.md": "---\nid: key-place\ntitle: Spare key location\ntags: home\ncreated: 2026-10-01T10:00:00Z\nupdated: 2026-10-01T10:00:00Z\n---\nThe spare key hangs behind the fuse box in the garage.\n"
+  },
+  "embedder": "fake",
+  "script": {
+    "steps": [
+      { "complete": { "text": "Behind the fuse box in the garage." } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "recall": ["key-place"],
+    "answer": { "contains": "fuse box" }
+  }
+}

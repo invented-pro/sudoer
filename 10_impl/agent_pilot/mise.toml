@@ -1,0 +1,26 @@
+[tools]
+dart = "3.13.5"
+
+[env]
+# Repo-root package cache, portable across machines (no absolute paths).
+PUB_CACHE = "{{config_root}}/../../.pub-cache"
+
+[tasks.build]
+description = "Compile the sudoer-pilot CLI into generated/dist/"
+dir = "generated"
+run = "dart run tool/build.dart"
+
+[tasks.analyze]
+description = "Static analysis"
+dir = "generated"
+run = "dart analyze"
+
+[tasks.test]
+description = "Unit tests"
+dir = "generated"
+run = "dart test"
+
+[tasks.gate]
+description = "Run the Pilot build gate (cumulative suite + CLI smoke)"
+dir = "generated"
+run = "dart run bin/gate.dart"

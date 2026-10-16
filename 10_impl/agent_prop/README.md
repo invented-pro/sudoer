@@ -112,7 +112,7 @@ Local model via ollama (`base_url` defaults to `http://localhost:11434`):
     "model": "llama3.1",
     "context_window": 8192
   },
-  "workspace_root": "/home/s1/src/myproject"
+  "workspace_root": "/path/to/myproject"
 }
 ```
 
@@ -248,15 +248,22 @@ mise exec -- dart run bin/sudoer.dart -c /path/to/config.json \
 - `--config` / `-c` defaults to `$SUDOER_CONFIG`, then `./sudoer.json`.
 - `--automate` forces the plain surface; `--human` forces the styled surface;
   `--verbose` emits per-step events.
-- `--session` / `-s <id>` resumes a saved session; `--help` / `-h` prints usage.
+- `--session` / `-s <id>` resumes a saved session, or starts one under that
+  id if it does not exist yet (on both the one-shot and interactive surfaces);
+  `--help` / `-h` prints usage.
 - Sessions live under `session_dir` (default `<workspace_root>/.sudoer/sessions`).
+  A new session's id is a readable UTC timestamp with a short suffix, e.g.
+  `20261006-064828-5i` (`/sessions` lists them).
+- On the automate surface the session id is logged on exit as
+  `session <id> (resume: --session <id>)`, so a one-shot or scripted run is
+  easy to resume.
 
 ### Exit codes
 
 | Code | Meaning |
 | --- | --- |
-| `0` | clean exit (interactive), or answered (one-shot complete/incomplete) |
-| `1` | fatal error (one-shot: blocked) |
+| `0` | the final run completed |
+| `1` | the final run was incomplete or blocked, or a fatal error occurred |
 | `2` | usage or config error |
 
 ### Behavior and limits
@@ -320,8 +327,8 @@ mise exec -- dart run bin/sudoer.dart -c /path/to/config.json \
   as command output (`↺ compacted N earlier steps …`).
 - **Stall-driven guards:** a run continues while steps make progress and ends
   after 3 consecutive non-progress steps (a repeat, error, or timeout); a
-  200-step ceiling is only a runaway safety net, so long productive work is
-  never cut off by step count. Timeouts are 30s for provider calls and 10m for
+  1000-step ceiling is only a runaway safety net, so long productive work is
+  never cut off by step count. Timeouts are 120s for provider calls and 10m for
   `run_command` (`lib/src/reliability.dart`). On a stall the loop makes one
   best-effort call with tools withheld, falling back to a local summary.
 - **Background jobs are reaped.** Every `job` runs under the same host shell

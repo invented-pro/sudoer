@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "autonomy.schema.json",
+  "title": "Pilot autonomy contracts",
+  "description": "The frozen shapes of the autonomy layer (C11): a scheduled task, the persisted task store, and a fire record. `when`/`next_due` are ISO 8601 timestamps resolved against the injected clock. A legacy reminders.json is migrated on read; a reminder is a one-shot task.",
+  "$defs": {
+    "scheduledTask": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "goal", "status", "created", "updated"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+        "goal": { "type": "string", "minLength": 1 },
+        "when": {
+          "description": "The first due time, as set (ISO 8601 or +<n><m|h|d>).",
+          "type": "string",
+          "minLength": 1
+        },
+        "next_due": {
+          "description": "Resolved next fire instant (ISO 8601); absent once a one-shot is done or cancelled.",
+          "type": "string",
+          "format": "date-time"
+        },
+        "repeat": {
+          "description": "Recurrence: +<n><m|h|d>, daily@HH:MM, or weekly@<mon..sun>@HH:MM. Absent for a one-shot.",
+          "type": "string",
+          "minLength": 2
+        },
+        "channel": {
+          "description": "Delivery target: `notify`, `origin` (the channel the task was created from), or a registered channel id. Defaults to the origin channel.",
+          "type": "string",
+          "minLength": 1
+        },
+        "origin": {
+          "description": "Transport and sender that created the task, so it reports back where it came from.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "channel": { "type": "string" },
+            "from": { "type": "string" },
+            "session": { "type": "string" }
+          }
+        },
+        "status": { "enum": ["pending", "fired", "done", "cancelled"] },
+        "created": { "type": "string", "format": "date-time" },
+        "updated": { "type": "string", "format": "date-time" },
+        "last_run": {
+          "description": "The instant of the most recent fire (ISO 8601).",
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "tasksFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tasks"],
+      "properties": {
+        "tasks": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/scheduledTask" }
+        }
+      }
+    },
+    "fireRecord": {
+      "description": "One fire (C11); written before the run starts, keyed by (task, due), so firing is idempotent.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task", "due", "at"],
+      "properties": {
+        "task": { "type": "string", "minLength": 1 },
+        "due": { "type": "string", "format": "date-time" },
+        "at": { "type": "string", "format": "date-time" },
+        "outcome": { "enum": ["started", "done", "failed", "resumed"] }
+      }
+    }
+  }
+}

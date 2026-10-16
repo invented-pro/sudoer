@@ -1,0 +1,392 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "task-pilot.schema.json",
+  "title": "Pilot gate eval task",
+  "description": "One Pilot gate task: the Prop task shape (agent_prop/task.schema.json) extended with the Pilot harness knobs — scripted provider chain, pinned clock, scheduler ticks, seeded scheduled tasks, fake channel adapters, the injected embedder, loopback stubs, secrets seeding, the API driver — and the Pilot expectations: prompt-prefix stability, memory and recall, the embedding index, scheduled tasks and fire records, channel deliveries, notifications, logs, and policy decisions. Self-contained: restates the Prop fields it keeps.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "expect"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+    "description": { "type": "string" },
+    "goal": {
+      "description": "Convenience single goal; equivalent to `turns: [{goal}]`.",
+      "type": "string",
+      "minLength": 1
+    },
+    "turns": {
+      "description": "Ordered inputs typed into the interactive session (C6): goals or commands.",
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["goal"],
+            "properties": { "goal": { "type": "string", "minLength": 1 } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["command"],
+            "properties": { "command": { "type": "string", "minLength": 1 } }
+          }
+        ]
+      }
+    },
+    "workspace": {
+      "description": "Initial files, relative to the workspace root, materialized before the session (may seed .sudoer/ stores).",
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "config": {
+      "description": "Partial Pilot configuration, deep-merged over the gate defaults (config-pilot.schema.json).",
+      "type": "object"
+    },
+    "secrets": {
+      "description": "Seed map written to the task's secrets_file before the session.",
+      "type": "object",
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "tasks": {
+      "description": "Seed scheduled tasks (C11) written to tasks_file before the run, so due-time firing can be driven deterministically.",
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "embedder": {
+      "description": "Memory embedder mode (C9): `fake` pins the deterministic semantic embedder; `fallback` forces the lexical fallback path; omit for the default fake.",
+      "enum": ["fake", "fallback", "none"]
+    },
+    "channels": {
+      "description": "Channel harness (C6): channels registered before driving, and inbound messages the fake adapter delivers (each becomes a goal if the channel is enabled and the sender permits).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "register": {
+          "description": "Channels to register before driving (channel.schema.json shape).",
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "inbound": {
+          "description": "Messages delivered to a channel, in order.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["channel", "from", "text"],
+            "properties": {
+              "channel": { "type": "string", "minLength": 1 },
+              "from": { "type": "string", "minLength": 1 },
+              "text": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "ticks": {
+      "description": "Clock advances + scheduler ticks to drive (C11), in order: e.g. [{advance: \"+1h\"}, {tick: true}]. A tick fires every task whose next_due has passed.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "advance": { "type": "string", "minLength": 2 },
+          "tick": { "type": "boolean" }
+        }
+      }
+    },
+    "clock": {
+      "description": "The pinned now every time-dependent path uses (C8, C11).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["now"],
+      "properties": {
+        "now": { "type": "string", "format": "date-time" }
+      }
+    },
+    "stubs": {
+      "description": "Loopback canned responders; `{{stub:name}}` in goals and script arguments resolves to the bound origin.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "response"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["status", "body"],
+            "properties": {
+              "status": { "type": "integer", "minimum": 200, "maximum": 599 },
+              "headers": {
+                "type": "object",
+                "additionalProperties": { "type": "string" }
+              },
+              "body": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "script": {
+      "description": "Scripted responses for a single-provider task (agent_prop/script.schema.json).",
+      "type": "object"
+    },
+    "scripts": {
+      "description": "Ordered scripts for a chain: the harness injects one scripted provider per entry onto the configured providers chain.",
+      "type": "array",
+      "minItems": 2,
+      "items": { "type": "object" }
+    },
+    "api": {
+      "description": "Drive `sudoer-pilot serve` instead of the CLI: the harness starts the server (token/port from config) and performs this sequence.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["createSession"],
+                "properties": {
+                  "createSession": { "type": "string", "minLength": 1 }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["run", "goal"],
+                "properties": {
+                  "run": { "type": "string", "minLength": 1 },
+                  "goal": { "type": "string", "minLength": 1 }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["getConfig"],
+                "properties": {
+                  "getConfig": { "type": "boolean" }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["putConfig"],
+                "properties": {
+                  "putConfig": { "type": "object" }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["login"],
+                "properties": {
+                  "login": { "type": "string", "minLength": 1 }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "host_shell": { "enum": ["posix"] },
+    "expect": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": { "enum": ["complete", "incomplete", "blocked"] },
+        "answer": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "equals": { "type": "string" },
+            "contains": { "type": "string" },
+            "notContains": { "type": "string" }
+          }
+        },
+        "runs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "status": { "enum": ["complete", "incomplete", "blocked"] },
+              "answer": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "equals": { "type": "string" },
+                  "contains": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "files": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "tools": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "observations": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "plan": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "sessionPersisted": { "type": "boolean" },
+        "stdoutContains": { "type": "string" },
+        "prefixStable": { "type": "boolean" },
+        "memory": {
+          "description": "Expected memory notes by id: each value a substring of the note body.",
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "recall": {
+          "description": "Memory ids expected injected into the first prompt of a goal (order-insensitive).",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "embeddings": {
+          "description": "The derived embedding index (C9) after the run.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "rebuilt": { "type": "boolean" },
+            "model": { "type": "string" },
+            "ids": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "tasks": {
+          "description": "Expected scheduled tasks by goal substring.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["status"],
+            "properties": {
+              "status": { "enum": ["pending", "fired", "done", "cancelled"] },
+              "next_due": { "type": "string", "format": "date-time" },
+              "repeat": { "type": "string" }
+            }
+          }
+        },
+        "fired": {
+          "description": "Ordered fire log (C11): each `{task, due}` must appear once; duplicates fail.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["task"],
+            "properties": {
+              "task": { "type": "string" },
+              "due": { "type": "string" }
+            }
+          }
+        },
+        "channels": {
+          "description": "Recorded outbound channel messages, in order (substrings).",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "channel": { "type": "string" },
+              "to": { "type": "string" },
+              "message": { "type": "string" }
+            }
+          }
+        },
+        "scheduler": {
+          "description": "The OS wake units/paths the fake scheduler recorded (C11).",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "api": {
+          "description": "Expected API-driver step results, in order (opaque objects; e.g. config keys returned, rejection of a secret patch).",
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "notifications": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "title": { "type": "string" },
+              "message": { "type": "string" }
+            }
+          }
+        },
+        "logs": {
+          "description": "Expected JSONL log lines in order: each entry's fields must appear in the k-th matching line.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind"],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "run_start",
+                  "run_end",
+                  "step",
+                  "tool_call",
+                  "provider_call",
+                  "policy_decision",
+                  "task_scheduled",
+                  "task_fired",
+                  "task_done",
+                  "channel_in",
+                  "channel_out",
+                  "config_changed",
+                  "service_start",
+                  "service_stop"
+                ]
+              },
+              "tool": { "type": "string" },
+              "detail": { "type": "string" },
+              "status": { "type": "string" }
+            }
+          }
+        },
+        "policy": {
+          "description": "Expected decision-log lines in order (policy.schema.json decisionEvent fields).",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["event", "tool"],
+            "properties": {
+              "event": {
+                "enum": [
+                  "network_denied",
+                  "confirm_asked",
+                  "confirm_granted",
+                  "confirm_denied",
+                  "secret_used",
+                  "auth_failed",
+                  "channel_denied",
+                  "config_changed"
+                ]
+              },
+              "tool": { "type": "string" },
+              "detail": { "type": "string" }
+            }
+          }
+        },
+        "reason": { "type": "string" }
+      }
+    }
+  }
+}

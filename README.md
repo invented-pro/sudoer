@@ -140,6 +140,12 @@ The Sudoer repository functions as a unidirectional engineering pipeline. Source
 └── 90_dist/     # Deployment pipelines, compilers, and production packaging artifacts.
 ```
 
+**Builds.** `90_dist/` is the home of final builds for every tier — Prop,
+Pilot, and Orbit alike. Each build compiles straight into a versioned
+release directory `90_dist/sudoer-<tier>-<version>-<os>-<arch>/`, and
+`10_impl/` and `20_eval/` call the executable through symlinks that each
+build re-points (`sudoer-prop`, `sudoer-pilot`, `sudoer-orbit`).
+
 ### Workflow: Blueprint First
 
 This is a blueprint-driven project, but the blueprint is not magic: at the current **Prop** stage two surfaces are managed by hand.

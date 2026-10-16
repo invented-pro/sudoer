@@ -1,6 +1,6 @@
 # Architecture
 
-> Status: draft · Version 0.6 · **Current tier: Prop**
+> Status: draft · Version 0.7 · **Current tier: Prop**
 
 Every agent, at its core, is one loop. Everything else is scope built
 around that loop.
@@ -55,8 +55,9 @@ long, multi-step work autonomously. Each tier is a superset of the one below,
 so the same loop runs everywhere; what changes is how far it is expected to
 carry a task — a plan-driven interactive loop at `Prop` that streams and can
 drive both a styled human CLI and a plain automation surface, reflection and
-replanning at `Orbit`; session continuity at `Prop` versus durable recall at
-`Pilot`; on-demand use versus autonomous long-horizon work.
+replanning at `Orbit`; session continuity at `Prop` versus durable, semantic
+recall plus proactive, wake-driven autonomy at `Pilot`; on-demand use versus
+self-directed long-horizon work at `Orbit`.
 
 ## LLM capability boundary
 
@@ -86,7 +87,7 @@ And not good at — each weakness carried by scaffolding, not by the model:
 | Model weakness | What carries it |
 | --- | --- |
 | Determinism and precision (arithmetic, exact strings, verbatim recall) | tools guarantee exactness — edit string-match, `run_command`; never in-context |
-| State and time (cross-run memory, waking unprompted) | sessions (C5), compaction (C4), memory (C9); reminders (C11) are system-fired, the model only reacts |
+| State and time (cross-run memory, waking unprompted) | sessions (C5), compaction (C4), memory (C9); scheduled tasks (C11) are system-fired, the model only reacts |
 | Long-horizon discipline (drift, goal loss) | step ceiling, stall budget, the plan-driven loop; reflection and replanning only at `Orbit` |
 | Knowing when to stop (calibration) | termination belongs to the loop — stall or ceiling still answers, marked incomplete |
 | Trust and safety judgment | guards and policy (C10) are code, not prompts; a denial blocks the run |
@@ -96,8 +97,8 @@ And not good at — each weakness carried by scaffolding, not by the model:
 The build ladder therefore runs *against* model-native strength. Coding
 (`Prop`) is verifiable — feedback is cheap and deterministic — so model plus
 tools shine there, which is why coding is the seed. `Pilot`'s everyday tasks
-lack a compiler, so deterministic scaffolding (memory, safety) carries more
-of the weight. `Orbit` targets the model's weakest axis — the long horizon —
+lack a compiler, so deterministic scaffolding (memory, safety, the scheduler)
+carries more of the weight. `Orbit` targets the model's weakest axis — the long horizon —
 which is why C12–C16 are almost entirely scaffolding around that weakness.
 The true edge of what sudoer can promise is the task with no feedback signal
 at all — no compiler, no test, no user reply — and that edge bounds
@@ -112,8 +113,8 @@ than by the components it happens to contain.
 | Tier | Function — what the work is |
 | --- | --- |
 | **Prop** | Coding. Take an instruction and deliver: follow it strictly, and produce working binary artifacts and tool actions flawlessly. |
-| **Pilot** | Personal assistant. Everything Prop does, plus full-coverage support for everyday personal tasks end-to-end. |
-| **Orbit** | Autonomy. Everything Pilot does, plus fully autonomous execution of super-long, multi-step tasks. |
+| **Pilot** | Personal assistant. Everything Prop does, plus proactive, multi-channel support for everyday personal tasks end-to-end: durable semantic memory, a resident scheduler that acts while the user is away, and a REST server with a built-in web page (config + chat) that messenger adapters plug into. |
+| **Orbit** | Autonomy. Everything Pilot does, plus self-directed long-horizon execution: reflection and replanning, multi-device continuity, and multi-user access. |
 
 Function defines the tier; components implement it. Each tier is a prefix of
 the same component list (`C1`–`C16`), so the scopes stack: `Pilot` includes
@@ -146,8 +147,9 @@ M -up-> A : <color:#64748B>adds autonomy · long-horizon execution
 
 Arrows mark newly introduced components (numbered `C1`–`C16` below);
 components already present deepen within a tier — at Pilot, `loop`,
-`providers`, `tools`, `context`, `sessions`, `interface`, and `reliability`
-all strengthen without being new. Each component's detailed design lives in
+`providers`, `tools`, `context`, `sessions`, `interface`, `reliability`,
+`memory`, `safety`, and `autonomy` all strengthen without being new. Each
+component's detailed design lives in
 its own file, named `C<n>_<component>.md` (for example
 [C1_loop.md](C1_loop.md)). The Prop tier's components are assembled and
 profiled in [agent_prop.md](agent_prop.md), and their interface contracts
@@ -207,23 +209,23 @@ progress-driven budget, per-tool timeouts, in-loop retry
 ** Pilot (adds C9–C11)
 ***:
 **providers** (C2)
-multi-provider + fallback, model catalog
+multi-provider + fallback, model catalog, embedding role
 ;
 ***:
 **tools** (C3)
-service and connector tools
+service connectors, channel send, schedule
 ;
 ***:
 **context** (C4)
-prompt caching
+prompt caching + memory recall injection
 ;
 ***:
 **sessions** (C5)
-session store + search
+session store + search, channel-keyed sessions
 ;
 ***:
 **interface** (C6)
-HTTP API (beside the interactive CLI)
+REST server + web page; messenger adapters as REST clients
 ;
 ***:
 **modality** (C7)
@@ -231,19 +233,19 @@ text (unchanged)
 ;
 ***:
 **reliability** (C8)
-structured logs, provider retry/backoff, concurrent runs
+structured logs, retry/backoff, concurrent runs, service supervision
 ;
 ***:
 **memory** (C9)
-durable Markdown notes + search
+durable Markdown notes + semantic recall (pluggable embeddings)
 ;
 ***:
 **safety** (C10)
-workspace roots, risky-action confirm
+workspace roots, risky-action confirm, channel access
 ;
 ***:
 **autonomy** (C11)
-user-set reminders (fire while the agent runs)
+resident scheduler, OS wake, recurring + background tasks
 ;
 ** Orbit (adds C12–C16)
 ***:
@@ -268,7 +270,7 @@ multi-device sync, lineage
 ;
 ***:
 **interface** (C6)
-gateway daemon, TUI/desktop, chat apps
+gateway daemon, TUI/desktop clients, multi-user pairing
 ;
 ***:
 **modality** (C7)
@@ -280,7 +282,7 @@ tracing, cost accounting, self-heal
 ;
 ***:
 **memory** (C9)
-vector / semantic long-term store, pluggable
+cross-device semantic store, pluggable embedding backends
 ;
 ***:
 **safety** (C10)
@@ -288,7 +290,7 @@ configurable policy, scoped capabilities, audit log
 ;
 ***:
 **autonomy** (C11)
-autonomous background / scheduled jobs
+self-directed long-horizon planning, autonomous goals
 ;
 ***:
 **execution** (C12)
@@ -395,15 +397,20 @@ code it writes; it must not be one-shot or memoryless.
   as a native executable on Linux, macOS, and Windows. No durable
   *semantic* memory, only built-in guards (no configurable policy), no server.
 - **Pilot** — personal assistant, full coverage: everything Prop does, plus
-  support for everyday personal tasks end-to-end — durable semantic memory, a broader
-  service/connector tool set, safety boundaries, context caching,
-  multi-provider fallback, and an HTTP surface beside the interactive CLI.
-  This is the shipping target.
+  support for everyday personal tasks end-to-end — durable *semantic* memory
+  (pluggable embeddings, Markdown-backed), a resident service and scheduler
+  that act while the user is away (wakes via the OS scheduler), recurring and
+  one-shot scheduled tasks plus delegated background work, a REST server with
+  a built-in web page for config and chat — which messenger adapters
+  (Telegram/Signal) plug into as REST clients — service connectors,
+  user-tunable safety with secrets, context caching, multi-provider fallback,
+  structured logs, and concurrent runs. This is the shipping target.
 - **Orbit** — autonomy, long-horizon: everything Pilot does, plus fully
-  autonomous execution of super-long multi-step tasks, a distinct style and
-  voice, skills grown from experience, connectors, extensibility, access
-  control, and multi-agent. Out of scope until Pilot is solid; never faked
-  (no stubs or placeholders).
+  self-directed execution of super-long multi-step tasks — reflection and
+  replanning, a distinct style and voice, skills grown from experience,
+  multi-device continuity, multi-user access control, extensibility, and
+  multi-agent. Out of scope until Pilot is solid; never faked (no stubs or
+  placeholders).
 
 > Scope boundaries are normative, but they bound the *usage domain*, not the
 > capability. The implementation MUST NOT implement a usage domain beyond the

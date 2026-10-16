@@ -16,9 +16,10 @@ blueprint change, not a test bug.
 
 | Constant | Value |
 | --- | --- |
-| `stall budget` | a run ends after 3 consecutive non-progress steps (a repeat, error, or timeout) |
-| `step ceiling` | 200 steps, a runaway safety net only; productive steps are never cut off by count |
-| `timeout` | per tool class: 30s provider calls (inactivity when streamed), 10m `run_command`, 20s web calls |
+| `stall budget` | a run ends after 3 consecutive non-progress steps (a repeat, error, or exhausted provider timeout) |
+| `step ceiling` | 1000 steps, a runaway safety net only; productive steps are never cut off by count |
+| `timeout` | per tool class: 120s provider calls (inactivity when streamed), 10m `run_command`, 20s web calls |
+| `provider retry` | a provider timeout retries in place 2 times (backoff 0.5s ×4 capped at 30s) before it counts as a non-progress step; the backoff sleep is a seam the gate pins to a no-op |
 | `web bounds` | 256 KB per fetch, 10 search results (`kWebMaxBytes`, `kWebMaxResults`) |
 | best-effort | one final provider call with tools withheld; answer is the completion text, else a local summary; status `incomplete` |
 

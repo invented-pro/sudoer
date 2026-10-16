@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "http-api.schema.json",
+  "title": "Pilot REST API",
+  "description": "The Pilot REST surface (C6), served by `sudoer-pilot serve`; the spine every client uses — the built-in web page, messenger adapters, and scripts. Single owner: every request carries `Authorization: Bearer <token>`, or, for the web page, a session cookie obtained by posting the token to the login endpoint. Endpoints: sessions list/search/new/info; one streamed run per session (SSE delta/tool/result), cancel; channels list/register/remove; inbound messages; scheduled tasks; non-secret config get/update; secret names; service status. Memory and secret values stay off the API. Busy session = 409. Unauthorized = 401; disallowed sender = 403; unknown channel = 404.",
+  "$defs": {
+    "newSessionRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workspace_root": { "type": "string", "minLength": 1 },
+        "channel": { "type": "string", "minLength": 1 }
+      }
+    },
+    "sessionInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "workspace_root", "updated"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "channel": { "type": "string" },
+        "workspace_root": { "type": "string" },
+        "runs": { "type": "integer", "minimum": 0 },
+        "last_status": {
+          "enum": ["complete", "incomplete", "blocked", "cancelled", null]
+        },
+        "updated": { "type": "string", "format": "date-time" }
+      }
+    },
+    "runRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal"],
+      "properties": {
+        "goal": { "type": "string", "minLength": 1 }
+      }
+    },
+    "sseEvent": {
+      "description": "Server-sent events streamed by POST /sessions/{id}/runs, in order: zero or more delta/tool, then exactly one result. delta: visible reply text. tool: a dispatched call. result: the final runResult (answer, status) — statuses as at Prop.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["event", "data"],
+          "properties": {
+            "event": { "const": "delta" },
+            "data": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["text"],
+              "properties": { "text": { "type": "string" } }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["event", "data"],
+          "properties": {
+            "event": { "const": "tool" },
+            "data": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "arguments"],
+              "properties": {
+                "name": { "type": "string" },
+                "arguments": { "type": "object" }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["event", "data"],
+          "properties": {
+            "event": { "const": "result" },
+            "data": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["status"],
+              "properties": {
+                "answer": { "type": "string" },
+                "status": {
+                  "enum": ["complete", "incomplete", "blocked"]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "channel": {
+      "description": "A registered channel (C6); see channel.schema.json for the message shapes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "kind": { "type": "string" },
+        "outbound_url": { "type": "string", "format": "uri" },
+        "outbound_secret": { "type": "string" },
+        "allow_from": { "type": "array", "items": { "type": "string" } },
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "inboundMessage": {
+      "description": "Body of POST /channels/{id}/messages (C6).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "text"],
+      "properties": {
+        "from": { "type": "string", "minLength": 1 },
+        "text": { "type": "string", "minLength": 1 },
+        "at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "outboundMessage": {
+      "description": "Body Pilot POSTs to a channel's outbound_url (C6).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["to", "text", "at"],
+      "properties": {
+        "to": { "type": "string", "minLength": 1 },
+        "text": { "type": "string", "minLength": 1 },
+        "at": { "type": "string", "format": "date-time" },
+        "task": { "type": "string" }
+      }
+    },
+    "scheduleTaskRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["when", "goal"],
+      "properties": {
+        "when": { "type": "string", "minLength": 2 },
+        "goal": { "type": "string", "minLength": 1 },
+        "repeat": { "type": "string", "minLength": 2 },
+        "channel": { "type": "string", "minLength": 1 }
+      }
+    },
+    "taskInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "goal", "status"],
+      "properties": {
+        "id": { "type": "string" },
+        "goal": { "type": "string" },
+        "status": { "enum": ["pending", "fired", "done", "cancelled"] },
+        "repeat": { "type": "string" },
+        "channel": { "type": "string" },
+        "next_due": { "type": "string", "format": "date-time" },
+        "last_run": { "type": "string", "format": "date-time" }
+      }
+    },
+    "configView": {
+      "description": "GET /config: the effective configuration with secret values removed. Shape follows config-pilot.schema.json minus `secrets_file` contents.",
+      "type": "object"
+    },
+    "configPatch": {
+      "description": "PUT /config: a partial non-secret configuration merged over the current one and validated before it takes effect. A patch that touches a secret value is rejected.",
+      "type": "object"
+    },
+    "secretNames": {
+      "description": "GET /secrets: the names of configured secrets, never their values.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["names"],
+      "properties": {
+        "names": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "loginRequest": {
+      "description": "POST /login: exchange the bearer token for a web session cookie (C6).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["token"],
+      "properties": { "token": { "type": "string", "minLength": 1 } }
+    },
+    "serviceStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["running", "tasks_pending"],
+      "properties": {
+        "running": { "type": "boolean" },
+        "tasks_pending": { "type": "integer", "minimum": 0 },
+        "next_due": { "type": "string", "format": "date-time" },
+        "wake_installed": { "type": "boolean" },
+        "channels": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["error"],
+      "properties": {
+        "error": { "type": "string" },
+        "detail": { "type": "string" }
+      }
+    }
+  }
+}

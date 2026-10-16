@@ -106,5 +106,7 @@ Normative; each is grounded in a component doc.
 
 These schemas are frozen for Prop. Changing one is a blueprint change:
 update the owning component doc, bump this document's version, and only
-then regenerate code. Pilot adds schemas beside these (`C9`–`C11`);
+then regenerate code. Pilot adds schemas beside these under
+[`agent_pilot/`](agent_pilot/) — `memory`, `autonomy`, `channel`, `policy`,
+`log`, `http-api`, `config-pilot`, `tools-pilot`, and `task-pilot`;
 Prop's must not grow to anticipate them.

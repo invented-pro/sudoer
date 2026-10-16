@@ -1,0 +1,28 @@
+{
+  "id": "memory-search-rank",
+  "description": "Pre-seeded notes: a tag match outranks a body match in memory_search's deterministic ranking (C9).",
+  "goal": "Search memory for recipes.",
+  "workspace": {
+    ".sudoer/memory/pasta-recipe.md": "---\nid: pasta-recipe\ntitle: Pasta recipe\ntags: recipes\ncreated: 2026-10-01T08:00:00Z\nupdated: 2026-10-01T08:00:00Z\n---\nBoil for 11 minutes, salt heavily.\n",
+    ".sudoer/memory/kitchen-notes.md": "---\nid: kitchen-notes\ntitle: Kitchen notes\ntags: kitchen\ncreated: 2026-10-01T08:00:00Z\nupdated: 2026-10-01T08:00:00Z\n---\nThe pasta recipe binder lives in drawer two.\n"
+  },
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "Searching.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "memory_search", "arguments": { "query": "recipes" } }
+          ]
+        }
+      },
+      { "complete": { "text": "The top hit is pasta-recipe — Pasta recipe." } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "answer": { "contains": "pasta-recipe" },
+    "tools": ["memory_search"],
+    "observations": ["pasta-recipe"]
+  }
+}

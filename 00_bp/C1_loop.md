@@ -47,13 +47,13 @@ stop
 ```
 
 The model ends a run by choosing a `finish` action that produces the
-answer. A recoverable error — a tool failure or a provider timeout —
-surfaces as an observation and the loop re-iterates; a denial or an
-unrecoverable error marks the run blocked. A run is bounded by *stalls*, not
-by step count: consecutive steps that make no progress end it, while
-productive steps continue. If the run stalls or hits the step ceiling first,
-it makes one final provider call as a best-effort answer, under the model
-timeout, marked incomplete — rather than aborting silently.
+answer. A recoverable error — a tool failure or a provider timeout — surfaces
+as an observation and the loop re-iterates (a provider timeout is retried with
+backoff first, `C8`); a denial or an unrecoverable error marks the run blocked.
+A run is bounded by *stalls*, not by step count: consecutive steps that make no
+progress end it, while productive steps continue. If the run stalls or hits the
+step ceiling first, it makes one final provider call as a best-effort answer,
+under the model timeout, marked incomplete — rather than aborting silently.
 
 A run returns `{answer, status}`, where `status` is `complete`,
 `incomplete`, or `blocked`; a blocked run may carry no answer. A clarifying
@@ -85,8 +85,8 @@ while (stalls < stall budget AND steps < ceiling AND not blocked) is (yes)
   if (prompt assembly failed? [overflow]) then (yes)
     :blocked := true;
   else (no)
-    :call provider (thought + action) under provider timeout (C2);
-    if (provider timed out or recoverable error?) then (yes)
+    :call provider (thought + action) under provider timeout (C2), retrying a timeout in place with backoff (C8);
+    if (provider timed out after its retries, or recoverable error?) then (yes)
       :observation := provider error;
       :append (observation) to transcript;
       :steps := steps + 1; :stalls := stalls + 1;
@@ -165,14 +165,16 @@ endif
   count: it continues while steps make progress (a plan item newly completed,
   or an observation not seen before in the run) and ends after a compiled-in
   number of consecutive non-progress steps. A repeat of the same call with the
-  same result, a recoverable error, or a timeout counts toward the stall
-  budget, so a loop that keeps producing the same output is cut off while long
-  productive work is not. A much larger compiled-in step ceiling remains only
-  as a runaway safety net. Each provider or tool call runs under a timeout
-  chosen by tool class (longer for `run_command`); a recoverable error becomes
-  an observation and the loop re-iterates; an unrecoverable error or a guard
-  denial marks the run blocked. A user cancel (`interface`, C6) ends the run
-  and keeps the partial transcript. These guards are built in and not
+  same result, a recoverable error, or an exhausted provider timeout counts
+  toward the stall budget, so a loop that keeps producing the same output is
+  cut off while long productive work is not. A provider *timeout* is retried
+  in place with backoff (`C8`) before it counts, so a brief endpoint outage is
+  survived rather than scored as a stall. A much larger compiled-in step
+  ceiling remains only as a runaway safety net. Each provider or tool call runs
+  under a timeout chosen by tool class (longer for `run_command`); a recoverable
+  error becomes an observation and the loop re-iterates; an unrecoverable error
+  or a guard denial marks the run blocked. A user cancel (`interface`, C6) ends
+  the run and keeps the partial transcript. These guards are built in and not
   configurable at Prop — configurable policy is `safety` (C10).
 - **Return contract.** A run returns the answer and a status of `complete`,
   `incomplete` (best-effort after a stall or the step ceiling), or `blocked`;

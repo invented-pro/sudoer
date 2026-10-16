@@ -1,0 +1,34 @@
+{
+  "id": "http-api-goal",
+  "description": "The served API runs a goal end-to-end: session create, run POST, SSE stream closed by one result event (C6).",
+  "goal": "unused",
+  "workspace": { "notes.txt": "7\n" },
+  "config": {
+    "http": { "token": "gatetoken-0123456789abcdef", "port": 0 }
+  },
+  "api": {
+    "steps": [
+      { "createSession": "s1" },
+      { "run": "s1", "goal": "Read notes.txt and tell me the number." }
+    ]
+  },
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "Reading.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "read", "arguments": { "path": "notes.txt" } }
+          ]
+        }
+      },
+      { "complete": { "text": "The number is 7." } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "answer": { "contains": "7" },
+    "tools": ["read"],
+    "sessionPersisted": true
+  }
+}

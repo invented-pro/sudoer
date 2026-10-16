@@ -1,0 +1,286 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "config-pilot.schema.json",
+  "title": "Pilot configuration",
+  "description": "Startup configuration for the Pilot agent, loaded by the interface (C6) at process start. A superset of the Prop configuration: every Prop key keeps its meaning; Pilot adds the provider chain and roles (C2), the anchor list (C10), memory and its embedder (C9), scheduled tasks and the resident service (C11), policy and secrets (C10), the REST server and channel registry (C6), and the structured log destination (C8). Self-contained by design: it supersedes the Prop config schema without $ref-into it.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "provider": {
+      "description": "Single provider, exactly as at Prop (C2); sugar for a one-element `providers` chain. A process sets `provider` or `providers`, never both.",
+      "$ref": "#/$defs/providerEntry"
+    },
+    "providers": {
+      "description": "Ordered provider chain (C2): index 0 is primary; later entries are failover targets in order. Ignored by the Prop surface.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/providerEntry" }
+    },
+    "roles": {
+      "description": "Named catalog roles (C2). `main` defaults to provider index 0; `fast`, when set, is used for tools-withheld compaction briefs (C4); `embed`, when set, is the provider+model used for memory embeddings (C9). A role may override the entry's model.",
+      "type": "object",
+      "additionalProperties": false,
+      "maxProperties": 3,
+      "properties": {
+        "main": { "$ref": "#/$defs/role" },
+        "fast": { "$ref": "#/$defs/role" },
+        "embed": { "$ref": "#/$defs/role" }
+      }
+    },
+    "workspace_root": {
+      "description": "Primary anchor, as at Prop (C3); defaults to the process working directory. Equivalent to `workspace_roots: [value]`.",
+      "type": "string",
+      "minLength": 1
+    },
+    "workspace_roots": {
+      "description": "Ordered anchor list (C10). Read-type file tools resolve against the first root where the path exists; writes and run_command use the first (primary) root. Anchors, not fences.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "session_dir": {
+      "description": "Directory holding persisted session files and the session index (C5). Defaults to <primary root>/.sudoer/sessions.",
+      "type": "string",
+      "minLength": 1
+    },
+    "memory_dir": {
+      "description": "Directory holding the Markdown memory notes and the derived embedding index (C9). Defaults to <primary root>/.sudoer/memory.",
+      "type": "string",
+      "minLength": 1
+    },
+    "memory": {
+      "description": "Memory behavior (C9). Optional; defaults reproduce the local semantic store.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "embedder": { "$ref": "#/$defs/embedder" }
+      }
+    },
+    "tasks_file": {
+      "description": "File holding the scheduled-task list (C11). Defaults to <primary root>/.sudoer/tasks.json. A legacy reminders.json is migrated on read.",
+      "type": "string",
+      "minLength": 1
+    },
+    "autonomy": {
+      "description": "Autonomy behavior (C11): service settings and missed-fire policy.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "catch_up": {
+          "description": "What to do with a task that came due while the machine was off. `fire` runs it late (default for recurring tasks); `report` lists it and leaves it pending (default for one-shot reminders).",
+          "enum": ["fire", "report"],
+          "default": "report"
+        }
+      }
+    },
+    "secrets_file": {
+      "description": "JSON map {name: value} of connector credentials, permission 0600 (C10). Defaults to <primary root>/.sudoer/secrets.json. Values never reach the model.",
+      "type": "string",
+      "minLength": 1
+    },
+    "policy": {
+      "description": "User-tunable safety policy (C10). All sub-keys optional; the default policy reproduces Prop's built-in guards.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "network": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "deny_hosts": {
+              "description": "Merged (union) with web.deny_hosts; exact host or `.`-prefixed suffix match; a match is a hard block.",
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "allow_hosts": {
+              "description": "When non-empty, inverts the policy to a whitelist for every egress tool (web tools and http). Empty by default: any host allowed.",
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "confirm": {
+          "description": "Matchers requiring interactive confirmation; empty by default (confirm off). A non-interactive surface turns a match into an immediate guard_denied; the web/channel surface asks and blocks to a timeout.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/confirmMatcher" }
+        },
+        "log": {
+          "description": "Append-only JSONL decision log (C10). Defaults to <primary root>/.sudoer/policy.log.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "http": {
+      "description": "The Pilot REST server (C6), started by `sudoer-pilot serve`; hosts the web page and the API every channel client uses.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bind": {
+          "description": "Listen address. Default 127.0.0.1 (loopback). Set to a LAN/interface address to let messenger adapters on another host connect; a non-loopback bind requires a token and refuses to start without one.",
+          "type": "string",
+          "default": "127.0.0.1"
+        },
+        "port": {
+          "description": "Listen port. Default 7363; 0 binds an ephemeral port and reports it.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "default": 7363
+        },
+        "token": {
+          "description": "Bearer token required on every request. When absent, one is generated at startup and printed once to stderr.",
+          "type": "string",
+          "minLength": 16
+        }
+      }
+    },
+    "channels": {
+      "description": "Registered channels (C6): REST clients that may reach the agent — the built-in web page and external messenger adapters. Each has an optional outbound URL and sender filter; service tokens live in secrets_file (C10), never inline.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/channel" }
+    },
+    "log_file": {
+      "description": "Structured JSONL event log (C8). Defaults to <primary root>/.sudoer/logs/agent.jsonl.",
+      "type": "string",
+      "minLength": 1
+    },
+    "web": {
+      "description": "As at Prop (C3): web tool switch, search backend, and the web-scope deny list that policy.network merges with.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "search_url": { "type": "string", "format": "uri" },
+        "deny_hosts": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "providerEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "model", "context_window"],
+      "properties": {
+        "kind": { "enum": ["openai-compatible", "ollama"] },
+        "base_url": { "type": "string", "format": "uri" },
+        "api_key": { "type": "string" },
+        "model": { "type": "string", "minLength": 1 },
+        "context_window": { "type": "integer", "minimum": 1 },
+        "sampling": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "temperature": { "type": "number", "minimum": 0, "maximum": 2 },
+            "top_p": { "type": "number", "minimum": 0, "maximum": 1 },
+            "top_k": { "type": "integer", "minimum": 1 },
+            "seed": { "type": "integer" },
+            "max_tokens": { "type": "integer", "minimum": 1 }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "kind": { "const": "openai-compatible" } },
+            "required": ["kind"]
+          },
+          "then": { "required": ["base_url"] }
+        }
+      ]
+    },
+    "role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider"],
+      "properties": {
+        "provider": {
+          "description": "Index into the `providers` chain.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "model": {
+          "description": "Optional model override for this role; context_window stays the entry's.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "confirmMatcher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool"],
+      "properties": {
+        "tool": {
+          "description": "Exact tool name the matcher applies to (C10).",
+          "type": "string",
+          "minLength": 1
+        },
+        "arg": {
+          "description": "Substring that must appear in the JSON-encoded arguments for the matcher to hit; omit to match every call of the tool.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "embedder": {
+      "description": "The memory embedder (C9): a pluggable adapter, local by default.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "enum": ["ollama", "local", "none"],
+          "description": "`ollama` calls a local embeddings endpoint (default); `local` uses a bundled model; `none` keeps lexical-only recall."
+        },
+        "base_url": {
+          "description": "Embeddings endpoint when kind is `ollama`.",
+          "type": "string",
+          "format": "uri"
+        },
+        "model": {
+          "description": "Embedding model name.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "channel": {
+      "description": "One registered channel (C6): a REST client that may reach the agent.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": {
+          "description": "Stable channel id, used in the REST path /channels/{id} and as the session key.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "kind": {
+          "description": "Adapter kind, informational (e.g. `web`, `telegram`, `signal`).",
+          "type": "string",
+          "minLength": 1
+        },
+        "outbound_url": {
+          "description": "Where Pilot POSTs outbound messages for this channel; omit for a pull-only adapter.",
+          "type": "string",
+          "format": "uri"
+        },
+        "outbound_secret": {
+          "description": "Name of the secret (in secrets_file) Pilot injects as a bearer header on outbound POSTs to this channel (C10). Omit if the adapter's endpoint is unauthenticated.",
+          "type": "string",
+          "minLength": 1
+        },
+        "allow_from": {
+          "description": "Permitted inbound sender ids. Empty or absent means any sender on this channel.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "enabled": { "type": "boolean", "default": true }
+      }
+    }
+  }
+}

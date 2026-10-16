@@ -1,0 +1,28 @@
+{
+  "id": "http-connector-task",
+  "description": "The http tool fetches from a loopback stub under the default policy (C3, C10).",
+  "goal": "Fetch my shopping list.",
+  "stubs": [
+    { "name": "shopping", "response": { "status": 200, "body": "milk, eggs, basil" } }
+  ],
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "Fetching.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "http", "arguments": { "url": "{{stub:shopping}}/list" } }
+          ]
+        }
+      },
+      { "complete": { "text": "Your list: milk, eggs, basil." } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "answer": { "contains": "eggs" },
+    "tools": ["http"],
+    "observations": ["milk, eggs, basil"],
+    "logs": [{ "kind": "tool_call", "tool": "http" }]
+  }
+}

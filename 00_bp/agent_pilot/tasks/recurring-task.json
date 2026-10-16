@@ -1,0 +1,29 @@
+{
+  "id": "recurring-task",
+  "description": "A recurring task reschedules next_due and fires again on the next tick (C11).",
+  "clock": { "now": "2026-10-06T08:00:00Z" },
+  "tasks": [
+    { "id": "meds", "when": "2026-10-06T08:00:00Z", "goal": "Take your morning medication", "repeat": "daily@08:00", "channel": "notify", "status": "pending", "created": "2026-10-01T08:00:00Z", "updated": "2026-10-01T08:00:00Z" }
+  ],
+  "ticks": [{ "tick": true }, { "advance": "+1d" }, { "tick": true }],
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "Reminded.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "notify", "arguments": { "message": "Take your morning medication" } }
+          ]
+        }
+      },
+      { "complete": { "text": "Done." } }
+    ]
+  },
+  "expect": {
+    "tasks": { "morning medication": { "status": "pending", "next_due": "2026-10-08T08:00:00Z", "repeat": "daily@08:00" } },
+    "fired": [
+      { "task": "meds", "due": "2026-10-06T08:00:00Z" },
+      { "task": "meds", "due": "2026-10-07T08:00:00Z" }
+    ]
+  }
+}

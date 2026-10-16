@@ -1,0 +1,47 @@
+{
+  "id": "memory-write-recall",
+  "description": "A note written in one session is recalled in a fresh session through memory_search and memory_read — the store spans sessions (C9).",
+  "turns": [
+    { "goal": "Remember: the Wi-Fi password at the cabin is norse-fjord-92." },
+    { "command": "/new" },
+    { "goal": "What is the Wi-Fi password at the cabin?" }
+  ],
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "Saving that.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "memory_write", "arguments": { "id": "wifi-cabin", "title": "Cabin Wi-Fi", "tags": ["cabin", "wifi"], "body": "The Wi-Fi password at the cabin is norse-fjord-92." } }
+          ]
+        }
+      },
+      { "complete": { "text": "Saved." } },
+      {
+        "complete": {
+          "text": "Checking memory.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "memory_search", "arguments": { "query": "cabin wifi" } }
+          ]
+        }
+      },
+      {
+        "complete": {
+          "text": "Reading the note.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "memory_read", "arguments": { "id": "wifi-cabin" } }
+          ]
+        }
+      },
+      { "complete": { "text": "The Wi-Fi password at the cabin is norse-fjord-92." } }
+    ]
+  },
+  "expect": {
+    "runs": [
+      { "status": "complete", "answer": { "equals": "Saved." } },
+      { "status": "complete", "answer": { "contains": "norse-fjord-92" } }
+    ],
+    "tools": ["memory_write", "memory_search", "memory_read"],
+    "memory": { "wifi-cabin": "norse-fjord-92" }
+  }
+}

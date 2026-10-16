@@ -1,0 +1,7 @@
+.dart_tool/
+dist/
+*.iml
+.pub-cache/
+# Live build config (API key) — the button's default -c target
+pilot-build.json
+.build/

@@ -30,7 +30,6 @@ final class OpenAiCompatibleProvider implements Provider {
     if (cancel?.isCancelled ?? false) {
       throw const StepFailure.cancelled('cancelled by user');
     }
-    final streaming = onDelta != null || onReasoning != null;
     final base = config.baseUrl!.replaceAll(RegExp(r'/+$'), '');
     final http.Request httpRequest;
     try {
@@ -39,7 +38,11 @@ final class OpenAiCompatibleProvider implements Provider {
         ..body = jsonEncode({
           'model': request.model,
           'messages': openAiMessages(request),
-          'stream': streaming,
+          // Always stream on the wire so the call is bounded by the
+          // inactivity timeout rather than a total deadline (C8): a long
+          // generation is never cut off while it is producing. Callers
+          // without callbacks simply receive no deltas.
+          'stream': true,
           if (request.tools.isNotEmpty) 'tools': _toolJson(request.tools),
           ...config.sampling?.openAiJson() ?? const {},
         });
@@ -62,13 +65,6 @@ final class OpenAiCompatibleProvider implements Provider {
       throw StepFailure.unrecoverable(
           'provider HTTP ${response.statusCode}: $body');
     }
-    if (!streaming) {
-      final decoded =
-          jsonDecode(await response.stream.bytesToString()) as Map<String, dynamic>;
-      final message =
-          ((decoded['choices'] as List).first as Map)['message'] as Map;
-      return parseCompletion(_completion(message.cast<String, dynamic>()));
-    }
     return _stream(response, onDelta, onReasoning, cancel);
   }
 
@@ -81,6 +77,10 @@ final class OpenAiCompatibleProvider implements Provider {
     final think = ThinkTextStream();
     final text = PlanTextStream();
     final calls = <int, _CallBuilder>{};
+    // Reasoning carried in its own delta field (GLM/Qwen-style
+    // `reasoning_content`) instead of an inline `<think>` block: the two
+    // conventions compose — field reasoning is never visible text.
+    final fieldReasoning = StringBuffer();
     final lines = raceCancelStream(
       response.stream
           .transform(utf8.decoder)
@@ -97,6 +97,11 @@ final class OpenAiCompatibleProvider implements Provider {
         final choice = (decoded['choices'] as List).first as Map;
         final delta =
             (choice['delta'] as Map?)?.cast<String, dynamic>() ?? const {};
+        final reasoning = delta['reasoning_content'] as String?;
+        if (reasoning != null && reasoning.isNotEmpty) {
+          fieldReasoning.write(reasoning);
+          onReasoning?.call(reasoning);
+        }
         final content = delta['content'] as String?;
         if (content != null && content.isNotEmpty) {
           final thinkChunk = think.add(content);
@@ -140,11 +145,15 @@ final class OpenAiCompatibleProvider implements Provider {
     final tail = text.flush();
     if (tail.isNotEmpty) onDelta?.call(tail);
     final parsed = parsePlanBlock(text.raw);
+    final reasoning = [
+      if (think.reasoning.isNotEmpty) think.reasoning,
+      if (fieldReasoning.isNotEmpty) fieldReasoning.toString(),
+    ].join('\n');
     return parseCompletion(Completion(
       text: parsed.text,
       toolCalls: _toolCalls(calls),
       plan: parsed.plan,
-      reasoning: think.reasoning,
+      reasoning: reasoning,
     ));
   }
 
@@ -159,31 +168,6 @@ final class OpenAiCompatibleProvider implements Provider {
             },
           }
       ];
-
-  Completion _completion(Map<String, dynamic> message) {
-    final toolCalls = <ToolCall>[];
-    for (final call in (message['tool_calls'] as List? ?? const [])) {
-      final map = (call as Map).cast<String, dynamic>();
-      final function = (map['function'] as Map).cast<String, dynamic>();
-      final raw = function['arguments'];
-      final arguments = raw is String
-          ? (jsonDecode(raw) as Map).cast<String, dynamic>()
-          : (raw as Map).cast<String, dynamic>();
-      toolCalls.add(ToolCall(
-        id: map['id'] as String?,
-        name: function['name'] as String,
-        arguments: arguments,
-      ));
-    }
-    final think = parseThinkBlock(message['content'] as String? ?? '');
-    final parsed = parsePlanBlock(think.text);
-    return Completion(
-      text: parsed.text,
-      toolCalls: toolCalls,
-      plan: parsed.plan,
-      reasoning: think.reasoning,
-    );
-  }
 }
 
 final class _CallBuilder {

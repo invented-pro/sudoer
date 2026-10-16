@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "memory.schema.json",
+  "title": "Pilot memory note",
+  "description": "One memory note (C9): a Markdown file named <id>.md whose first lines are a fixed-key front-matter block, followed by the note body. Frozen so store writes and parses stay deterministic and gate-testable.",
+  "$defs": {
+    "frontMatter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "tags", "created", "updated"],
+      "properties": {
+        "id": {
+          "description": "Slug identifier; must match the filename without .md.",
+          "type": "string",
+          "pattern": "^[a-z0-9-]+$"
+        },
+        "title": { "type": "string", "minLength": 1 },
+        "tags": {
+          "description": "Comma-separated in the file; a list after parsing.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "created": { "type": "string", "format": "date-time" },
+        "updated": { "type": "string", "format": "date-time" }
+      }
+    },
+    "noteFile": {
+      "description": "Textual file shape: `---`, five `key: value` lines (tags comma-separated), `---`, blank line, Markdown body.",
+      "type": "string",
+      "minLength": 1
+    },
+    "embeddingIndex": {
+      "description": "The derived embedding index (C9), at <memory_dir>/index.json. Never a source of truth: rebuildable from the notes, deterministic under a pinned embedder.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "dim", "hash", "vectors"],
+      "properties": {
+        "model": {
+          "description": "Embedder identity that produced the vectors; a change invalidates the index.",
+          "type": "string",
+          "minLength": 1
+        },
+        "dim": { "type": "integer", "minimum": 1 },
+        "hash": {
+          "description": "Deterministic digest of (note ids + updated timestamps), so staleness is detectable.",
+          "type": "string",
+          "minLength": 1
+        },
+        "vectors": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "type": "number" }
+          }
+        }
+      }
+    },
+    "searchHit": {
+      "description": "One memory search result (C9): hybrid score and why it matched.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "score"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+        "title": { "type": "string" },
+        "score": { "type": "number" },
+        "match": {
+          "description": "`tag`, `title`, `body`, or `semantic` — how the hit scored.",
+          "enum": ["tag", "title", "body", "semantic"]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tools-pilot.schema.json",
+  "title": "Pilot tool argument contracts",
+  "description": "Concrete argument shapes for the tools Pilot adds to the built-in catalog (C3): the http connector, notify, send, schedule, secrets, and the memory tools (C9). Prop's tool.schema.json stays frozen; these sit beside it.",
+  "$defs": {
+    "http": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url"],
+      "properties": {
+        "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"], "default": "GET" },
+        "url": { "type": "string", "format": "uri" },
+        "headers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "body": { "type": "string" },
+        "auth": {
+          "description": "Named secret resolved at execution and injected as a header (C10); the value never enters an observation.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["secret"],
+          "properties": {
+            "secret": { "type": "string", "minLength": 1 },
+            "header": {
+              "description": "Header name; default Authorization: Bearer <value>.",
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "notify": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["message"],
+      "properties": {
+        "title": { "type": "string" },
+        "message": { "type": "string", "minLength": 1 }
+      }
+    },
+    "schedule": {
+      "description": "Enrol a user task in the scheduler (C11). One-shot or recurring.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["when", "goal"],
+      "properties": {
+        "when": {
+          "description": "ISO 8601 timestamp or +<n><m|h|d>; sets the first due time (C11).",
+          "type": "string",
+          "minLength": 2
+        },
+        "goal": { "type": "string", "minLength": 1 },
+        "repeat": {
+          "description": "Recurrence: +<n><m|h|d>, daily@HH:MM, or weekly@<mon..sun>@HH:MM (C11). Omit for a one-shot.",
+          "type": "string",
+          "minLength": 2
+        },
+        "channel": {
+          "description": "Where the result is delivered: `notify`, `origin` (the channel the task was created from), or a registered channel id. Defaults to the origin channel.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "remind": {
+      "description": "One-shot sugar for `schedule` (C11).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["when", "goal"],
+      "properties": {
+        "when": {
+          "description": "ISO 8601 timestamp or +<n><m|h|d> (C11).",
+          "type": "string",
+          "minLength": 2
+        },
+        "goal": { "type": "string", "minLength": 1 }
+      }
+    },
+    "send": {
+      "description": "Deliver a message to a registered channel (C3, C6); the agent's outbound path, under policy.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["to", "message"],
+      "properties": {
+        "to": {
+          "description": "Recipient id within the channel.",
+          "type": "string",
+          "minLength": 1
+        },
+        "message": { "type": "string", "minLength": 1 },
+        "channel": {
+          "description": "Channel id; defaults to the origin channel.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "secrets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action"],
+      "properties": {
+        "action": { "enum": ["list"], "default": "list" }
+      }
+    },
+    "memory_write": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "body"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+        "title": { "type": "string", "minLength": 1 },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "body": { "type": "string", "minLength": 1 }
+      }
+    },
+    "memory_search": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["query"],
+      "properties": {
+        "query": { "type": "string", "minLength": 1 }
+      }
+    },
+    "memory_read": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9-]+$" }
+      }
+    }
+  }
+}

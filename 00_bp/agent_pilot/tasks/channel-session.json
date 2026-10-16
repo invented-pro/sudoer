@@ -1,0 +1,29 @@
+{
+  "id": "channel-session",
+  "description": "One channel maps to one continuous session across messages, and replies are delivered back to the channel (C5, C6).",
+  "channels": {
+    "register": [
+      { "id": "telegram", "kind": "telegram", "allow_from": ["42"] }
+    ],
+    "inbound": [
+      { "channel": "telegram", "from": "42", "text": "My name is Ada." },
+      { "channel": "telegram", "from": "42", "text": "What is my name?" }
+    ]
+  },
+  "script": {
+    "steps": [
+      { "complete": { "text": "Nice to meet you, Ada." } },
+      { "complete": { "text": "You are Ada." } }
+    ]
+  },
+  "expect": {
+    "runs": [
+      { "status": "complete" },
+      { "status": "complete", "answer": { "contains": "Ada" } }
+    ],
+    "channels": [
+      { "channel": "telegram", "to": "42", "message": "Nice to meet you, Ada." },
+      { "channel": "telegram", "to": "42", "message": "You are Ada." }
+    ]
+  }
+}

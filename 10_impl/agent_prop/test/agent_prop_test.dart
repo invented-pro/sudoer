@@ -122,6 +122,25 @@ void main() {
       expect(decoded['web'], isA<Map>());
     });
 
+    test('relative paths in a config file resolve against its directory',
+        () {
+      final dir = Directory.systemTemp.createTempSync('sudoer_cfg');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final path = p.join(dir.path, 'sudoer.json');
+      File(path).writeAsStringSync(jsonEncode({
+        'provider': {
+          'kind': 'ollama',
+          'model': 'llama3.1',
+          'context_window': 8192,
+        },
+        'workspace_root': 'ws',
+        'session_dir': 'ws/sessions',
+      }));
+      final config = loadConfigFile(path);
+      expect(config.workspaceRoot, p.join(dir.path, 'ws'));
+      expect(config.sessionDir, p.join(dir.path, 'ws', 'sessions'));
+    });
+
     test('defaults session_dir under the workspace', () {
       final config = _config(workspaceRoot: '/tmp/ws');
       expect(config.sessionDir,
@@ -391,6 +410,16 @@ void main() {
       expect(loaded.transcript.length, 2);
       expect(loaded.plan.single.text, 'step one');
     });
+
+    test('a new id is a readable UTC timestamp plus a suffix', () {
+      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final a = Session.create(workspaceRoot: temp.path);
+      final b = Session.create(workspaceRoot: temp.path);
+      expect(a.id, matches(RegExp(r'^\d{8}-\d{6}-[0-9a-z]{2}$')));
+      // Two sessions opened back to back never collide.
+      expect(a.id, isNot(b.id));
+    });
   });
 
   group('loop (C1)', () {
@@ -585,6 +614,63 @@ void main() {
           agent.session.transcript.whereType<ObservationEntry>().length, 4);
     });
 
+    test('a re-fetch recovering a cleared observation is progress, not a stall',
+        () async {
+      if (Platform.isWindows) {
+        // The bulky command that pushes the read out of the tail is POSIX
+        // shell syntax; the clearing logic itself is platform-neutral.
+        return;
+      }
+      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      // A big file read, then bulky non-refetchable output pushing it out of
+      // the verbatim tail: C4 clears the read to a placeholder, and the
+      // model's re-fetch must count as recovery progress (C8), not a repeat.
+      File('${temp.path}/a.txt')
+          .writeAsStringSync(List.filled(1300, 'filler line').join('\n'));
+      final config = _config(
+          workspaceRoot: temp.path, sessionDir: temp.path, window: 8000);
+      final read = {
+        'complete': {
+          'text': 'reading',
+          'tool_calls': [
+            {
+              'type': 'tool_call',
+              'name': 'read',
+              'arguments': {'path': 'a.txt'},
+            }
+          ],
+        }
+      };
+      final provider = ScriptedProvider.fromJson({
+        'steps': [
+          read,
+          {
+            'complete': {
+              'text': 'building',
+                  'tool_calls': [
+                {
+                  'type': 'tool_call',
+                  'name': 'run_command',
+                  'arguments': {
+                    'command':
+                        "i=0; while [ \$i -lt 150 ]; do echo \"report line \$i\"; i=\$((i+1)); done"
+                  },
+                }
+              ],
+            }
+          },
+          read,
+          {'complete': {'text': 'a.txt recovered'}},
+        ]
+      });
+      final agent = PropAgent.assemble(config: config, provider: provider);
+      final result = await agent.run(const RunRequest('read it again'));
+
+      expect(result.status, RunStatus.complete);
+      expect(result.answer, 'a.txt recovered');
+    });
+
     test('a stalled run with no best-effort answer summarizes locally',
         () async {
       final temp = Directory.systemTemp.createTempSync('sudoer-test-');
@@ -619,6 +705,37 @@ void main() {
       expect(result.status, RunStatus.incomplete);
       expect(result.answer, contains('Last observation'));
       expect(result.answer, contains('static'));
+    });
+
+    test('a provider timeout retries in place before it counts as a stall',
+        () async {
+      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
+      final provider = ScriptedProvider.fromJson({
+        'steps': [
+          {'error': 'timeout'},
+          {'error': 'timeout'},
+          {'complete': {'text': 'recovered'}}
+        ]
+      });
+      final agent = PropAgent.assemble(
+        config: config,
+        provider: provider,
+        // The backoff is real in production; tests never wait (C8).
+        reliability: Reliability(sleep: (Duration _) async {}),
+      );
+      final result = await agent.run(const RunRequest('do it'));
+
+      expect(result.status, RunStatus.complete);
+      expect(result.answer, 'recovered');
+      expect(provider.calls, 3);
+      // A recovered timeout is invisible: no error observation is recorded.
+      expect(
+          agent.session.transcript
+              .whereType<ObservationEntry>()
+              .any((o) => o.text.contains('provider error')),
+          isFalse);
     });
 
     test('an empty finish is nudged instead of completing silently', () async {
@@ -959,6 +1076,12 @@ void main() {
       expect(texts.skip(1).first, contains('EEEE'));
       expect(texts.last, contains('cccc'));
       expect(assembler.lastCompaction, isNull);
+      // The clearing is queryable so the loop can credit a re-fetch of
+      // cleared content as progress rather than a repeat stall (C8).
+      expect(assembler.clearedInLastView('read', {'path': 'lib/a.dart'}),
+          isTrue);
+      expect(assembler.clearedInLastView('read', {'path': 'lib/c.dart'}),
+          isFalse);
       // The exchange stays paired and the stored transcript is unchanged.
       expect(
           request.messages.whereType<AssistantEntry>().map((a) => a.action),
@@ -1448,9 +1571,11 @@ void main() {
         providerFactory: (_) => provider,
       );
       expect(out.toString(), 'hello\n');
-      expect(err.toString(), contains('timing: read '));
-      expect(err.toString(), contains('timing: response '));
+      // Without verbose there is no inline C2/tool trace, so the run total is
+      // the only timing line; per-call timings require the automate trace.
       expect(err.toString(), contains('timing: run '));
+      expect(err.toString(), isNot(contains('timing: read ')));
+      expect(err.toString(), isNot(contains('timing: response ')));
     });
   });
 
@@ -1693,19 +1818,19 @@ void main() {
     test('the openai adapter parses and strips a plan block', () async {
       final config = _config(
           kind: 'openai-compatible', extra: {'base_url': 'http://x'});
-      final client = MockClient((_) async => http.Response(
-            jsonEncode({
-              'choices': [
-                {
-                  'message': {
-                    'role': 'assistant',
-                    'content': 'planning\n```plan\n- [ ] a\n- [x] b\n```',
-                  }
+      // The adapter always streams on the wire (C8: inactivity-bounded),
+      // so the mock serves SSE even for a callback-less one-shot call.
+      final body = 'data: ${jsonEncode({
+            'choices': [
+              {
+                'delta': {
+                  'role': 'assistant',
+                  'content': 'planning\n```plan\n- [ ] a\n- [x] b\n```',
                 }
-              ]
-            }),
-            200,
-          ));
+              }
+            ]
+          })}\n\ndata: [DONE]\n\n';
+      final client = MockClient((_) async => http.Response(body, 200));
       final provider =
           OpenAiCompatibleProvider(config.provider, client: client);
       final response = await provider.complete(const ProviderRequest(
@@ -1849,6 +1974,157 @@ void main() {
     });
   });
 
+  group('automate log format (C6)', () {
+    final stamp = RegExp(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z ');
+
+    test('StampingSink prefixes every line; blank lines pass through', () {
+      final sink = StringBuffer();
+      final stamped = StampingSink(sink);
+      stamped.writeln('first');
+      stamped.writeln('multi\nline');
+      stamped.writeln();
+      stamped.writeln('');
+      final text = sink.toString();
+      expect(text.split('\n').first, matches(stamp));
+      for (final line in text.split('\n').where((l) => l.isNotEmpty)) {
+        expect(line, matches(stamp));
+      }
+      expect(text, contains(' first\n'));
+      expect(text, contains(' multi\n'));
+      expect(text, contains(' line\n'));
+      // Empty writes stay blank separators.
+      expect(text, contains('\n\n'));
+      // write() forwards untouched: not a line-oriented log write.
+      sink.clear();
+      stamped.write('not a log line');
+      expect(sink.toString(), 'not a log line');
+    });
+
+    test('logTimestamp is UTC with millisecond precision', () {
+      expect(
+        logTimestamp(DateTime.parse('2026-10-06T02:21:53.123Z')),
+        '2026-10-06T02:21:53.123Z',
+      );
+      expect(
+        logTimestamp(DateTime.parse('2026-01-02T03:04:05.006Z')),
+        '2026-01-02T03:04:05.006Z',
+      );
+    });
+
+    test('verbose automate stderr is timestamped and traces LLM traffic',
+        () async {
+      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      File('${temp.path}/a.txt').writeAsStringSync('x');
+      final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
+      final provider = ScriptedProvider.fromJson({
+        'steps': [
+          {
+            'complete': {
+              'text': 'reading',
+              'tool_calls': [
+                {
+                  'type': 'tool_call',
+                  'name': 'read',
+                  'arguments': {'path': 'a.txt'},
+                }
+              ],
+            }
+          },
+          {'complete': {'text': 'done text'}},
+        ]
+      });
+      final out = StringBuffer();
+      final err = StringBuffer();
+      await runCli(
+        config: config,
+        goal: 'read a.txt',
+        out: out,
+        err: err,
+        providerFactory: (_) => provider,
+        verbose: true,
+      );
+      // stdout stays the clean answer surface.
+      expect(out.toString(), 'done text\n');
+      final text = err.toString();
+      // Every non-blank stderr line carries a timestamp prefix.
+      for (final line in text.split('\n').where((l) => l.isNotEmpty)) {
+        expect(line, matches(stamp));
+      }
+      // The request/response traffic is on the record, with context.
+      expect(text, contains('── request step 1 ──'));
+      expect(text, contains('── request step 2 ──'));
+      expect(text, contains('ctx ~'));
+      expect(text, contains('messages=1 new=1'));
+      expect(text, contains('── system'));
+      expect(text, contains('[C2 provider]   You are Sudoer'));
+      expect(text, contains('── user'));
+      expect(text, contains('[C2 provider]   read a.txt'));
+      expect(text, contains('── tool_calls ──'));
+      expect(text, contains('── observation ok for '));
+      expect(text, contains('── finish'));
+      expect(text, contains('[C2 provider]   done text'));
+      // The second request diffs instead of re-dumping: the goal is not
+      // reprinted and the new tail is announced.
+      expect('── system'.allMatches(text).length, 1);
+      expect(text, contains('earlier message unchanged'));
+      expect(text, contains('── assistant'));
+      // Timings ride inline with the response and each tool result.
+      expect(text, contains('timing: response '));
+      expect(text, contains('timing: read '));
+      expect(text, contains(RegExp(r'Z \[C2 provider\] timing: response ')));
+    });
+
+    test('the human surface is never stamped nor traced', () async {
+      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
+      final provider =
+          ScriptedProvider.fromJson({'steps': [{'complete': {'text': 'ok'}}]});
+      final err = StringBuffer();
+      await runCli(
+        config: config,
+        goal: 'hi',
+        out: StringBuffer(),
+        err: err,
+        providerFactory: (_) => provider,
+        verbose: true,
+        human: true,
+      );
+      final text = stripAnsi(err.toString());
+      expect(text, contains('[C1 loop]'));
+      expect(text, isNot(contains('── system')));
+      expect(text, isNot(contains('── finish')));
+      expect(text, isNot(contains('timing: response ')));
+      for (final line in text.split('\n').where((l) => l.trim().isNotEmpty)) {
+        expect(line, isNot(matches(stamp)));
+      }
+    });
+
+    test('the automate surface logs the session id to resume', () async {
+      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
+      final session = Session.create(workspaceRoot: temp.path, id: 'fixed-id');
+      final out = StringBuffer();
+      final err = StringBuffer();
+      final code = await runCli(
+        config: config,
+        goal: 'hi',
+        out: out,
+        err: err,
+        session: session,
+        providerFactory: (_) =>
+            ScriptedProvider.fromJson({'steps': [{'complete': {'text': 'ok'}}]}),
+      );
+      expect(code, 0);
+      // The answer surface stays clean; the resume hint lands on the log.
+      expect(out.toString(), 'ok\n');
+      expect(err.toString(),
+          contains('session fixed-id (resume: --session fixed-id)'));
+    });
+  });
+
   group('plan stream (C2)', () {
     test('withholds an arriving plan block across chunks', () {
       final stream = PlanTextStream();
@@ -1908,19 +2184,19 @@ void main() {
     test('the openai adapter strips a think block one-shot', () async {
       final config = _config(
           kind: 'openai-compatible', extra: {'base_url': 'http://x'});
-      final client = MockClient((_) async => http.Response(
-            jsonEncode({
-              'choices': [
-                {
-                  'message': {
-                    'role': 'assistant',
-                    'content': '<think>deliberating</think>answer',
-                  }
+      // The adapter always streams on the wire (C8: inactivity-bounded),
+      // so the mock serves SSE even for a callback-less one-shot call.
+      final body = 'data: ${jsonEncode({
+            'choices': [
+              {
+                'delta': {
+                  'role': 'assistant',
+                  'content': '<think>deliberating</think>answer',
                 }
-              ]
-            }),
-            200,
-          ));
+              }
+            ]
+          })}\n\ndata: [DONE]\n\n';
+      final client = MockClient((_) async => http.Response(body, 200));
       final provider =
           OpenAiCompatibleProvider(config.provider, client: client);
       final response = await provider.complete(const ProviderRequest(

@@ -18,6 +18,7 @@ import 'providers/ollama.dart';
 import 'providers/openai_compatible.dart';
 import 'providers/provider.dart';
 import 'providers/scripted.dart';
+import 'reliability.dart';
 import 'session.dart';
 import 'tools/job.dart';
 
@@ -57,8 +58,9 @@ Provider providerFor(ProviderConfig config) {
   };
 }
 
-/// C6: one-shot CLI. Returns a process exit code: 0 when an answer is
-/// produced (including a best-effort incomplete one), non-zero when blocked.
+/// C6: one-shot CLI. Returns a process exit code: 0 only when the run is
+/// `complete`; non-zero when it is `incomplete` (a stalled or ceiling-hit run
+/// that still produced a best-effort answer) or `blocked`.
 Future<int> runCli({
   required Config config,
   required String goal,
@@ -68,9 +70,13 @@ Future<int> runCli({
   List<String>? callLog,
   bool verbose = false,
   bool human = false,
+  Session? session,
+  Reliability? reliability,
 }) async {
   final outSink = out ?? stdout;
-  final errSink = err ?? stderr;
+  // Automate surface: stderr is the log, so every line written there is
+  // timestamped; the human surface's stderr stays unstamped (C6).
+  final errSink = human ? (err ?? stderr) : StampingSink(err ?? stderr);
   final factory = providerFactory ?? providerFor;
   final console = Console(out: outSink, err: errSink, ansi: human, spinner: human);
   final observer = human ? _CliObserver(console) : null;
@@ -86,9 +92,14 @@ Future<int> runCli({
     config: config,
     provider: factory(config.provider),
     callLog: callLog,
+    session: session,
+    reliability: reliability,
     diagnostics: Diagnostics(
       enabled: verbose,
       sink: human ? console.diagnostic : errSink.writeln,
+      // The automate log records the full LLM traffic; the human surface
+      // keeps diagnostics to brief routing even with --verbose.
+      traceContent: !human,
     ),
   );
   try {
@@ -108,31 +119,31 @@ Future<int> runCli({
       console.endLine();
       if (result.status == RunStatus.blocked) {
         console.error('blocked: ${result.reason ?? 'unknown'}');
-        console.status(_statusText(observer!, result, agent.session),
-            kind: result.status.wire);
-        return 1;
-      }
-      if (result.status == RunStatus.incomplete && result.answer != null) {
+      } else if (result.status == RunStatus.incomplete &&
+          result.answer != null) {
         console.answer(result.answer!);
       }
       console.status(_statusText(observer!, result, agent.session),
           kind: result.status.wire);
-      return 0;
+      return result.status == RunStatus.complete ? 0 : 1;
     }
 
     switch (result.status) {
       case RunStatus.blocked:
         errSink.writeln('blocked: ${result.reason ?? 'unknown'}');
         _printTimings(errSink, result);
+        _printSession(errSink, agent.session);
         return 1;
       case RunStatus.incomplete:
         outSink.writeln(result.answer ?? '');
         errSink.writeln('incomplete: ${result.reason ?? 'incomplete'}');
         _printTimings(errSink, result);
-        return 0;
+        _printSession(errSink, agent.session);
+        return 1;
       case RunStatus.complete:
         outSink.writeln(result.answer ?? '');
         _printTimings(errSink, result);
+        _printSession(errSink, agent.session);
         return 0;
     }
   } finally {
@@ -171,12 +182,14 @@ Future<ReplOutcome> runRepl({
   bool human = false,
   bool echoInput = false,
   List<String>? callLog,
-}) {
-  return _Repl(
+  Reliability? reliability,
+}) async {
+  final repl = _Repl(
     config: config,
     console: Console(
       out: out ?? stdout,
-      err: err ?? stderr,
+      // Automate surface: stderr is the log, so timestamp every line (C6).
+      err: human ? (err ?? stderr) : StampingSink(err ?? stderr),
       ansi: human,
       spinner: human,
     ),
@@ -187,7 +200,13 @@ Future<ReplOutcome> runRepl({
     interactive: interactive,
     echoInput: echoInput,
     callLog: callLog,
-  ).start(input: input, rawInput: rawInput);
+    reliability: reliability,
+  );
+  final outcome = await repl.start(input: input, rawInput: rawInput);
+  // C6: on the automate surface, log the session id on close so the next run
+  // can resume it with `--session <id>`.
+  if (!human) _printSession(repl.console.err, outcome.session);
+  return outcome;
 }
 
 /// The mutable REPL state shared by the piped line path and the interactive
@@ -204,11 +223,15 @@ final class _Repl {
     required this.interactive,
     required this.echoInput,
     this.callLog,
+    this.reliability,
   }) {
     workspaceRoot = session.workspaceRoot;
     diagnostics = Diagnostics(
       enabled: verbose,
       sink: human ? console.diagnostic : console.err.writeln,
+      // The automate log records the full LLM traffic; the human surface
+      // keeps diagnostics to brief routing even with /verbose on.
+      traceContent: !human,
     );
     agent = _build();
   }
@@ -221,6 +244,7 @@ final class _Repl {
   final bool interactive;
   final bool echoInput;
   final List<String>? callLog;
+  final Reliability? reliability;
 
   final List<RunResult> runs = [];
   late final Diagnostics diagnostics;
@@ -243,6 +267,7 @@ final class _Repl {
         session: session,
         callLog: callLog,
         diagnostics: diagnostics,
+        reliability: reliability,
         jobs: jobs,
       );
 
@@ -493,9 +518,9 @@ final class _Repl {
     final result = await agent
         .run(RunRequest(parsed.text, images: parsed.images), observer: observer);
     runs.add(result);
-    // A blocked final run makes the process exit non-zero (C6); any later
-    // run that delivers an answer resets it.
-    exitCode = result.status == RunStatus.blocked ? 1 : 0;
+    // Any non-`complete` final run makes the process exit non-zero (C6);
+    // a later `complete` run resets it.
+    exitCode = result.status == RunStatus.complete ? 0 : 1;
     if (human) {
       console.stopThinking();
       console.endLine();
@@ -745,12 +770,22 @@ Duration? _runTotal(RunResult result) {
   return null;
 }
 
-/// Print a run's measured spans as plain `timing:` lines on stderr, leaving
-/// stdout untouched for the automate surface.
+/// Print the run's measured total as a plain `timing:` line on stderr,
+/// leaving stdout untouched for the automate surface. Per-response and
+/// per-tool timings are emitted inline by the C2 trace as they happen
+/// (automate verbose), so only the `run` total lands here.
 void _printTimings(StringSink err, RunResult result) {
   for (final timing in result.timings) {
+    if (timing.label != 'run') continue;
     err.writeln('timing: ${timing.label} ${formatDuration(timing.duration)}');
   }
+}
+
+/// C6: on the automate surface, log the session id at exit so the run can be
+/// resumed by copy-pasting `--session <id>`. Goes to stderr, keeping stdout
+/// the clean answer surface.
+void _printSession(StringSink err, Session session) {
+  err.writeln('session ${session.id} (resume: --session ${session.id})');
 }
 
 /// The context use as ` (NN%)`, or empty when the window is unknown.

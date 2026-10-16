@@ -1,0 +1,30 @@
+{
+  "id": "policy-confirm-deny",
+  "description": "A call matching a confirm matcher cannot be confirmed on the automate surface, so it is denied immediately and the run blocks (C10).",
+  "goal": "Post my note to the journal.",
+  "config": {
+    "policy": {
+      "confirm": [{ "tool": "http", "arg": "POST" }]
+    }
+  },
+  "stubs": [
+    { "name": "journal", "response": { "status": 200, "body": "stored" } }
+  ],
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "Posting the note.",
+          "tool_calls": [
+            { "type": "tool_call", "name": "http", "arguments": { "method": "POST", "url": "{{stub:journal}}/entry", "body": "note" } }
+          ]
+        }
+      }
+    ]
+  },
+  "expect": {
+    "status": "blocked",
+    "tools": ["http"],
+    "policy": [{ "event": "confirm_denied", "tool": "http" }]
+  }
+}

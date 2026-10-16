@@ -146,6 +146,20 @@ final class ContextAssembler {
   int _lastClipped = 0;
   int _lastCleared = 0;
 
+  /// Calls whose observations the last view cleared to placeholders (C4).
+  /// The loop consults this so a re-fetch that recovers cleared content
+  /// counts as progress, not a repeat stall (C8): the invitation to re-run
+  /// a cleared tool must not be a trap.
+  final Set<String> _lastClearedCalls = {};
+
+  /// True when [name]+[arguments] was cleared to a placeholder in the last
+  /// assembled view (C4) — i.e. the model could not see its result.
+  bool clearedInLastView(String name, Map<String, dynamic> arguments) =>
+      _lastClearedCalls.contains(_callKeySuffix(name, arguments));
+
+  static String _callKeySuffix(String name, Map<String, dynamic> arguments) =>
+      '$name\u0000${jsonEncode(arguments)}';
+
   /// The full prompt estimate measured when the pending fold was planned.
   int _plannedBefore = 0;
 
@@ -310,6 +324,7 @@ final class ContextAssembler {
     ];
     _lastClipped = 0;
     _lastCleared = 0;
+    _lastClearedCalls.clear();
     // The calls of the batch currently being replayed, consumed in order by
     // the observations that answer them (the loop appends one observation per
     // call, in the listed order).
@@ -329,6 +344,7 @@ final class ContextAssembler {
           entry.outcome == Outcome.ok &&
           kRefetchableTools.contains(call.name)) {
         _lastCleared++;
+        _lastClearedCalls.add(_callKeySuffix(call.name, call.arguments));
         view.add(ObservationEntry(
             text: _clearedPlaceholder(call),
             outcome: entry.outcome,
@@ -366,8 +382,7 @@ final class ContextAssembler {
         '${text.substring(text.length - tail)}';
   }
 
-  /// The one-line replacement for a cleared re-fetchable tool result (C4):
-  /// name the tool and its path, pattern, query, or URL so a later step can
+  /// The one-line replacement for a cleared re-fetchable tool result (C4):  /// name the tool and its path, pattern, query, or URL so a later step can
   /// re-run it.
   static String _clearedPlaceholder(ToolCall call) {
     final target = switch (call.name) {

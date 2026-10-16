@@ -1,6 +1,6 @@
 # C7 — Modality
 
-> Status: draft · Version 0.4 · **Current tier: Prop**
+> Status: draft · Version 0.5 · **Current tier: Prop**
 
 Modality is the shape of information crossing the boundary: `C7` defines
 what kinds of input the agent accepts and what kinds of output it produces.
@@ -88,3 +88,10 @@ stop
   (C6) — is passed to that goal's provider requests as an attachment; the
   transcript keeps a text reference only, and the binary is not stored in the
   session.
+
+## Pilot
+
+Unchanged: text in and out, with image input only where a coding task
+supplies it. The channel API (`C6`, web page and messenger adapters)
+carries text only; attachments are out of scope at Pilot. General vision
+and audio wait for Orbit.

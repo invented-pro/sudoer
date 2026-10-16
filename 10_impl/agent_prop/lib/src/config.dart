@@ -362,6 +362,9 @@ $kSampleConfig
 ''';
 
 /// Load configuration from a JSON file, validating against the schema.
+/// Relative path values (`workspace_root`, `session_dir`) are resolved
+/// against the config file's directory, so configs stay portable — no
+/// absolute machine paths required.
 Config loadConfigFile(String path) {
   final file = File(path);
   if (!file.existsSync()) {
@@ -376,7 +379,23 @@ Config loadConfigFile(String path) {
   if (decoded is! Map) {
     throw const ConfigException('config must be a JSON object');
   }
-  return Config.fromJson(decoded.cast<String, dynamic>());
+  final expanded = _expandEnvDeep(decoded.cast<String, dynamic>());
+  return Config.fromJson(_resolvePaths(expanded,
+      p.normalize(p.absolute(file.parent.path))));
+}
+
+/// Rewrite relative path values as absolute, anchored at [base] (the
+/// config file's directory). Absolute values pass through normalized.
+Map<String, dynamic> _resolvePaths(Map<String, dynamic> json, String base) {
+  for (final key in const ['workspace_root', 'session_dir']) {
+    final value = json[key];
+    if (value is String && value.isNotEmpty) {
+      json[key] = p.isAbsolute(value)
+          ? p.normalize(value)
+          : p.normalize(p.join(base, value));
+    }
+  }
+  return json;
 }
 
 /// Expand `$VAR` and `${VAR}` references in [value] from the environment.

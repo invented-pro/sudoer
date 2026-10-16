@@ -1,6 +1,10 @@
 [tools]
 dart = "3.13.5"
 
+[env]
+# Repo-root package cache, portable across machines (no absolute paths).
+PUB_CACHE = "{{config_root}}/../../.pub-cache"
+
 [tasks.build]
 description = "Compile the sudoer-prop CLI into dist/ and publish it to 20_eval/agent_prop/"
 run = "dart run tool/build.dart"
