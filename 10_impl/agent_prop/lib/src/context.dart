@@ -10,6 +10,51 @@ import 'tools/tool.dart' show kReadOnlyTools;
 /// evaluation results stay attributable.
 const String kPromptVersion = 'prop-prompt-v2';
 
+/// The version stamp for the CLM prompt section (C4), frozen with the build
+/// like [kPromptVersion].
+const String kClmPromptVersion = 'prop-clm-prompt-v1';
+
+/// C4 (CLM): the context-management section appended to the pinned system
+/// prompt when the model owns its context. It names the live context file and
+/// the block protocol the model edits with its ordinary tools. The base
+/// system prompt stays pinned; only the per-session file path and window are
+/// interpolated.
+String clmContextSection({
+  required String contextPath,
+  required int window,
+  String strategy = '',
+}) {
+  final buffer = StringBuffer()
+    ..writeln('Context management (CLM $kClmPromptVersion):')
+    ..writeln('- Your live context is mirrored as a file: $contextPath')
+    ..writeln('  (any path in this workspace; edit it with run_command, write, '
+        'or edit).')
+    ..writeln('- That file *is* your context: edits take effect on your next '
+        'step. If you do not edit it, the harness appends your turn as usual.')
+    ..writeln('- Everything you delete is gone; there is no other memory of '
+        'this session. Keep the file well under the $window-token window.')
+    ..writeln('- Curate it: keep the goal, the files you touched and their '
+        'state, commands and outcomes, decisions, errors, and open threads; '
+        'compress or drop stale tool output.')
+    ..writeln('- Format: each block starts with a line '
+        '[[ctx role=user|assistant|observation|note]] followed by its body. '
+        'Inside an assistant block, one tool call per line is '
+        '[[call]] <name> <json>. A body line that must start with [[ is '
+        'escaped as \\[[ . Observations bind to a call by '
+        '[[ctx role=observation id=<call id>]].')
+    ..writeln('- The context must keep at least the user (goal) block; an '
+        'edit that removes it or is otherwise malformed is ignored and '
+        'reported, so never delete the goal.');
+  final steer = strategy.trim();
+  if (steer.isNotEmpty) {
+    buffer
+      ..writeln()
+      ..writeln('Context-management strategy (follow it):')
+      ..writeln(steer);
+  }
+  return buffer.toString();
+}
+
 const String kPropSystemPrompt =
     'You are Sudoer (Prop), a coding agent running locally in a workspace '
     '(system prompt $kPromptVersion).\n'
@@ -122,11 +167,18 @@ final class ContextAssembler {
     required this.contextWindow,
     this.systemPrompt = kPropSystemPrompt,
     this.diagnostics,
+    this.modelManagedContext = false,
   });
 
   final int contextWindow;
   final String systemPrompt;
   final Diagnostics? diagnostics;
+
+  /// C4 (CLM): when true the model owns the live context, so the harness
+  /// ladder (clip, clear, fold, drop) is disabled and the transcript is sent
+  /// as-is. Fitting then depends on the model keeping the context small; the
+  /// prompt that still overflows is an error, as always.
+  final bool modelManagedContext;
 
   /// Estimated tokens of the most recently assembled prompt (status, C6).
   int lastUsedTokens = 0;
@@ -172,6 +224,8 @@ final class ContextAssembler {
     List<PlanItem> plan = const [],
     bool force = false,
   }) {
+    // CLM: the model folds its own context; the harness never plans a fold.
+    if (modelManagedContext) return null;
     final system = _systemWithPlan(plan);
     final toolsJson = jsonEncode([for (final tool in tools) tool.toJson()]);
     final cut = _desiredCut(system, toolsJson, transcript, force: force);
@@ -236,40 +290,44 @@ final class ContextAssembler {
 
     // Fallback folding: when the loop did not pre-summarize a warranted fold
     // (or a direct caller has no loop), fold deterministically so the prompt
-    // always fits even without a model call.
+    // always fits even without a model call. In CLM mode the model owns the
+    // context, so no lever runs; the prompt is sent as the model left it.
     lastCompaction = null;
     final startFolded = _foldedThrough;
-    final cut = _desiredCut(system, toolsJson, transcript);
+    final cut =
+        modelManagedContext ? _foldedThrough : _desiredCut(system, toolsJson, transcript);
     if (cut > _foldedThrough) {
       _foldedThrough = cut;
       _brief = _digest(transcript.sublist(0, cut)).text;
     }
 
     var messages = _view(transcript);
-    // If the prompt still overflows after clipping and clearing, fold more of
-    // the tail turn-aligned before ever dropping a segment.
-    while (_estimate(system, toolsJson, messages) > contextWindow &&
-        _foldedThrough < transcript.length) {
-      final next = _nextBoundary(transcript, _foldedThrough);
-      if (next <= _foldedThrough) break;
-      _foldedThrough = next;
-      _brief = _digest(transcript.sublist(0, _foldedThrough)).text;
-      messages = _view(transcript);
-    }
-
-    // Last resort: drop the oldest non-pinned segments, but never the goal and
-    // never the last entry.
-    while (_estimate(system, toolsJson, messages) > contextWindow &&
-        messages.length > 2) {
-      var removable = -1;
-      for (var i = 0; i < messages.length - 1; i++) {
-        if (messages[i] is! UserEntry) {
-          removable = i;
-          break;
-        }
+    if (!modelManagedContext) {
+      // If the prompt still overflows after clipping and clearing, fold more
+      // of the tail turn-aligned before ever dropping a segment.
+      while (_estimate(system, toolsJson, messages) > contextWindow &&
+          _foldedThrough < transcript.length) {
+        final next = _nextBoundary(transcript, _foldedThrough);
+        if (next <= _foldedThrough) break;
+        _foldedThrough = next;
+        _brief = _digest(transcript.sublist(0, _foldedThrough)).text;
+        messages = _view(transcript);
       }
-      if (removable < 0) break;
-      messages.removeAt(removable);
+
+      // Last resort: drop the oldest non-pinned segments, but never the goal
+      // and never the last entry.
+      while (_estimate(system, toolsJson, messages) > contextWindow &&
+          messages.length > 2) {
+        var removable = -1;
+        for (var i = 0; i < messages.length - 1; i++) {
+          if (messages[i] is! UserEntry) {
+            removable = i;
+            break;
+          }
+        }
+        if (removable < 0) break;
+        messages.removeAt(removable);
+      }
     }
 
     final used = _estimate(system, toolsJson, messages);
@@ -309,6 +367,14 @@ final class ContextAssembler {
   /// observations are clipped everywhere. The stored transcript is never
   /// rewritten; thinning is a view, not a mutation.
   List<Entry> _view(List<Entry> transcript) {
+    // CLM: the model's context is sent verbatim; the deterministic levers are
+    // the harness's job, and in this mode the model does that job.
+    if (modelManagedContext) {
+      _lastClipped = 0;
+      _lastCleared = 0;
+      _lastClearedCalls.clear();
+      return List<Entry>.of(transcript);
+    }
     final clipped = _clipAll(transcript);
     var tailStart =
         _chooseCut(clipped, (contextWindow * kRetainFraction).round());

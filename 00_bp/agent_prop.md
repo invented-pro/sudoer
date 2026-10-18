@@ -121,7 +121,9 @@ gate, and to rebuild itself.
   or ollama; a fixed model and context window.
 - **Transcript (across runs).** The live transcript, built by `C1` and
   assembled by `C4`, carried across the goals of a continuous session,
-  persisted by `C5`, and compacted in-window by `C4` as it grows.
+  persisted by `C5`, and compacted in-window by `C4` as it grows. Under
+  `context.mode: clm` the model instead owns the live context as an editable
+  file (`C4`, *context as a file*), which the loop mirrors and adopts.
 - **Streaming.** On the human surface, the model reply is streamed as tokens
   arrive (`C2`); the loop forwards visible deltas to the interface (`C1`).
   The plan block is withheld until it is complete, so it is never shown, and
@@ -245,6 +247,7 @@ root defaults to the process working directory when not configured.
 | --- | --- |
 | `provider kind`, `base_url`, `api_key`, `model`, `context_window`, `sampling` | `C2` |
 | `workspace_root`, `web.enabled`, `web.search_url`, `web.deny_hosts` | `C3` |
+| `context.mode`, `context.file`, `context.strategy` | `C4` |
 | `session_dir` | `C5` |
 
 The budget bounds and per-tool-class timeouts, and the web size/result bounds,
@@ -311,7 +314,7 @@ interface: cli-human(styled) + cli-automate   # inline, no full-screen
 streaming: human-surface                      # one-shot for automation
 modality: text + coding-only image
 session: continuous-persistent
-context: transcript-compacted
+context: transcript-compacted          # context.mode: harness (default)
 loop: react-plan-driven
 provider:
   kind: [openai-compatible, ollama]   # exactly one
@@ -323,7 +326,11 @@ tools_config:
     enabled: true          # on by default; false removes the web tools
     search_url: <searxng>  # backend for web_search
     deny_hosts: []         # empty blacklist; `.suffix` matches subdomains
-commands: [help, exit, new, sessions, resume, plan, status, diff, cancel, workspace, verbose]
+context_config:
+  mode: [harness, clm]   # harness = built-in ladder; clm = model-managed file
+  file: <path>           # live context file (clm); default <workspace_root>/.sudoer/context.md
+  strategy: <text>       # optional natural-language context-management steering (clm)
+commands: [help, exit, new, sessions, resume, plan, status, context, diff, cancel, workspace, verbose]
 guards:
   step_budget: progress-driven-with-ceiling   # compiled-in
   timeouts: per-tool-class                    # compiled-in

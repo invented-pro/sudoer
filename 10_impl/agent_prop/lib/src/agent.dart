@@ -1,5 +1,6 @@
 import 'package:path/path.dart' as p;
 
+import 'clm.dart';
 import 'config.dart';
 import 'context.dart';
 import 'diagnostics.dart';
@@ -25,6 +26,7 @@ final class PropAgent {
     required this.diagnostics,
     required this.baseline,
     required this.ownsJobs,
+    this.contextLog,
   });
 
   final Config config;
@@ -33,6 +35,13 @@ final class PropAgent {
   final AgentLoop loop;
   final Session session;
   final Diagnostics diagnostics;
+
+  /// C4 (CLM): the model-owned live context file, or null under the harness
+  /// ladder.
+  final ContextLog? contextLog;
+
+  /// The live context file path (CLM only), for the interface and tests.
+  String? get contextFilePath => contextLog?.file.path;
 
   /// The workspace snapshot backing `diff`/`restore` (C3/C5): captured at
   /// session open, refreshed when the workspace root changes, recorded in the
@@ -75,8 +84,26 @@ final class PropAgent {
       ],
       callLog: callLog,
     );
+    // C4: choose the context strategy. Under CLM the model owns the live
+    // context, so the prompt gains the CLM section and the loop mirrors the
+    // transcript to an editable file; under the default the pinned ladder
+    // prompt is used unchanged.
+    final clm = config.context.mode == ContextMode.clm;
+    final contextLog = clm
+        ? ContextLog(ContextLog.fileFor(config),
+            workspaceRoot: config.workspaceRoot)
+        : null;
+    final systemPrompt = clm
+        ? '$kPropSystemPrompt\n\n${clmContextSection(
+            contextPath: contextLog!.displayPath,
+            window: config.provider.contextWindow,
+            strategy: config.context.strategy,
+          )}'
+        : kPropSystemPrompt;
     final context = ContextAssembler(
       contextWindow: config.provider.contextWindow,
+      systemPrompt: systemPrompt,
+      modelManagedContext: clm,
       diagnostics: diag,
     );
     final loop = AgentLoop(
@@ -84,6 +111,7 @@ final class PropAgent {
       provider: provider,
       tools: tools,
       context: context,
+      contextLog: contextLog,
       reliability: reliability ?? const Reliability(),
       diagnostics: diag,
     );
@@ -96,6 +124,7 @@ final class PropAgent {
       diagnostics: diag,
       baseline: baseline,
       ownsJobs: registry == null,
+      contextLog: contextLog,
     );
   }
 

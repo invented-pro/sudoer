@@ -89,6 +89,27 @@
           "items": { "type": "string", "minLength": 1 }
         }
       }
+    },
+    "context": {
+      "description": "Context management (C4). `harness` (default) fits the prompt with the built-in clip/clear/fold ladder; `clm` mirrors the live context to an editable file the model manages itself (context as a file).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "description": "Which context-management strategy to use (C4).",
+          "enum": ["harness", "clm"],
+          "default": "harness"
+        },
+        "file": {
+          "description": "The live context file (CLM only). Relative paths resolve against workspace_root; defaults to <workspace_root>/.sudoer/context.md.",
+          "type": "string",
+          "minLength": 1
+        },
+        "strategy": {
+          "description": "Optional natural-language context-management instruction (CLM only), appended to the CLM prompt section.",
+          "type": "string"
+        }
+      }
     }
   }
 }

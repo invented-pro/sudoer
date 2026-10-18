@@ -63,6 +63,13 @@ blueprint change, not a test bug.
   (reported as SKIP, never as failures) on platforms without a POSIX host
   shell, where the shell paths are unit-tested instead.
 
+**Context as a file (CLM).** A `clm` task sets `config.context.mode`, and
+its script edits the *real* context file through the real tools
+(`run_command`, `write`, `edit`) — the same mechanism a live model uses — so
+the loop's mirror-then-adopt path is exercised end to end with no model. The
+runner then asserts the final context file and the serialized transcript
+through the `context*` / `transcript*` expectations.
+
 ## Procedure
 
 1. Materialize the task's `workspace` into a fresh temp dir and use it as
@@ -80,8 +87,11 @@ blueprint change, not a test bug.
    plan), the final workspace, and the ordered tool-call log with each
    call's observation.
 5. Compare against `expect`: `status`/`answer`/`runs`, `plan`,
-   `sessionPersisted`, `stdoutContains`, `files`, `tools`, and
-   `observations`. Record pass/fail.
+   `sessionPersisted`, `stdoutContains`, `files`, `tools`,
+   `observations`, and — for CLM tasks — `contextContains` /
+   `contextNotContains` (the final live context file) and
+   `transcriptContains` / `transcriptNotContains` (the serialized session
+   transcript). Record pass/fail.
 
 ## Pass criteria
 
@@ -135,6 +145,11 @@ The concrete argument shapes the scripts rely on, frozen in
 | [sustained-progress](tasks/sustained-progress.json) | `C1`/`C8` productive steps run past the old step cap to a finish |
 | [context-overflow](tasks/context-overflow.json) | `C4` overflow; `C1` block |
 | [compaction](tasks/compaction.json) | `C4` watermark fold at a goal boundary (scripted brief); `C5` continuity (POSIX shell) |
+| [clm-edit-sync](tasks/clm-edit-sync.json) | `C4` CLM: an append to the context file is adopted (POSIX shell) |
+| [clm-elide-observation](tasks/clm-elide-observation.json) | `C4` CLM: an in-place elision of a bulky observation is adopted (POSIX shell) |
+| [clm-rewrite-ledger](tasks/clm-rewrite-ledger.json) | `C4` CLM: a full rewrite of the context file is adopted; the goal is kept |
+| [clm-malformed-edit](tasks/clm-malformed-edit.json) | `C4` CLM: a malformed edit is rejected with a notice; the context survives (POSIX shell) |
+| [clm-switch-command](tasks/clm-switch-command.json) | `C4`/`C6` CLM: `/context clm` switches the live mode; the next goal adopts a rewrite |
 | [session-continuity](tasks/session-continuity.json) | `C5` continuous session; two goals; persistence |
 | [plan-persistence](tasks/plan-persistence.json) | `C1` plan update; `C5` persistence |
 | [repl-command](tasks/repl-command.json) | `C6` command handling; `/plan` |

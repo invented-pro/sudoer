@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'clm.dart';
 import 'context.dart';
 import 'diagnostics.dart';
 import 'errors.dart';
@@ -37,6 +38,7 @@ final class AgentLoop {
     required this.provider,
     required this.tools,
     required this.context,
+    this.contextLog,
     this.reliability = const Reliability(),
     Diagnostics? diagnostics,
   }) : diagnostics = diagnostics ?? Diagnostics.silent;
@@ -47,6 +49,17 @@ final class AgentLoop {
   final ContextAssembler context;
   final Reliability reliability;
   final Diagnostics diagnostics;
+
+  /// C4 (CLM): the model-owned live context file, or null for the harness
+  /// ladder. When set, the loop mirrors the transcript to the file, adopts a
+  /// model edit as the new context, and leaves the fitting to the model.
+  final ContextLog? contextLog;
+
+  /// The exact context-file text the harness last wrote this run, so a change
+  /// means the model edited it. Reset per step by [_syncContextFile].
+  String? _synced;
+
+  bool get _clm => contextLog != null;
 
   Future<RunResult> run(
     RunRequest request,
@@ -76,6 +89,9 @@ final class AgentLoop {
     // so both surfaces can show how long the goal took.
     RunResult done(RunStatus status, {String? answer, String? reason}) {
       runWatch.stop();
+      // CLM: leave the live context file mirroring the final transcript, so a
+      // resumed session and the human surface see the same context.
+      if (_clm) _syncContextFile(session);
       timings.add(RunTiming('run', runWatch.elapsed));
       return RunResult(
           status: status, answer: answer, reason: reason, timings: timings);
@@ -99,6 +115,9 @@ final class AgentLoop {
           'C1 loop', 'step ${steps + 1} (stalls $stalls/$kStallBudget)');
       observer?.onPhase('thinking');
       observer?.onStep(steps + 1, stalls, kStallBudget);
+      // CLM: mirror the live transcript to the context file before the call,
+      // giving the model a clean baseline to edit (C4).
+      if (_clm) _syncContextFile(session);
       await compact(session, observer: observer);
       final ProviderRequest prompt;
       try {
@@ -222,6 +241,10 @@ final class AgentLoop {
                 )
               : batch.calls[i],
       ];
+      // CLM: everything appended from here is this turn; if the model edited
+      // the context file during the tools, that edit is adopted as the base
+      // and this turn is re-appended on top of it (C4).
+      final turnStart = session.transcript.length;
       session.transcript.add(
           AssistantEntry(thought: response.thought, action: ToolBatch(calls)));
       for (final call in calls) {
@@ -321,6 +344,7 @@ final class AgentLoop {
       if (calls.length > 1) {
         timings.add(RunTiming('batch', wall.elapsed));
       }
+      if (_clm) _resolveModelEdit(session, turnStart);
 
       if (denied.isNotEmpty) {
         diagnostics.event('C1 loop', 'blocked: ${denied.first}');
@@ -588,6 +612,53 @@ final class AgentLoop {
           'C8 reliability', 'tool timeout; recovering: ${failure.message}');
       return _Dispatched(null, watch.elapsed,
           timeoutMessage: failure.message);
+    }
+  }
+
+  /// C4 (CLM): write the canonical rendering of the live transcript to the
+  /// context file and remember it, so a later difference means the model
+  /// edited the file. A write failure is reported and ignored: losing the
+  /// mirror must not break the run, since the session (C5) is the store.
+  void _syncContextFile(Session session) {
+    final log = contextLog;
+    if (log == null) return;
+    try {
+      _synced = log.write(session.transcript);
+    } on Object catch (e) {
+      _synced = null;
+      diagnostics.event('C4 context', 'CLM: context file write failed: $e');
+    }
+  }
+
+  /// C4 (CLM): after a turn, adopt a model edit to the context file as the new
+  /// live context, then re-append the turn that produced it ([turnStart] is
+  /// where this turn began). A malformed edit is ignored with a notice to the
+  /// model, leaving the harness's context intact — never a silent wipe.
+  void _resolveModelEdit(Session session, int turnStart) {
+    final log = contextLog;
+    if (log == null) return;
+    final current = log.read();
+    if (current == null || current == _synced) return; // the model left it be
+    final turn = session.transcript.sublist(turnStart);
+    try {
+      final adopted = ContextLog.normalize(log.parse(current));
+      session.transcript
+        ..clear()
+        ..addAll(adopted)
+        ..addAll(turn);
+      diagnostics.event(
+          'C4 context',
+          'CLM: adopted model context edit '
+          '(${adopted.length} entries + ${turn.length} this turn)');
+    } on FormatException catch (e) {
+      session.transcript.add(ObservationEntry(
+        text: 'context edit ignored (malformed): ${e.message}. '
+            'Your previous context is unchanged; re-read the file before '
+            'editing it again.',
+        outcome: Outcome.error,
+      ));
+      diagnostics.event(
+          'C4 context', 'CLM: malformed context edit ignored: ${e.message}');
     }
   }
 

@@ -1,6 +1,6 @@
 # C4 — Context
 
-> Status: draft · Version 1.1 · **Current tier: Prop**
+> Status: draft · Version 1.2 · **Current tier: Prop**
 
 Context is what the model actually sees: `C4` is the assembly of the prompt
 sent to the provider on every turn. The loop decides; context frames the
@@ -36,6 +36,12 @@ L -> P : complete(prompt)
 
 Context is rebuilt on every iteration; it is not a store. Anything that must
 outlive a run belongs to `sessions` (C5) or `memory` (C9), not here.
+
+Prop fits the window with a deterministic ladder by default, or — when
+`context.mode` is `clm` — hands the live context to the model as an editable
+file (*context as a file*; see [Context as a file](#context-as-a-file-clm)
+below). Both modes share the shell above; only who manages the context
+differs.
 
 ## Prop
 
@@ -178,6 +184,68 @@ endif
 - **Usage is reported.** The estimate for the last assembled prompt is
   exposed to the loop and, through it, to the interface (C6), so the human
   surface can show context used against the window.
+
+### Context as a file (CLM)
+
+Prop can run in one of two context-management modes, chosen by
+`context.mode` (C6, `config.schema.json`):
+
+- **`harness`** (default) — the deterministic ladder above: clip, clear,
+  fold, drop, with a model-written brief at a milestone. The harness fits
+  the prompt and never rewrites the stored transcript.
+- **`clm`** — the model owns its live context. The runtime mirrors the live
+  transcript to a plain file and hands the model its path in the prompt; the
+  model edits that file with its ordinary tools (`run_command`, `write`,
+  `edit`), and an edit is adopted as the live context on the next step. This
+  follows *Context Language Models*: context management becomes a model
+  behavior rather than a harness policy.
+
+In `clm` mode the levers above are inert — nothing is clipped, cleared, or
+folded by the harness, and the transcript is sent verbatim. Fitting is the
+model's responsibility; a prompt that still overflows is an error (C8),
+exactly as in `harness` mode.
+
+- **The file is a view, not the store.** The session (C5) remains the
+  authoritative record across runs. The context file (`context.file`,
+  default `<workspace_root>/.sudoer/context.md`) is refreshed from the
+  transcript whenever the model leaves it alone and is never the only copy.
+- **Default append.** When the model does not edit the file, the harness
+  appends the turn — the assistant message and its observations — exactly as
+  a standard LM would, then refreshes the file.
+- **Adoption.** When the model edits the file during a step, the edit is
+  adopted as the base context and that step's own turn is re-appended on
+  top, so fresh tool feedback is never lost.
+- **Format.** One `[[ctx role=…]]` block per entry (`user`, `assistant`,
+  `observation`, `note`); tool calls are `[[call]] <name> <json>` lines
+  inside an assistant block; a body line that must start with `[[` is
+  escaped as `\[[`. An observation binds to its call by `id`.
+- **Repair, not corruption.** A parsed edit is normalized: every tool call
+  gets exactly one observation (a missing one becomes a placeholder), and an
+  observation with a dangling id becomes a note, so the provider always
+  receives a well-formed exchange.
+- **The goal is pinned.** A context must keep a `user` (goal) block and be
+  well-formed; a malformed edit — including one that wipes the goal — is
+  rejected with an observation and the harness context is left intact.
+- **Steering.** `context.strategy` appends a natural-language
+  context-management instruction to the CLM prompt section, so the strategy
+  can be steered without rebuilding the agent. The base system prompt stays
+  pinned and versioned (`kClmPromptVersion`); only the file path, the window,
+  and the strategy are interpolated.
+- **Multi-agent files.** A single live context file is the Prop default;
+  multiple coexisting context files (subagents, a swarm) are a Pilot/Orbit
+  extension.
+- **Caching is best-effort.** In `harness` mode consecutive prompts are
+  append-stable (Pilot's prefix cache); an in-place `clm` edit breaks the
+  cached prefix, so caching holds only between edits.
+- **New attack surface.** An editable context can carry a persisted
+  instruction across turns (a prompt-injection channel). The `clm` edit is
+  still parsed and repaired by the harness, and the pinned system prompt and
+  guards (C10) are unscoped by it, but the mode is not enabled by default.
+- **Reported and switchable.** `/context` (C6) shows the active mode and the
+  live file; `/context clm` and `/context harness` switch the mode for the
+  session (the agent is rebuilt with the new strategy), so a task can opt in
+  or out without restarting. `/compact` reports that the context is
+  model-managed rather than silently doing nothing.
 
 ### System prompt
 

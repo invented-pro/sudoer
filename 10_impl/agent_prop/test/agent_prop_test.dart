@@ -3941,6 +3941,228 @@ void main() {
       expect(out.toString(), contains('+ two'));
     });
   });
+
+  group('context as a file (C4 CLM)', () {
+    test('the context file round-trips every entry kind', () {
+      final temp = Directory.systemTemp.createTempSync('sudoer-clm-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final log = ContextLog(File(p.join(temp.path, 'context.md')));
+      final entries = <Entry>[
+        const UserEntry('goal line\n[[ctx role=note]]\nliteral'),
+        AssistantEntry(
+          thought: 'thinking',
+          action: ToolBatch([
+            const ToolCall(
+                id: 'c1', name: 'read', arguments: {'path': 'a.txt'}),
+            const ToolCall(name: 'glob', arguments: {'pattern': '**/*.dart'}),
+          ]),
+        ),
+        const ObservationEntry(
+            text: 'body\nmore', outcome: Outcome.error, toolCallId: 'c1'),
+        const ObservationEntry(text: 'my own note', outcome: Outcome.ok),
+        const AssistantEntry(thought: 'final answer', action: Finish('final answer')),
+      ];
+      final back = log.parse(log.render(entries));
+      expect(
+        [for (final e in back) e.toJson()],
+        [for (final e in entries) e.toJson()],
+      );
+    });
+
+    test('parse rejects garbage and a context without the goal', () {
+      final temp = Directory.systemTemp.createTempSync('sudoer-clm-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final log = ContextLog(File(p.join(temp.path, 'context.md')));
+      expect(() => log.parse('just some prose\n'), throwsFormatException);
+      expect(
+        () => log.parse('[[ctx v1]]\n[[ctx role=note]]\nhi\n'),
+        throwsFormatException,
+      );
+    });
+
+    test('normalize fills a missing observation and drops a dangling id', () {
+      final entries = <Entry>[
+        AssistantEntry(
+          thought: 't',
+          action: ToolBatch([
+            const ToolCall(id: 'c1', name: 'read', arguments: {'path': 'a'}),
+          ]),
+        ),
+        const ObservationEntry(
+            text: 'orphan', outcome: Outcome.ok, toolCallId: 'zzz'),
+      ];
+      final norm = ContextLog.normalize(entries);
+      expect(norm.length, 3);
+      expect((norm[1] as ObservationEntry).toolCallId, 'c1');
+      expect((norm[2] as ObservationEntry).toolCallId, isNull);
+      expect((norm[2] as ObservationEntry).text, 'orphan');
+    });
+
+    test('render then parse binds a tool call to its observation by id', () {
+      final temp = Directory.systemTemp.createTempSync('sudoer-clm-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final log = ContextLog(File(p.join(temp.path, 'context.md')));
+      final entries = <Entry>[
+        const UserEntry('goal'),
+        AssistantEntry(
+          thought: 't',
+          action: ToolBatch([
+            const ToolCall(id: 'c9', name: 'read', arguments: {'path': 'a'}),
+          ]),
+        ),
+        const ObservationEntry(
+            text: 'result', outcome: Outcome.ok, toolCallId: 'c9'),
+      ];
+      final back = ContextLog.normalize(log.parse(log.render(entries)));
+      // No placeholder was inserted: the id survived the round-trip.
+      expect(back.whereType<ObservationEntry>().length, 1);
+      expect((back.last as ObservationEntry).toolCallId, 'c9');
+    });
+
+    test('a run in CLM mode adopts a model rewrite of its context file',
+        () async {
+      final temp = Directory.systemTemp.createTempSync('sudoer-clm-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final config = Config.fromJson({
+        'provider': {'kind': 'ollama', 'model': 'scripted', 'context_window': 8192},
+        'workspace_root': temp.path,
+        'session_dir': p.join(temp.path, '.sudoer', 'sessions'),
+        'context': {'mode': 'clm'},
+      });
+      final provider = ScriptedProvider.fromJson({
+        'steps': [
+          {
+            'complete': {
+              'text': 'rewriting',
+              'tool_calls': [
+                {
+                  'type': 'tool_call',
+                  'name': 'write',
+                  'arguments': {
+                    'path': '.sudoer/context.md',
+                    'content':
+                        '[[ctx v1]]\n[[ctx role=user]]\nnote it\n'
+                            '[[ctx role=note]]\nKEEP-ME\n',
+                  },
+                }
+              ],
+            }
+          },
+          {'complete': {'text': 'done'}},
+        ]
+      });
+      final out = StringBuffer();
+      final err = StringBuffer();
+      final outcome = await runRepl(
+        config: config,
+        input: Stream.fromIterable(['note it', '/exit']),
+        out: out,
+        err: err,
+        providerFactory: (_) => provider,
+      );
+      expect(outcome.exitCode, 0);
+      final ctx = File(p.join(temp.path, '.sudoer', 'context.md'));
+      expect(ctx.existsSync(), isTrue);
+      expect(ctx.readAsStringSync(), contains('KEEP-ME'));
+      expect(jsonEncode(outcome.session.toJson()), contains('KEEP-ME'));
+    });
+
+    test('CLM sends the context verbatim; the harness ladder clips (C4)', () {
+      final big = 'x' * (kObservationCapTokens * 4 + 200);
+      final transcript = <Entry>[
+        const UserEntry('goal'),
+        ObservationEntry(text: big, outcome: Outcome.ok),
+      ];
+      final clm = ContextAssembler(
+          contextWindow: 1000000, modelManagedContext: true);
+      final clmPrompt =
+          clm.assemble(model: 'm', tools: const [], transcript: transcript);
+      expect((clmPrompt.messages[1] as ObservationEntry).text.length,
+          big.length);
+
+      final harness = ContextAssembler(contextWindow: 1000000);
+      final harnessPrompt =
+          harness.assemble(model: 'm', tools: const [], transcript: transcript);
+      expect((harnessPrompt.messages[1] as ObservationEntry).text.length,
+          lessThan(big.length));
+    });
+
+    test('config parses and round-trips the context block', () {
+      final config = Config.fromJson({
+        'provider': {'kind': 'ollama', 'model': 'm', 'context_window': 100},
+        'context': {
+          'mode': 'clm',
+          'file': 'ctx/live.md',
+          'strategy': 'keep it small',
+        },
+      });
+      expect(config.context.mode, ContextMode.clm);
+      expect(config.context.file, 'ctx/live.md');
+      expect(config.context.strategy, 'keep it small');
+      expect(config.toJson()['context'], {
+        'mode': 'clm',
+        'file': 'ctx/live.md',
+        'strategy': 'keep it small',
+      });
+      expect(
+        () => Config.fromJson({
+          'provider': {'kind': 'ollama', 'model': 'm', 'context_window': 100},
+          'context': {'mode': 'nonsense'},
+        }),
+        throwsA(isA<ConfigException>()),
+      );
+    });
+
+    test('/context switches between harness and clm at runtime', () async {
+      final temp = Directory.systemTemp.createTempSync('sudoer-ctxcmd-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final config = Config.fromJson({
+        'provider': {
+          'kind': 'ollama',
+          'model': 'scripted',
+          'context_window': 8192
+        },
+        'workspace_root': temp.path,
+        'session_dir': p.join(temp.path, '.sudoer', 'sessions'),
+      });
+      final out = StringBuffer();
+      final err = StringBuffer();
+      final outcome = await runRepl(
+        config: config,
+        input: Stream.fromIterable([
+          '/context',
+          '/context clm',
+          '/context',
+          '/context harness',
+          '/context',
+          '/context nonsense',
+          '/exit',
+        ]),
+        out: out,
+        err: err,
+        providerFactory: (_) =>
+            ScriptedProvider.fromJson({'steps': <dynamic>[]}),
+      );
+      expect(outcome.exitCode, 0);
+      // harness -> clm -> harness, so each is reported more than once.
+      expect('context: harness'.allMatches(out.toString()).length,
+          greaterThanOrEqualTo(2));
+      expect('context: clm'.allMatches(out.toString()).length,
+          greaterThanOrEqualTo(2));
+      expect(err.toString(), contains('usage: /context'));
+    });
+
+    test('the default context file lives under the workspace .sudoer', () {
+      final config = Config.fromJson({
+        'provider': {'kind': 'ollama', 'model': 'm', 'context_window': 100},
+        'workspace_root': p.join(Directory.systemTemp.path, 'ws'),
+      });
+      expect(
+        ContextLog.fileFor(config).path,
+        p.join(Directory.systemTemp.path, 'ws', '.sudoer', 'context.md'),
+      );
+    });
+  });
 }
 
 /// A no-op stylize for markdown tests, so assertions can ignore ANSI.

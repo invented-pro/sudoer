@@ -166,6 +166,26 @@ SearXNG to enable `web_search`; set `deny_hosts` to block specific hosts:
 Set `"enabled": false` to remove the web tools entirely. A network denial
 blocks the run; there is no interactive override.
 
+Context management defaults to the built-in *harness* ladder (clip, clear,
+fold). Set `context.mode` to `clm` to hand the live context to the model as
+an editable file it manages with its own tools (*context as a file*), with
+optional natural-language steering:
+
+```json
+{
+  "context": {
+    "mode": "clm",
+    "strategy": "keep a running ledger and compact around sub-questions"
+  }
+}
+```
+
+The live file defaults to `<workspace_root>/.sudoer/context.md`; override it
+with `context.file` (relative paths resolve against `workspace_root`). The
+session file (C5) stays the authoritative store — the context file is a
+mirror the model edits. `/context` reports the active mode and file; see
+`00_bp/C4_context.md`.
+
 ### 2. Start a session
 
 With no positional goal on a terminal, `sudoer-prop` runs the **human CLI**: the
@@ -231,6 +251,7 @@ Built-in commands (both surfaces):
 | `/resume <id>` | switch to a saved session |
 | `/plan` | print the current plan |
 | `/status` | print the session status |
+| `/context [harness\|clm]` | show or switch the context strategy (and live file) |
 | `/diff [path]` | show the workspace's changes against the session baseline |
 | `/cancel` | cancel the in-flight run |
 | `/workspace [dir]` | print or change the workspace root |

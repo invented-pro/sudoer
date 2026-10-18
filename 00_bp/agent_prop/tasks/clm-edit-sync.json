@@ -1,0 +1,34 @@
+{
+  "id": "clm-edit-sync",
+  "description": "CLM (C4): the model appends a note to its live context file with run_command; the edit is adopted as the new context and survives to the next step, then the run finishes.",
+  "host_shell": "posix",
+  "goal": "Note the needle and finish.",
+  "config": { "context": { "mode": "clm" } },
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "noting",
+          "tool_calls": [
+            {
+              "type": "tool_call",
+              "name": "run_command",
+              "arguments": {
+                "command": "printf '[[ctx role=note]]\\nNEEDLE-42\\n' >> .sudoer/context.md"
+              }
+            }
+          ]
+        }
+      },
+      { "complete": { "text": "done" } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "answer": { "equals": "done" },
+    "tools": ["run_command"],
+    "contextContains": ["[[ctx role=user]]", "NEEDLE-42"],
+    "transcriptContains": ["NEEDLE-42"],
+    "sessionPersisted": true
+  }
+}

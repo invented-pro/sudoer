@@ -236,7 +236,9 @@ final class _Repl {
     agent = _build();
   }
 
-  final Config config;
+  /// Mutable so a session-level command (`/workspace`, `/context`) can
+  /// rebuild the agent with an updated setting (C6).
+  Config config;
   final Console console;
   final Provider provider;
   final bool verbose;
@@ -472,6 +474,18 @@ final class _Repl {
     return ReplOutcome(exitCode: exitCode, runs: runs, session: session);
   }
 
+  /// C4/C6: print the active context strategy and, under CLM, the live file.
+  void _printContext() {
+    final path = agent.contextFilePath;
+    if (path == null) {
+      console.info('context: harness (built-in clip / clear / fold ladder)');
+      return;
+    }
+    final file = File(path);
+    final size = file.existsSync() ? file.lengthSync() : 0;
+    console.info('context: clm (model-managed) ${shortPath(path, 60)} ${size}B');
+  }
+
   /// C4/C6: fold older context into a brief on demand (`/compact`), below the
   /// automatic watermark. Shared by both surfaces.
   Future<void> _compact() async {
@@ -482,7 +496,9 @@ final class _Repl {
       console.endLine();
     }
     if (info == null) {
-      console.info('nothing to compact');
+      console.info(agent.contextFilePath == null
+          ? 'nothing to compact'
+          : 'context is model-managed (CLM); the agent compacts it itself');
     } else {
       console.info('↺ compacted ${info.steps} earlier steps '
           '(${_compactCount(info.beforeTokens)} → '
@@ -613,6 +629,33 @@ final class _Repl {
             '${session.transcript.length} entries, '
             '${session.plan.length} plan items, '
             'last run ${last?.status.wire ?? 'none'}');
+      case '/context':
+        if (argument == null) {
+          _printContext();
+          break;
+        }
+        final mode = switch (argument) {
+          'harness' => ContextMode.harness,
+          'clm' => ContextMode.clm,
+          _ => null,
+        };
+        if (mode == null) {
+          console.error('usage: /context [harness|clm]');
+          break;
+        }
+        config = config.copyWith(context: config.context.copyWith(mode: mode));
+        agent = _build();
+        // Switch to CLM: materialize the live mirror now (when there is a
+        // transcript to mirror) so the file exists before the next run.
+        if (mode == ContextMode.clm && session.transcript.isNotEmpty) {
+          try {
+            agent.contextLog?.write(session.transcript);
+          } on Object catch (e) {
+            console.error('cannot write context file: $e');
+          }
+        }
+        diagnostics.event('C4 context', 'mode -> ${mode.name}');
+        _printContext();
       case '/workspace':
         if (argument == null) {
           console.info(workspaceRoot);
@@ -817,6 +860,7 @@ const Set<String> kReplCommands = {
   '/resume',
   '/plan',
   '/status',
+  '/context',
   '/compact',
   '/diff',
   '/workspace',
@@ -835,6 +879,7 @@ List<String> helpLines({required bool interactive}) => [
       '  /resume <id>     switch to a saved session',
       '  /plan            print the current plan',
       '  /status          print the session status',
+      '  /context [mode]  show or switch the context strategy (harness|clm)',
       '  /diff [path]     show workspace changes against the session baseline',
       if (!interactive) '  /cancel          cancel the in-flight run',
       '  /compact         fold earlier context into a brief now',

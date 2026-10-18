@@ -1,0 +1,44 @@
+{
+  "id": "clm-elide-observation",
+  "description": "CLM (C4): the model elides a bulky tool observation with a shell filter over its live context file; the edit is adopted and the elided text no longer reaches the model.",
+  "host_shell": "posix",
+  "goal": "Read the report and drop the secret line.",
+  "workspace": { "bulk.txt": "line one\nSECRET-XYZ\nline two\n" },
+  "config": { "context": { "mode": "clm" } },
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "reading",
+          "tool_calls": [
+            { "type": "tool_call", "name": "read", "arguments": { "path": "bulk.txt" } }
+          ]
+        }
+      },
+      {
+        "complete": {
+          "text": "eliding",
+          "tool_calls": [
+            {
+              "type": "tool_call",
+              "name": "run_command",
+              "arguments": {
+                "command": "grep -v 'SECRET-' .sudoer/context.md > .sudoer/context.tmp && mv .sudoer/context.tmp .sudoer/context.md"
+              }
+            }
+          ]
+        }
+      },
+      { "complete": { "text": "dropped" } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "answer": { "equals": "dropped" },
+    "tools": ["read", "run_command"],
+    "contextContains": ["line one"],
+    "contextNotContains": ["SECRET-XYZ"],
+    "transcriptNotContains": ["SECRET-XYZ"],
+    "sessionPersisted": true
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "id": "clm-malformed-edit",
+  "description": "CLM (C4): the model corrupts its live context file with a shell command; the edit is rejected with a notice, the harness context is left intact, and the run finishes.",
+  "host_shell": "posix",
+  "goal": "Corrupt the context then finish.",
+  "config": { "context": { "mode": "clm" } },
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "corrupting",
+          "tool_calls": [
+            {
+              "type": "tool_call",
+              "name": "run_command",
+              "arguments": {
+                "command": "printf '%s-%s\\n' 'GARBAGE' 'MARK' > .sudoer/context.md"
+              }
+            }
+          ]
+        }
+      },
+      { "complete": { "text": "done" } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "answer": { "equals": "done" },
+    "tools": ["run_command"],
+    "transcriptContains": ["malformed"],
+    "contextContains": ["[[ctx role=user]]", "context edit ignored"],
+    "contextNotContains": ["GARBAGE-MARK"],
+    "sessionPersisted": true
+  }
+}

@@ -248,18 +248,89 @@ final class WebConfig {
       };
 }
 
+/// Which context-management strategy C4 uses (C4). `harness` (the default)
+/// fits the prompt with the built-in clip/clear/fold ladder; `clm` gives the
+/// model control of its live context through an editable file, following
+/// Context Language Models.
+enum ContextMode { harness, clm }
+
+ContextMode _parseContextMode(Object? value) => switch (value) {
+      null || 'harness' => ContextMode.harness,
+      'clm' => ContextMode.clm,
+      _ => throw ConfigException(
+          'context.mode must be one of "harness", "clm" (got: $value)'),
+    };
+
+/// Context assembly and management (C4). `harness` is the default pinned
+/// ladder; `clm` mirrors the live context to [file] and lets the model edit
+/// it, with optional [strategy] natural-language steering (a context-skills
+/// document the model is told to follow).
+final class ContextConfig {
+  const ContextConfig({
+    this.mode = ContextMode.harness,
+    this.file,
+    this.strategy = '',
+  });
+
+  final ContextMode mode;
+
+  /// The live context file (CLM only). Relative paths resolve against the
+  /// workspace root; defaults to `<workspace_root>/.sudoer/context.md`.
+  final String? file;
+
+  /// Optional natural-language context-management instruction (CLM only),
+  /// appended to the CLM prompt section so the user can steer the strategy
+  /// without rebuilding the agent.
+  final String strategy;
+
+  factory ContextConfig.fromJson(Map<String, dynamic> json) {
+    final mode = _parseContextMode(json['mode']);
+    final file = json['file'];
+    if (file != null && (file is! String || file.isEmpty)) {
+      throw const ConfigException(
+          'context.file must be a non-empty string when set');
+    }
+    final strategy = json['strategy'];
+    if (strategy != null && strategy is! String) {
+      throw const ConfigException('context.strategy must be a string');
+    }
+    return ContextConfig(
+      mode: mode,
+      file: file as String?,
+      strategy: (strategy as String?) ?? '',
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'mode': mode == ContextMode.clm ? 'clm' : 'harness',
+        if (file != null) 'file': file,
+        if (strategy.isNotEmpty) 'strategy': strategy,
+      };
+
+  /// A copy with a different [mode], keeping the file and strategy, so the
+  /// interface can switch strategy at runtime (`/context clm|harness`, C6).
+  ContextConfig copyWith({ContextMode? mode, String? file, String? strategy}) =>
+      ContextConfig(
+        mode: mode ?? this.mode,
+        file: file ?? this.file,
+        strategy: strategy ?? this.strategy,
+      );
+}
+
 final class Config {
   const Config({
     required this.provider,
     required this.workspaceRoot,
     required this.sessionDir,
     this.web = const WebConfig(),
+    this.context = const ContextConfig(),
   });
 
   final ProviderConfig provider;
   final String workspaceRoot;
   final String sessionDir;
   final WebConfig web;
+  final ContextConfig context;
 
   factory Config.fromJson(Map<String, dynamic> json) {
     final expanded = _expandEnvDeep(json);
@@ -284,6 +355,10 @@ final class Config {
     if (web != null && web is! Map) {
       throw const ConfigException('web must be an object');
     }
+    final context = expanded['context'];
+    if (context != null && context is! Map) {
+      throw const ConfigException('context must be an object');
+    }
     return Config(
       provider: ProviderConfig.fromJson(provider.cast<String, dynamic>()),
       workspaceRoot: workspaceRoot,
@@ -292,6 +367,9 @@ final class Config {
       web: web == null
           ? const WebConfig()
           : WebConfig.fromJson(web.cast<String, dynamic>()),
+      context: context == null
+          ? const ContextConfig()
+          : ContextConfig.fromJson(context.cast<String, dynamic>()),
     );
   }
 
@@ -300,15 +378,18 @@ final class Config {
         'workspace_root': workspaceRoot,
         'session_dir': sessionDir,
         'web': web.toJson(),
+        'context': context.toJson(),
       };
 
-  /// A copy with a new [workspaceRoot], keeping the provider, the session
-  /// directory, and the network policy fixed for the process (C6).
-  Config copyWith({String? workspaceRoot}) => Config(
+  /// A copy with a new [workspaceRoot] and/or [context] strategy, keeping the
+  /// provider, the session directory, and the network policy fixed for the
+  /// process (C6).
+  Config copyWith({String? workspaceRoot, ContextConfig? context}) => Config(
         provider: provider,
         workspaceRoot: workspaceRoot ?? this.workspaceRoot,
         sessionDir: sessionDir,
         web: web,
+        context: context ?? this.context,
       );
 
   /// Deep-merge an override map (gate tasks) over this config, then validate.

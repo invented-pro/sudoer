@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../clm.dart';
 import '../config.dart';
 import '../interface.dart';
 import '../models.dart';
@@ -158,6 +159,41 @@ Future<TaskReport> runTask(Task task) async {
         if (!observations[i].contains(expected[i])) {
           failures.add('observations[$i]: expected to contain '
               '"${expected[i]}", got "${observations[i]}"');
+        }
+      }
+    }
+
+    // C4 (CLM): the live context file the model curated, and the serialized
+    // transcript it was adopted from.
+    if (task.expect.contextContains != null ||
+        task.expect.contextNotContains != null) {
+      final file = ContextLog.fileFor(config);
+      final actual = file.existsSync() ? file.readAsStringSync() : '';
+      for (final needle in task.expect.contextContains ?? const <String>[]) {
+        if (!actual.contains(needle)) {
+          failures.add('context: expected to contain "$needle"');
+        }
+      }
+      for (final needle
+          in task.expect.contextNotContains ?? const <String>[]) {
+        if (actual.contains(needle)) {
+          failures.add('context: expected NOT to contain "$needle"');
+        }
+      }
+    }
+
+    if (task.expect.transcriptContains != null ||
+        task.expect.transcriptNotContains != null) {
+      final actual = jsonEncode(outcome.session.toJson());
+      for (final needle in task.expect.transcriptContains ?? const <String>[]) {
+        if (!actual.contains(needle)) {
+          failures.add('transcript: expected to contain "$needle"');
+        }
+      }
+      for (final needle
+          in task.expect.transcriptNotContains ?? const <String>[]) {
+        if (actual.contains(needle)) {
+          failures.add('transcript: expected NOT to contain "$needle"');
         }
       }
     }

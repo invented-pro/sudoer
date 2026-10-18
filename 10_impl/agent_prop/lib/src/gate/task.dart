@@ -21,6 +21,10 @@ final class Expect {
     this.runs = const [],
     this.plan,
     this.sessionPersisted,
+    this.contextContains,
+    this.contextNotContains,
+    this.transcriptContains,
+    this.transcriptNotContains,
     this.stdoutContains,
   });
 
@@ -38,6 +42,17 @@ final class Expect {
   final List<RunExpect> runs;
   final List<String>? plan;
   final bool? sessionPersisted;
+
+  /// C4 (CLM): substrings that must / must not appear in the final live
+  /// context file.
+  final List<String>? contextContains;
+  final List<String>? contextNotContains;
+
+  /// Substrings that must / must not appear in the final serialized session
+  /// transcript.
+  final List<String>? transcriptContains;
+  final List<String>? transcriptNotContains;
+
   final String? stdoutContains;
 }
 
@@ -123,6 +138,13 @@ final class Task {
         ],
         plan: (expect['plan'] as List?)?.cast<String>(),
         sessionPersisted: expect['sessionPersisted'] as bool?,
+        contextContains: (expect['contextContains'] as List?)?.cast<String>(),
+        contextNotContains:
+            (expect['contextNotContains'] as List?)?.cast<String>(),
+        transcriptContains:
+            (expect['transcriptContains'] as List?)?.cast<String>(),
+        transcriptNotContains:
+            (expect['transcriptNotContains'] as List?)?.cast<String>(),
         stdoutContains: expect['stdoutContains'] as String?,
       ),
     );

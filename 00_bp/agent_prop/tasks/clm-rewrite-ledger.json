@@ -1,0 +1,33 @@
+{
+  "id": "clm-rewrite-ledger",
+  "description": "CLM (C4): the model rewrites its whole live context file with the ordinary write tool, keeping a compact ledger (and the goal) while dropping the rest; the rewrite is adopted.",
+  "goal": "Track progress.",
+  "config": { "context": { "mode": "clm" } },
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "rewriting",
+          "tool_calls": [
+            {
+              "type": "tool_call",
+              "name": "write",
+              "arguments": {
+                "path": ".sudoer/context.md",
+                "content": "[[ctx v1]]\n[[ctx role=user]]\nTrack progress.\n[[ctx role=note]]\nLEDGER: 1/10 done\n"
+              }
+            }
+          ]
+        }
+      },
+      { "complete": { "text": "tracked" } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "answer": { "equals": "tracked" },
+    "tools": ["write"],
+    "contextContains": ["[[ctx role=user]]", "Track progress.", "LEDGER: 1/10 done"],
+    "sessionPersisted": true
+  }
+}

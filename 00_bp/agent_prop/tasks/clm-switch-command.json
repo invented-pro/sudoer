@@ -1,0 +1,36 @@
+{
+  "id": "clm-switch-command",
+  "description": "The /context clm command switches the live session from the default harness ladder to model-managed context; the following goal rewrites the context file and the edit is adopted.",
+  "turns": [
+    { "command": "/context clm" },
+    { "goal": "Track the switch." }
+  ],
+  "script": {
+    "steps": [
+      {
+        "complete": {
+          "text": "rewriting",
+          "tool_calls": [
+            {
+              "type": "tool_call",
+              "name": "write",
+              "arguments": {
+                "path": ".sudoer/context.md",
+                "content": "[[ctx v1]]\n[[ctx role=user]]\nTrack the switch.\n[[ctx role=note]]\nSWITCHED\n"
+              }
+            }
+          ]
+        }
+      },
+      { "complete": { "text": "switched" } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "answer": { "equals": "switched" },
+    "tools": ["write"],
+    "contextContains": ["[[ctx role=user]]", "SWITCHED"],
+    "transcriptContains": ["SWITCHED"],
+    "sessionPersisted": true
+  }
+}

@@ -5,6 +5,7 @@ library;
 export 'src/agent.dart';
 export 'src/build_info.dart';
 export 'src/cancellation.dart';
+export 'src/clm.dart';
 export 'src/config.dart';
 export 'src/console.dart';
 export 'src/context.dart';

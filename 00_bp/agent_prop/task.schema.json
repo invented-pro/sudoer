@@ -94,6 +94,26 @@
           "description": "Whether a session file exists and reloads with the same id and transcript length.",
           "type": "boolean"
         },
+        "contextContains": {
+          "description": "Substrings that must appear in the final live context file (C4 CLM mode).",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "contextNotContains": {
+          "description": "Substrings that must NOT appear in the final live context file (C4 CLM mode).",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "transcriptContains": {
+          "description": "Substrings that must appear in the final session transcript (its serialized form).",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "transcriptNotContains": {
+          "description": "Substrings that must NOT appear in the final session transcript (its serialized form).",
+          "type": "array",
+          "items": { "type": "string" }
+        },
         "stdoutContains": { "type": "string" },
         "reason": { "type": "string" }
       }
