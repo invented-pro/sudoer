@@ -265,6 +265,8 @@ final class ContextLog {
     file.parent.createSync(recursive: true);
     final temp = File('${file.path}.tmp');
     temp.writeAsStringSync(text);
+    // Windows rename does not replace an existing destination.
+    if (Platform.isWindows && file.existsSync()) file.deleteSync();
     temp.renameSync(file.path);
     return text;
   }

@@ -1,0 +1,20 @@
+{
+  "id": "provider-switch",
+  "description": "The /provider <id> command switches the live provider preset and rebuilds the agent; the next goal still runs through the injected provider.",
+  "turns": [
+    { "command": "/provider openai" },
+    { "goal": "Say hi." }
+  ],
+  "script": {
+    "steps": [
+      { "complete": { "text": "hi" } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "answer": { "equals": "hi" },
+    "tools": [],
+    "stdoutContains": "provider: openai",
+    "sessionPersisted": true
+  }
+}

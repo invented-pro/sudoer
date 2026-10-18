@@ -23,6 +23,7 @@ enum KeyKind {
   rune,
   enter,
   newline,
+  altEnter,
   paste,
   backspace,
   delete,
@@ -32,6 +33,8 @@ enum KeyKind {
   down,
   home,
   end,
+  pageUp,
+  pageDown,
   esc,
   ctrlC,
   ctrlD,
@@ -149,6 +152,11 @@ final class KeyReader {
         }
         return _takeCsi();
       }
+      // Alt+Enter: ESC followed by CR/LF adds a line.
+      if (_buffer[1] == 0x0d || _buffer[1] == 0x0a) {
+        _buffer.removeRange(0, 2);
+        return const Key(KeyKind.altEnter);
+      }
       // Alt+<byte>: report ESC and leave the byte for the next pass.
       _buffer.removeAt(0);
       return const Key(KeyKind.esc);
@@ -226,6 +234,29 @@ final class KeyReader {
         return _consume(3, const Key(KeyKind.home));
       case 0x46:
         return _consume(3, const Key(KeyKind.end));
+      case 0x35:
+        // ESC[5~ is PageUp. (ESC[5;…~ variants use the generic CSI path.)
+        if (_buffer.length >= 4 && _buffer[3] == 0x7E) {
+          return _consume(4, const Key(KeyKind.pageUp));
+        }
+        break;
+      case 0x36:
+        // ESC[6~ is PageDown.
+        if (_buffer.length >= 4 && _buffer[3] == 0x7E) {
+          return _consume(4, const Key(KeyKind.pageDown));
+        }
+        break;
+    }
+    // Kitty keyboard: Shift+Enter is CSI 13;2u. Terminals that negotiate
+    // modified keys send this; plain Enter remains CR/LF above.
+    if (third == 0x31) {
+      final end = _buffer.indexOf(0x75, 2);
+      if (end > 0) {
+        final param = String.fromCharCodes(_buffer.sublist(2, end));
+        if (param == '13;2') {
+          return _consume(end + 1, const Key(KeyKind.altEnter));
+        }
+      }
     }
     final tilde = _buffer.indexOf(0x7E, 2);
     if (tilde >= 0) {
@@ -234,6 +265,8 @@ final class KeyReader {
         '1' || '7' => const Key(KeyKind.home),
         '3' => const Key(KeyKind.delete),
         '4' || '8' => const Key(KeyKind.end),
+        '5' => const Key(KeyKind.pageUp),
+        '6' => const Key(KeyKind.pageDown),
         _ => const Key(KeyKind.other),
       };
       return _consume(tilde + 1, key);
@@ -543,6 +576,7 @@ final class LineEditor {
       case KeyKind.enter:
         return _enter();
       case KeyKind.newline:
+      case KeyKind.altEnter:
         _newline();
       case KeyKind.paste:
         _insertText(key.text);
@@ -577,6 +611,8 @@ final class LineEditor {
         return const EditResult.pending();
       case KeyKind.ctrlD:
         if (text.isEmpty) return const EditResult.eof();
+      case KeyKind.pageUp:
+      case KeyKind.pageDown:
       case KeyKind.esc:
       case KeyKind.tab:
       case KeyKind.other:

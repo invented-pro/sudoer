@@ -10,28 +10,46 @@
     "provider": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "model", "context_window"],
+      "required": ["model"],
+      "anyOf": [
+        { "required": ["kind"] },
+        { "required": ["preset"] }
+      ],
+      "not": { "required": ["api_key", "api_key_env"] },
       "properties": {
+        "preset": {
+          "description": "Provider preset (C2). Fills in kind, base_url, and context_window when omitted. The catalog includes the curated core, the full OpenAI-compatible models.dev set (the source OpenCode uses), and the local/custom entries; run `sudoer-prop --list-providers` for the authoritative ids.",
+          "type": "string",
+          "minLength": 1,
+          "examples": ["openai", "minimax-cn", "opencode", "ollama", "custom"]
+        },
         "kind": {
-          "description": "Which of the two Prop adapters to use (C2).",
+          "description": "Which of the two Prop adapters to use (C2). Inferred from preset when omitted.",
           "enum": ["openai-compatible", "ollama"]
         },
         "base_url": {
-          "description": "Endpoint for the OpenAI-compatible adapter; required when kind is openai-compatible (C2).",
+          "description": "Endpoint for the OpenAI-compatible adapter; inferred from preset, otherwise required when kind is openai-compatible (C2).",
           "type": "string",
           "format": "uri"
         },
         "api_key": {
-          "description": "Optional bearer credential for the endpoint (C2).",
-          "type": "string"
+          "description": "Optional bearer credential for the endpoint (C2). Mutually exclusive with api_key_env; prefer the auth store (`sudoer-prop --setup`) or an env reference. Printable ASCII without whitespace; surrounding whitespace is trimmed, but an embedded newline or terminal transcript is rejected.",
+          "type": "string",
+          "maxLength": 4096,
+          "pattern": "^[!-~]+$"
+        },
+        "api_key_env": {
+          "description": "Name of an environment variable holding the key (C2). Mutually exclusive with api_key. The name itself is not expanded.",
+          "type": "string",
+          "minLength": 1
         },
         "model": {
-          "description": "Fixed model name for the run (C2).",
+          "description": "Model name for the run (C2); selectable with --model or /model.",
           "type": "string",
           "minLength": 1
         },
         "context_window": {
-          "description": "Model context size in tokens, used by context fitting (C4).",
+          "description": "Model context size in tokens, used by context fitting (C4). With a preset, defaults to the catalog entry for the model, else 128000.",
           "type": "integer",
           "minimum": 1
         },
@@ -53,6 +71,18 @@
           "if": {
             "properties": { "kind": { "const": "openai-compatible" } },
             "required": ["kind"]
+          },
+          "then": {
+            "anyOf": [
+              { "required": ["base_url"] },
+              { "required": ["preset"] }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": { "preset": { "const": "custom" } },
+            "required": ["preset"]
           },
           "then": { "required": ["base_url"] }
         }

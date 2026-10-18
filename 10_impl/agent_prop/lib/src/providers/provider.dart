@@ -25,6 +25,14 @@ abstract class Provider {
   });
 }
 
+/// C2: an adapter that owns a transport and can release it when the interface
+/// replaces it (`/provider`, `/model`) or the process closes. Kept separate
+/// from [Provider] so test fakes and the scripted gate adapter need not
+/// implement it.
+abstract interface class ClosableProvider {
+  void close();
+}
+
 /// C2 normalization: a completion with no tool call becomes a finish; one or
 /// more tool calls become a single batch action preserving the model's order.
 ProviderResponse parseCompletion(Completion completion) {

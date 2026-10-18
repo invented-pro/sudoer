@@ -205,7 +205,7 @@ coding contract — the assembly judges both:
 | Aspect | Value |
 | --- | --- |
 | Surface | Prop's CLIs, a built-in web page, and a single-owner REST server (`C6`); messenger adapters (Telegram/Signal) connect as clients |
-| Presentation | as Prop — inline, no full-screen; the web page is basic server-rendered HTML |
+| Presentation | basic server-rendered HTML, inline; no full-screen takeover |
 | Streaming | human surface, the API/web SSE stream, and messenger channels (reply on completion) |
 | Modality | text (`C7`) |
 | Session | continuous, persistent, indexed and searchable; concurrent; one session per channel |

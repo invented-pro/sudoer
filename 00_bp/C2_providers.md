@@ -1,6 +1,6 @@
 # C2 — Providers
 
-> Status: draft · Version 0.7 · **Current tier: Prop**
+> Status: draft · Version 0.8 · **Current tier: Prop**
 
 The provider is the model behind the loop: `C2` is the single boundary
 through which the agent reaches an LLM. The loop decides; the provider
@@ -11,9 +11,9 @@ turns a prompt into a thought and an action.
 A provider adapts the agent's request shape to one LLM API. Every tier
 reaches models through this boundary, so the loop never knows which backend
 is in use. The tiers differ in how many providers exist and how they are
-selected: one at Prop, which may set the per-model parameters coding needs
-(sampling, context); several with fallback and a model catalog at Pilot; and
-a registry with OAuth at Orbit.
+selected: one active provider chosen from a built-in catalog at Prop, which
+may set the per-model parameters coding needs (sampling, context); an ordered
+chain with fallback and roles at Pilot; and a registry with OAuth at Orbit.
 
 ```plantuml
 @startuml
@@ -41,14 +41,17 @@ the reply belongs to the loop, not here.
 
 ## Prop
 
-Prop supports exactly one provider, selected from two user-configurable
-adapters: an OpenAI-compatible HTTP endpoint or ollama. The provider kind is
-an explicit configuration value and never changes during a run; there is no
-fallback and no model catalog. The boundary itself is an interface, and the
-build gate injects a third, non-configurable scripted adapter behind it —
-never reachable through config (`agent_prop/gate.md`). A timeout is returned
-to the loop as a recoverable observation; an unrecoverable provider error is
-returned as such and blocks the run (`reliability`, C8).
+Prop runs exactly one provider at a time, selected from two
+user-configurable adapters — an OpenAI-compatible HTTP endpoint or ollama —
+through a built-in catalog of presets. A preset names the base URL, the
+conventional key environment variable, and a starter model list; the active
+provider never changes *during* a run (it may switch between goals, below).
+The catalog selects which single provider serves the session; there is still
+no failover. The boundary itself is an interface, and the build gate injects
+a third, non-configurable scripted adapter behind it — never reachable
+through config (`agent_prop/gate.md`). A timeout is returned to the loop as a
+recoverable observation; an unrecoverable provider error is returned as such
+and blocks the run (`reliability`, C8).
 
 ```plantuml
 @startuml
@@ -59,7 +62,7 @@ skinparam activityBorderColor #64748B
 skinparam activityFontColor #1F2937
 skinparam arrowColor #64748B
 start
-:load config (provider kind, base_url, api_key, model, context_window);
+:load config (preset/kind, base_url, key source, model, context_window);
 if (provider kind is OpenAI-compatible?) then (yes)
   :select OpenAI-compatible adapter;
 else (no)
@@ -86,10 +89,10 @@ endif
 @enduml
 ```
 
-- **Single adapter.** The configured provider kind selects one of the two
-  user-configurable adapters; no other provider is settable at Prop. The
-  scripted gate adapter implements the same boundary but is injected by the
-  harness, not configuration.
+- **One active provider, two adapters.** The configured preset or kind
+  selects one of the two user-configurable adapters; a run never switches
+  backend. The scripted gate adapter implements the same boundary but is
+  injected by the harness, not configuration.
 - **Stateless.** The provider holds no conversation state — the prompt is
   passed in full on every call.
 - **Called once per iteration.** The loop (C1) invokes the provider for
@@ -99,11 +102,15 @@ endif
   (`message` `action`), preserving the model's order. Independent read-only
   calls may then run in parallel (C1). Streaming merges each call's deltas by
   its index, so interleaved calls reassemble into the same batch.
-- **Fixed model and window.** The configured model also fixes the context
-  window size that `context` (C4) fits the prompt against.
+- **Model and window.** The configured model fixes the context window that
+  `context` (C4) fits the prompt against. The window comes from the catalog
+  entry, a config override, or the conservative default; `/model` takes the
+  catalog window for a known id and keeps the current window for an unknown
+  one.
 - **Coding-scoped per-model parameters.** The context window and, where the
-  adapter supports them, sampling parameters are part of Prop's model config;
-  selecting among models, fallback, and OAuth are not.
+  adapter supports them, sampling parameters are part of Prop's model config.
+  The catalog may offer many models, but Prop still selects exactly one per
+  run; failover, roles, and OAuth are not part of the catalog.
 - **No fallback.** There is one endpoint; a failure is returned rather than
   retried against another backend. A timeout is retried by the loop
   re-iterating, not by switching providers.
@@ -169,18 +176,81 @@ endif
   the `id` and `name` from the first delta that carries them and concatenates
   argument fragments: a later delta that repeats them as empty strings (as
   MiniMax does) must not erase the earlier values.
-- **Configuration.** Reads `provider kind`, `base_url`, `api_key`, `model`,
-  and `context_window` from config, loaded by the interface (C6). It is
-  fixed for the process.
+- **Configuration.** Reads `provider.preset`, `kind`, `base_url`, `model`,
+  `context_window`, `api_key`, `api_key_env`, and `sampling` from config,
+  loaded by the interface (C6); the key may also come from the auth store.
+  The configured provider is fixed during a run and may change at a goal
+  boundary (`/provider`, `/model`).
 - **Model timeout.** The HTTP call is wrapped by the model-call timeout
   defined in `reliability` (C8).
 
+### Catalog and credentials
+
+Prop's CLI carries a small provider catalog, so hooking up a model does not
+mean hand-writing an endpoint and guessing a context window. It is a
+convenience over the two adapters, not a third adapter layer: every preset
+resolves to an OpenAI-compatible or ollama endpoint.
+
+- **Presets.** A preset (`provider.preset`) names a base URL, the
+  conventional key environment variables, and a starter model list. The
+  catalog carries the curated core (`openai`, `anthropic`, `google`,
+  `openrouter`, `groq`, `deepseek`, `mistral`, `xai`, `zhipuai`,
+  `moonshotai`, `minimax`, `minimax-cn`, `cohere`, `fireworks-ai`, `deepinfra`,
+  `cerebras`, `ollama-cloud`, `ollama`, `lmstudio`, `custom`) plus the full
+  OpenAI-compatible provider set from models.dev/OpenCode (Nvidia, OpenCode
+  Zen, Z.AI, Alibaba, regional and coding-plan variants, gateways, and the
+  long tail). `--list-providers` is authoritative; it covers 211 of
+  models.dev's 232 providers. The remaining 21 need a native SDK (Bedrock,
+  Vertex, Azure, native Anthropic/Google, …) or a per-account URL placeholder,
+  so they are not listed; use `custom` or an OpenAI-compatible gateway for
+  those. The generated part is
+  checked in and refreshed from `models.dev/api.json`; providers whose base
+  URL needs a per-account `${…}` placeholder are left to `custom`. `custom`
+  takes a user-supplied OpenAI-compatible base URL. MiniMax keys are
+  region-specific: `minimax` is the international `api.minimax.io` endpoint
+  and `minimax-cn` is the China `api.minimax.cn` endpoint; a 401 from the
+  wrong region carries a hint naming the other preset.
+- **Selection.** `--provider <id>`, `--model <id>`, `--base-url`,
+  `--context-window`, `--api-key`, and `--api-key-env` override the config
+  for one process; `--list-providers` and `--list-models` inspect the
+  catalog. Inside a session, `/provider [id]` and `/model [id]` list and
+  switch at a goal boundary (C6); the agent is rebuilt, and a run always
+  starts and finishes on one provider.
+- **Setup.** `sudoer-prop --setup` (alias `--login`) is the interactive
+  path: pick a preset, enter the key with a masked prompt, discover the
+  endpoint's models, pick one, and write the config. It uses `dart_tui` for
+  the terminal UI rather than a bespoke prompt: full-screen prompts (the
+  alternate screen) and pasteable key/text fields.
+- **Credential store.** Keys entered by setup live in
+  `~/.config/sudoer/auth.json` (XDG; `%APPDATA%` on Windows;
+  `SUDOER_AUTH_FILE` overrides), owner-only (0600), never in the project
+  config and never echoed. A config
+  can instead reference `provider.api_key_env` or a literal `api_key`.
+  Precedence is `api_key` → auth store → `api_key_env` → the preset's
+  well-known env var.
+- **Key validation.** A key must be printable ASCII with no whitespace
+  (surrounding whitespace is trimmed). Setup and `--save-key` reject anything
+  else before storing it; a stale value already in the store or environment
+  is reported as `invalid` by `--list-providers` and by the startup hint, and
+  is never placed in an HTTP header. The message names the problem, never the
+  value.
+- **Discovery is best-effort.** `--list-models` and setup call the
+  endpoint's `GET /models` (OpenAI-compatible) or `GET /api/tags` (ollama)
+  and merge the live ids over the static catalog; known ids keep their
+  curated name and context window, unknown ids get a conservative 128k
+  fallback. Offline, the static catalog is used.
+- **No fallback.** The catalog selects one provider; a failure is returned,
+  never retried against another backend. Failover remains Pilot's job.
+- **Secrets stay out of the transcript.** The CLI never prints a key, and a
+  key entered at setup is not written into the config or the session (C5).
+
 ## Pilot
 
-Pilot replaces the single provider with an ordered **chain** and a small
-role catalog, for availability — not for new coding power (arch.md: the
-mechanism exists to stay reachable, which personal tasks need and coding
-does not).
+Pilot keeps Prop's provider catalog and replaces the single active provider
+with an ordered **chain** and a small role catalog, for availability — not
+for new coding power (arch.md: the mechanism exists to stay reachable, which
+personal tasks need and coding does not). The catalog still names endpoints
+and models; the chain adds failover order and roles.
 
 - **Chain.** `providers` (config) lists entries in failover order; the
   Prop `provider` key remains valid as the one-element form. Index 0 is

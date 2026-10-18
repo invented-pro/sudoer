@@ -1,6 +1,6 @@
 # Prop Build Gate
 
-> Status: draft · Version 0.8 · **Current tier: Prop**
+> Status: draft · Version 0.9 · **Current tier: Prop**
 
 The gate is how Prop is judged done. Per [arch.md](../arch.md), every rung
 must pass its eval suite before it may build the next: the gate is a fixed
@@ -138,6 +138,9 @@ The concrete argument shapes the scripts rely on, frozen in
 | [parallel-reads](tasks/parallel-reads.json) | `C1`/`C2` batch tool calls; parallel read-only |
 | [tool-error-recovery](tasks/tool-error-recovery.json) | `C3` error observation; `C1` re-iterate |
 | [guard-denied](tasks/guard-denied.json) | `C3` network guard denial (`web.deny_hosts`, offline); `C1`/`C8` block |
+| [provider-list](tasks/provider-list.json) | `C2`/`C6` provider catalog listing, offline |
+| [provider-switch](tasks/provider-switch.json) | `C2`/`C6` `/provider` switches and rebuilds at a goal boundary |
+| [model-switch](tasks/model-switch.json) | `C2`/`C6` `/model` switches; context window from the catalog |
 | [provider-timeout-recovery](tasks/provider-timeout-recovery.json) | `C2`/`C8` recoverable; `C1` re-iterate |
 | [provider-unrecoverable](tasks/provider-unrecoverable.json) | `C2`/`C8` unrecoverable; `C1` block |
 | [stall-exhausted](tasks/stall-exhausted.json) | `C1`/`C8` stall detection (repeated steps); best-effort |

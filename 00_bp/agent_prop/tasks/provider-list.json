@@ -1,0 +1,20 @@
+{
+  "id": "provider-list",
+  "description": "The /provider command lists the built-in provider catalog offline; a following goal still runs through the injected provider.",
+  "turns": [
+    { "command": "/provider" },
+    { "goal": "Say hi." }
+  ],
+  "script": {
+    "steps": [
+      { "complete": { "text": "hi" } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "answer": { "equals": "hi" },
+    "tools": [],
+    "stdoutContains": "openai",
+    "sessionPersisted": true
+  }
+}

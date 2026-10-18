@@ -13,12 +13,15 @@ import '../think_block.dart';
 import 'provider.dart';
 
 /// C2 adapter for a local ollama server.
-final class OllamaProvider implements Provider {
+final class OllamaProvider implements Provider, ClosableProvider {
   OllamaProvider(this.config, {http.Client? client})
       : _client = client ?? http.Client();
 
   final ProviderConfig config;
   final http.Client _client;
+
+  @override
+  void close() => _client.close();
 
   String get _base =>
       (config.baseUrl ?? 'http://localhost:11434').replaceAll(RegExp(r'/+$'), '');

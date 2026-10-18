@@ -1,6 +1,6 @@
 # Prop Agent
 
-> Status: draft · Version 0.8 · **Current tier: Prop**
+> Status: draft · Version 0.10 · **Current tier: Prop**
 
 The Prop agent is the concrete assembly of components `C1`–`C8`. Its function
 is coding: it follows instructions strictly and delivers working binary
@@ -15,11 +15,11 @@ them together, and profiles the resulting agent.
 | Component | Role in the assembly | Detail |
 | --- | --- | --- |
 | `C1` Loop | control cycle; owns the plan, progress-driven budget, and run status | [C1_loop.md](C1_loop.md) |
-| `C2` Providers | one LLM backend (OpenAI-compatible or ollama) | [C2_providers.md](C2_providers.md) |
+| `C2` Providers | one active backend from a preset catalog (OpenAI-compatible or ollama) | [C2_providers.md](C2_providers.md) |
 | `C3` Tools | orientation, read/edit, `run_command`/jobs, diff/restore | [C3_tools.md](C3_tools.md) |
 | `C4` Context | transcript fitted to the window; compaction | [C4_context.md](C4_context.md) |
 | `C5` Sessions | continuous, persistent session across runs | [C5_sessions.md](C5_sessions.md) |
-| `C6` Interface | styled human CLI + plain automation CLI; owns configuration | [C6_interface.md](C6_interface.md) |
+| `C6` Interface | full-screen human TUI + plain automation CLI; owns configuration | [C6_interface.md](C6_interface.md) |
 | `C7` Modality | text in and out, plus coding-required image input | [C7_modality.md](C7_modality.md) |
 | `C8` Reliability | progress-driven budget, per-tool timeouts, in-loop retry with provider-timeout backoff | [C8_reliability.md](C8_reliability.md) |
 
@@ -64,9 +64,10 @@ I ..> T : config
 
 1. `C6` starts and, if a session is given, `C5` resumes it; otherwise `C5`
    opens a new persistent session.
-2. `C6` chooses a presentation: the styled human CLI on a terminal, or the
-   plain automate CLI when `--automate` is set or stdin/stdout is not a
-   terminal. It reads a goal or command; a command line is handled locally
+2. `C6` chooses a presentation: the full-screen human TUI on a terminal
+   (`--inline` selects its scrollback variant), or the plain automate CLI
+   when `--automate` is set or stdin/stdout is not a terminal. It reads a
+   goal or command; a command line is handled locally
    (`exit`, new/resume session, show plan, change workspace, cancel), and any
    other line is a goal, which `C7` normalizes to text.
 3. `C5` appends the goal to the session transcript and runs `C1` inside it.
@@ -79,7 +80,7 @@ I ..> T : config
 6. Steps 4–5 repeat until `finish`, the run stalls, hits the step ceiling, or
    is blocked; `C1` returns `{answer, status}`.
 7. `C5` persists the updated session, and `C6` renders the answer and a
-   status line (streaming the reply inline on the human surface), then
+   status footer (streaming the reply into the human transcript), then
    returns to step 2 for the next goal.
 
 ## Agent profile
@@ -117,8 +118,12 @@ gate, and to rebuild itself.
   `web_fetch`, on by default, disable with `web.enabled: false`). The catalog
   is built-in and coding-scoped, and it is not capped: any further tool coding
   requires is added here and held to top-niche quality.
-- **Model.** One provider (`C2`), selected from an OpenAI-compatible endpoint
-  or ollama; a fixed model and context window.
+- **Model.** One active provider (`C2`), selected from an OpenAI-compatible
+  endpoint or ollama through a built-in preset catalog. The CLI selects and
+  switches the provider and model (`--provider`/`--model`, `/provider`/
+  `/model`), keeps keys in an owner-only auth store, and discovers the
+  endpoint's models when reachable; a run still uses one fixed model and
+  context window.
 - **Transcript (across runs).** The live transcript, built by `C1` and
   assembled by `C4`, carried across the goals of a continuous session,
   persisted by `C5`, and compacted in-window by `C4` as it grows. Under
@@ -127,18 +132,19 @@ gate, and to rebuild itself.
 - **Streaming.** On the human surface, the model reply is streamed as tokens
   arrive (`C2`); the loop forwards visible deltas to the interface (`C1`).
   The plan block is withheld until it is complete, so it is never shown, and
-  `<think>` reasoning streams dim and italic to stderr, apart from the answer.
-  The visible reply is markdown; the interface renders it block by block as
-  each completes.
-- **Surfaces.** A styled human CLI (colors, italics, a spinner, a `› ` prompt,
-  streamed replies, and a per-run status line with context use, workspace,
-  session, and plan) and a plain automation CLI, sharing the same session and
-  loop (`C6`). Neither takes over the screen. The human surface renders the
-  markdown reply (headings, emphasis, code, lists, tables); each output
-  channel has its own visual treatment: a `❯` goal header, dim italic
-  reasoning, mauve tool-call lines, coloured tool/command results with an
-  indented body, a dim gutter with component-coloured tags for verbose
-  diagnostics, and a dim status rule with a coloured result.
+  `<think>` reasoning streams dim and italic in the transcript (or to stderr
+  under `--inline`), apart from the answer. The visible reply is markdown;
+  the interface renders it block by block as each completes.
+- **Surfaces.** A full-screen human TUI (Pi-style header, scrollable
+  transcript, multi-line editor, and status footer with context use,
+  workspace, session, and plan), an `--inline` scrollback fallback, and a
+  plain automation CLI, all sharing the same session and loop (`C6`). The
+  human surfaces render the markdown reply (headings, emphasis, code, lists,
+  tables); each output channel has its own visual treatment: a user-turn
+  header (`›` in the TUI, `❯` off-terminal), dim italic reasoning, mauve
+  tool-call lines, coloured tool/command results with an indented body, a
+  dim gutter with component-coloured tags for verbose diagnostics, and a dim
+  status footer with a coloured result.
 
 ### Coding behavior
 
@@ -197,12 +203,12 @@ gate-covered or unit-tested.
 
 | Aspect | Value |
 | --- | --- |
-| Surface | styled human CLI on a terminal; plain CLI under `--automate` or off a TTY (`C6`) |
-| Presentation | inline only — colors, italics, spinner, prompt; per-channel formatting; no full-screen mode |
+| Surface | full-screen human TUI on a terminal; inline fallback with `--inline`; plain CLI under `--automate` or off a TTY (`C6`) |
+| Presentation | Pi-style full-screen layout — header, scrollable transcript, multi-line editor, status footer; per-channel formatting; inline scrollback fallback |
 | Streaming | on for the human surface; one-shot for automation (`C1`, `C2`) |
 | Modality | text in and out; image input only for coding tasks (`C7`) |
 | Session | continuous; persisted across runs, resumable by id (`C5`) |
-| Output | answers on stdout; status and diagnostics on stderr |
+| Output | human surfaces render into the transcript/footer; automate answers on stdout, status and diagnostics on stderr |
 | Exit code | zero only on a `complete` run; non-zero when the final run is `incomplete` or `blocked`, or on a fatal startup/config error (the status string distinguishes them) |
 
 ### Guards and contract
@@ -222,9 +228,10 @@ gate-covered or unit-tested.
   non-progress step, so a brief endpoint outage is survived.
 - **Cancellation.** The user may cancel an in-flight run (`C6`); the run
   stops at once, its partial transcript is kept in the session, and the
-  interface returns to the prompt. The automate surface reads input
-  concurrently with the run, so a `/cancel` line interrupts it; the human
-  surface uses a double `Esc` because the run owns the line editor.
+  interface returns to the editor. The automate surface reads input
+  concurrently with the run, so a `/cancel` line interrupts it; the TUI uses
+  a single `Esc`, and the inline fallback uses a double `Esc` because its run
+  owns the line editor.
 - **Recovery.** A recoverable error (tool failure or provider timeout)
   becomes an observation and the loop re-iterates; an unrecoverable error or
   a guard denial blocks the run.
@@ -238,21 +245,25 @@ gate-covered or unit-tested.
 
 ### Configuration
 
-Read at startup by `C6`. Provider settings are fixed for the process;
-session-level, non-policy settings (active session, workspace root,
-verbosity) may change during a session through `C6` commands. The workspace
+Read at startup by `C6`. Provider settings are fixed during a run; the
+active provider and model may change between goals, and session-level,
+non-policy settings (active session, workspace root, verbosity, context
+strategy) may change during a session through `C6` commands. The workspace
 root defaults to the process working directory when not configured.
 
 | Key | Owner |
 | --- | --- |
-| `provider kind`, `base_url`, `api_key`, `model`, `context_window`, `sampling` | `C2` |
+| `provider.preset`, `kind`, `base_url`, `model`, `context_window`, `api_key`, `api_key_env`, `sampling` | `C2` |
 | `workspace_root`, `web.enabled`, `web.search_url`, `web.deny_hosts` | `C3` |
 | `context.mode`, `context.file`, `context.strategy` | `C4` |
 | `session_dir` | `C5` |
 
-The budget bounds and per-tool-class timeouts, and the web size/result bounds,
-are compiled-in constants, not configuration (`C8`); user-tunable policy and
-model/provider switching are out of scope at Prop (`C2`, `C10`).
+The provider key may instead live in the owner-only auth store
+(`~/.config/sudoer/auth.json`; `SUDOER_AUTH_FILE` overrides), which is where
+`--setup` puts it. The budget bounds and per-tool-class timeouts, and the web
+size/result bounds, are compiled-in constants, not configuration (`C8`);
+user-tunable safety policy and multi-provider failover are out of scope at
+Prop (`C2`, `C10`).
 
 ### Non-goals
 
@@ -262,8 +273,6 @@ capabilities it declines. It does not:
 - serve as a personal assistant — no durable *semantic* memory or
   cross-session recall (`C9`); session continuity is not long-term knowledge;
 - expose a server, daemon, or HTTP API (`C6`, Pilot);
-- take over the screen with a full-screen or alternate-screen app; the human
-  surface is inline and leaves the scrollback intact (`C6`);
 - run as an autonomous long-horizon scheduler — no scheduled or background
   autonomy, no reminders, no background jobs (`C11`, Pilot);
 - accept audio, or vision as a general modality (`C7`); vision is used only
@@ -274,8 +283,8 @@ capabilities it declines. It does not:
   framework and personal connectors are not;
 - apply user-tunable safety policy or audit (`C10`); Prop keeps its built-in
   guards;
-- offer multi-provider fallback or a model catalog (`C2`) — not required to
-  code, only to stay available;
+- offer multi-provider failover (`C2`) — the catalog selects one active
+  model, not a fallback chain; staying reachable is Pilot's concern;
 - pretend to confine the shell: the network guard binds only the web tools
   — config-gated, host-limited, size- and time-bounded, never auto-following
   page instructions — while `run_command` and `job` are full-trust by design
@@ -310,15 +319,18 @@ The assembled Prop agent in one block (the frozen contracts are in
 name: sudoer-prop
 tier: prop
 role: coding agent — strict instruction following, precise, verified artifact delivery
-interface: cli-human(styled) + cli-automate   # inline, no full-screen
+interface: cli-human(tui) + cli-automate      # full-screen; --inline fallback
 streaming: human-surface                      # one-shot for automation
 modality: text + coding-only image
 session: continuous-persistent
 context: transcript-compacted          # context.mode: harness (default)
 loop: react-plan-driven
 provider:
-  kind: [openai-compatible, ollama]   # exactly one
-  config: [base_url, api_key, model, context_window, sampling?]
+  active: one                         # one active provider per run; no failover
+  presets: curated core + full OpenAI-compatible models.dev set + [ollama, lmstudio, custom]
+  kind: [openai-compatible, ollama]   # each preset resolves to one adapter
+  config: [preset?, base_url, api_key|api_key_env, model, context_window, sampling?]
+  auth_store: ~/.config/sudoer/auth.json   # 0600; SUDOER_AUTH_FILE overrides
 tools: [read, write, edit, multi_edit, glob, search, run_command, job, diff, restore, web_search?, web_fetch?]  # coding-scoped; not capped
 tools_config:
   workspace_root: <path>   # defaults to the process working directory
@@ -330,7 +342,7 @@ context_config:
   mode: [harness, clm]   # harness = built-in ladder; clm = model-managed file
   file: <path>           # live context file (clm); default <workspace_root>/.sudoer/context.md
   strategy: <text>       # optional natural-language context-management steering (clm)
-commands: [help, exit, new, sessions, resume, plan, status, context, diff, cancel, workspace, verbose]
+commands: [help, exit, new, sessions, resume, plan, status, provider, model, context, diff, cancel, workspace, verbose]
 guards:
   step_budget: progress-driven-with-ceiling   # compiled-in
   timeouts: per-tool-class                    # compiled-in

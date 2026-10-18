@@ -10,15 +10,19 @@ import '../models.dart';
 import '../plan_block.dart';
 import '../reliability.dart';
 import '../think_block.dart';
+import 'auth.dart';
 import 'provider.dart';
 
 /// C2 adapter for any OpenAI-compatible chat-completions endpoint.
-final class OpenAiCompatibleProvider implements Provider {
+final class OpenAiCompatibleProvider implements Provider, ClosableProvider {
   OpenAiCompatibleProvider(this.config, {http.Client? client})
       : _client = client ?? http.Client();
 
   final ProviderConfig config;
   final http.Client _client;
+
+  @override
+  void close() => _client.close();
 
   @override
   Future<ProviderResponse> complete(
@@ -49,8 +53,15 @@ final class OpenAiCompatibleProvider implements Provider {
     } on Object catch (e) {
       throw StepFailure.unrecoverable('provider request failed: $e');
     }
-    if (config.apiKey != null) {
-      httpRequest.headers['authorization'] = 'Bearer ${config.apiKey}';
+    final apiKey = config.apiKey;
+    if (apiKey != null) {
+      final problem = apiKeyProblem(apiKey);
+      if (problem != null) {
+        throw StepFailure.unrecoverable(
+            'provider API key is invalid: $problem; '
+            'run `sudoer-prop --setup` to replace it');
+      }
+      httpRequest.headers['authorization'] = 'Bearer $apiKey';
     }
 
     final http.StreamedResponse response;
@@ -62,8 +73,15 @@ final class OpenAiCompatibleProvider implements Provider {
     }
     if (response.statusCode != 200) {
       final body = await response.stream.bytesToString();
+      final hint = (response.statusCode == 401 || response.statusCode == 403) &&
+              apiKey != null &&
+              apiKey.isNotEmpty
+          ? minimaxRegionHint(
+              presetId: config.preset, baseUrl: config.baseUrl)
+          : '';
       throw StepFailure.unrecoverable(
-          'provider HTTP ${response.statusCode}: $body');
+          'provider HTTP ${response.statusCode}: $body'
+          '${hint.isEmpty ? '' : ' $hint'}');
     }
     return _stream(response, onDelta, onReasoning, cancel);
   }

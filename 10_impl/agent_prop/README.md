@@ -7,7 +7,8 @@ interactive session with a persistent transcript and plan, deep enough to
 work on its own codebase.
 
 - Language: **Dart 3.13.5**, via [mise](https://mise.jdx.dev) (`mise.toml`)
-- Inline styling: [dart_tui](https://pub.dev/packages/dart_tui) (styles only; no full-screen app)
+- Terminal UI: [dart_tui](https://pub.dev/packages/dart_tui) (full-screen
+  alternate-buffer app, differential rendering, text editor components)
 - Args: [args](https://pub.dev/packages/args)
 - Blueprint: [`00_bp/agent_prop.md`](../../00_bp/agent_prop.md),
   [`00_bp/agent_prop/gate.md`](../../00_bp/agent_prop/gate.md),
@@ -23,11 +24,14 @@ bin/
   gate.dart               build-gate runner
 tool/
   build.dart              portable build: compile + publish (C3)
+  generate_catalog.dart   regenerate catalog_generated.dart from models.dev
   version.dart            print the pubspec version for release naming
 lib/src/
   agent.dart              assembles C1–C8; owns the workspace baseline
   models.dart             transcript/action/tool/run/completion contracts
   console.dart            inline human formatting: channels, spinner, status (C6)
+  tui_console.dart        full-screen transcript console + Pi-style frame (C6)
+  tui_app.dart            full-screen app: editor, history, queue, scroll (C6)
   markdown_render.dart    block-buffered markdown -> styled terminal text (C6)
   plan_block.dart         fenced `plan` block parse/stream (C2)
   think_block.dart        `<think>` reasoning block parse/stream (C2)
@@ -101,25 +105,48 @@ Common mise tasks:
 
 ## Use it as a Prop agent
 
-### 1. Write a config (JSON)
+### 1. Choose a provider
 
-Local model via ollama (`base_url` defaults to `http://localhost:11434`):
+The quickest path is the interactive wizard (it uses `dart_tui` for the
+selection and a masked key prompt):
+
+```bash
+mise exec -- dart run bin/sudoer.dart --setup
+```
+
+It picks a provider preset, takes the key (stored in
+`~/.config/sudoer/auth.json`, owner-only 0600), discovers the endpoint's
+models when reachable, selects one, and writes `sudoer.json`. The prompts are
+full-screen, and the key/text fields accept a paste. The provider chooser is
+searchable (type to filter) because the catalog tracks the full
+OpenAI-compatible models.dev set. `--login` is an alias.
+
+Or write a config by hand. The smallest form names a preset and a model;
+`kind`, `base_url`, and `context_window` come from the built-in catalog
+(`--list-providers`):
 
 ```json
 {
-  "provider": {
-    "kind": "ollama",
-    "model": "llama3.1",
-    "context_window": 8192
-  },
+  "provider": { "preset": "openai", "model": "gpt-6-astra" },
   "workspace_root": "/path/to/myproject"
 }
 ```
 
-`workspace_root` is optional: omit it to use the working directory `sudoer-prop`
-was started from. It can be changed mid-session with `/workspace <dir>`.
+`workspace_root` is optional: omit it to use the working directory
+`sudoer-prop` was started from. It can be changed mid-session with
+`/workspace <dir>`.
 
-Any OpenAI-compatible endpoint:
+Local models use the `ollama` preset (the daemon's models are discovered when
+reachable):
+
+```json
+{
+  "provider": { "preset": "ollama", "model": "qwen2.5-coder:7b" }
+}
+```
+
+Any explicit OpenAI-compatible endpoint (a legacy form, still supported) or
+a preset not in the catalog:
 
 ```json
 {
@@ -127,8 +154,8 @@ Any OpenAI-compatible endpoint:
     "kind": "openai-compatible",
     "base_url": "https://api.openai.com/v1",
     "api_key": "$OPENAI_API_KEY",
-    "model": "gpt-4o-mini",
-    "context_window": 128000
+    "model": "gpt-6-astra",
+    "context_window": 1050000
   },
   "workspace_root": "$HOME/src/myproject"
 }
@@ -136,6 +163,8 @@ Any OpenAI-compatible endpoint:
 
 String values may reference environment variables as `$VAR` or `${VAR}`.
 A referenced variable that is unset is an error (no silent empty key).
+Prefer `api_key_env` (a bare variable name) or the auth store to a literal
+key in the config.
 
 Optional sampling parameters ride under `provider.sampling` (sent where the
 adapter supports them; omitted keys use the endpoint defaults):
@@ -143,13 +172,49 @@ adapter supports them; omitted keys use the endpoint defaults):
 ```json
 {
   "provider": {
-    "kind": "ollama",
-    "model": "llama3.1",
-    "context_window": 8192,
+    "preset": "ollama",
+    "model": "qwen2.5-coder:7b",
     "sampling": { "temperature": 0.2, "top_p": 0.9, "max_tokens": 4096 }
   }
 }
 ```
+
+#### Provider catalog and keys
+
+- `--list-providers` lists the presets and whether a key is available (never
+  the key itself). The catalog is the curated core plus the full
+  OpenAI-compatible subset of models.dev/OpenCode (Nvidia, OpenCode Zen,
+  Z.AI, Alibaba, regional/coding-plan variants, gateways, and the long tail),
+  so it currently carries 200+ presets (211 of models.dev's 232 providers).
+  The remaining 21 need a native SDK (Bedrock, Vertex, Azure, native
+  Anthropic/Google, …) or a per-account URL placeholder; use `custom` or an
+  OpenAI-compatible gateway for those. The generated list is checked in as
+  `catalog_generated.dart`; refresh it with
+  `dart run tool/generate_catalog.dart /path/to/models.dev-api.json` after
+  downloading `https://models.dev/api.json`.
+- `--list-models --provider openai` prints the endpoint's live models when
+  reachable, else the built-in catalog.
+- `--provider <id>`, `--model <id>`, `--base-url`, `--context-window`,
+  `--api-key`, and `--api-key-env` override the config for one process.
+  `--provider` alone is enough to run without a config (rooted at the
+  working directory).
+- `--save-key --provider openai --api-key …` stores a key for scripts
+  without running the wizard.
+- MiniMax keys are region-specific. Use `--provider minimax` for the
+  international `api.minimax.io` endpoint and `--provider minimax-cn` for the
+  China `api.minimax.cn` endpoint. A 401 from the wrong region now carries a
+  hint naming the other preset (the key is never echoed).
+- Keys are validated as printable ASCII without whitespace (surrounding
+  whitespace is trimmed). Setup and `--save-key` reject a pasted terminal
+  transcript or multi-line blob before storing it; a stale stored/env key is
+  reported as `invalid` (and is never sent as an HTTP header).
+- Inside a session, `/provider [id]` and `/model [id]` list and switch at a
+  goal boundary.
+- Key precedence: `provider.api_key` → auth store → `provider.api_key_env`
+  → the preset's conventional env var (`OPENAI_API_KEY`,
+  `ANTHROPIC_API_KEY`, …). The auth store is
+  `~/.config/sudoer/auth.json` (XDG; `%APPDATA%` on Windows;
+  `SUDOER_AUTH_FILE` overrides) and is written 0600.
 
 Web tools are on by default (any host). Point `search_url` at a self-hosted
 SearXNG to enable `web_search`; set `deny_hosts` to block specific hosts:
@@ -188,26 +253,30 @@ mirror the model edits. `/context` reports the active mode and file; see
 
 ### 2. Start a session
 
-With no positional goal on a terminal, `sudoer-prop` runs the **human CLI**: the
-normal scrollback, with color/italics, a `› ` prompt, a spinner while
-thinking, replies streamed in as they are generated, and a one-line status
-after each run: the response number within the session, the result, context
-use as `used/window (percent)` in K/M units with a bar, plan progress,
-step count (with stall state once steps stop making progress), and the
-workspace. It does **not** take over the screen.
+With no positional goal on a terminal, `sudoer-prop` runs the **full-screen
+TUI**: a fixed header (build, provider/model, workspace, session, transcript
+size), a scrollable transcript, a bordered multi-line editor, and a status
+footer. It uses the alternate screen and restores the shell's scrollback on
+exit. The layout follows Pi's interactive mode: the editor and status area
+stay put while the transcript scrolls, so a long run never pushes the input
+off-screen. `--inline` keeps the older scrollback surface when a takeover is
+not wanted; `--automate` (or a non-interactive stdin/stdout) is the plain
+one-shot CLI.
+
+The footer carries the spinner and step/context detail while a run is in
+flight, then the latest status: response number, result, context use as
+`used/window (percent)` in K/M units with a bar, plan progress, step count
+(with stall state once steps stop making progress), and the workspace.
 
 Each kind of output has its own colour so the three voices never blur
-together, with no change to how typing feels: **user input** stays in the
-terminal's default color (the `› ` prompt and the typed line exactly as the
-tty shows them); **model output** is rendered markdown in magenta (sky
-headings, peach inline code, mauve list markers); **command output**
-(`/help`, `/plan`, `/status`, …) is yellow; the model's `<think>`
-**reasoning** streams as a dim italic `│` block distinct from the answer;
-tool calls are mauve `→` lines; tool/command results are coloured `✓`/`✗`
-lines with any multi-line body indented beneath; verbose `[C1]`–`[C8]`
-diagnostics are a dim gutter with a colour-coded tag; and the status line has
-its result word coloured. Styling is presentation only; with color off each
-channel degrades to its plain prefix.
+together: **user input** is echoed as a bold `›` turn; **model output** is
+rendered markdown in magenta (sky headings, peach inline code, mauve list
+markers); **command output** (`/help`, `/plan`, `/status`, …) is yellow; the
+model's `<think>` **reasoning** is a dim italic `│` block distinct from the
+answer; tool calls are mauve `→` lines; tool/command results are coloured
+`✓`/`✗` lines with any multi-line body indented beneath; verbose `[C1]`–`[C8]`
+diagnostics are a dim gutter with a colour-coded tag; and the status footer has
+its result word coloured. Styling is presentation only.
 
 The model's reply is markdown, so the human surface renders it: headings,
 emphasis, inline code, fenced code (with a language tag), lists, task items,
@@ -217,14 +286,18 @@ rest at the end of the run — so text arrives per block rather than per token,
 always complete. The automation surface keeps the raw markdown, so its stdout
 stays machine-readable.
 
-On a terminal the prompt is a real line editor: `←`/`→` move the cursor to
-insert or correct, `↑`/`↓` walk your input history (the in-progress draft is
-restored when you come back to it), `Home`/`End` jump within the line, and a
-line ending in `\` continues onto the next line, so a goal can span multiple
-lines. While the agent is working the spinner carries an `Esc Esc to
-interrupt` hint; press `Esc` twice to cancel the run (like `/cancel`, keeping
-the partial transcript). On a pipe or with `--automate` this is skipped and
-input is read one line at a time.
+The TUI editor is multi-line: `Enter` submits, `Shift+Enter` (or `Alt+Enter`,
+which works even when the terminal does not report modified Enter) adds a
+line, and bracketed paste inserts text verbatim, including line breaks,
+without submitting. `←`/`→`/`Home`/`End` move within the text; `↑`/`↓` at the
+first/last line walk your input history and restore the in-progress draft.
+`PgUp`/`PgDn` scroll the transcript. While a run is in flight, `Enter`
+queues a follow-up to
+run after it and the footer shows the queue depth; one `Esc` cancels the run
+and keeps the partial transcript. `Ctrl+C` restores the terminal and exits.
+The `--inline` fallback keeps the line editor, `\`-continued multi-line goals,
+and double-`Esc` cancellation. On a pipe or with `--automate` input is read
+one line at a time.
 
 ```bash
 cd 10_impl/agent_prop
@@ -251,11 +324,13 @@ Built-in commands (both surfaces):
 | `/resume <id>` | switch to a saved session |
 | `/plan` | print the current plan |
 | `/status` | print the session status |
+| `/provider [id]` | list the provider presets, or switch the active provider |
+| `/model [id]` | list the current provider's models, or switch model |
 | `/context [harness\|clm]` | show or switch the context strategy (and live file) |
 | `/diff [path]` | show the workspace's changes against the session baseline |
-| `/cancel` | cancel the in-flight run |
+| `/cancel` | cancel the in-flight run (automate surface; `Esc` on human surfaces) |
 | `/workspace [dir]` | print or change the workspace root |
-| `/verbose on\|off` | emit per-step routing on stderr (default off) |
+| `/verbose on\|off` | emit per-step routing (TUI transcript; stderr otherwise; default off) |
 
 A positional goal is a one-shot convenience: run it and exit.
 
@@ -264,11 +339,21 @@ mise exec -- dart run bin/sudoer.dart -c /path/to/config.json \
   "Read README.md and summarize it"
 ```
 
-- On the line surface, answers go to **stdout**; diagnostics, plan, and
-  status to **stderr**.
+- On the automate surface, answers go to **stdout**; diagnostics, plan, and
+  status to **stderr**. The human surfaces render those into the transcript
+  and footer.
 - `--config` / `-c` defaults to `$SUDOER_CONFIG`, then `./sudoer.json`.
 - `--automate` forces the plain surface; `--human` forces the styled surface;
+  `--inline` uses the scrollback line editor instead of the full-screen TUI;
   `--verbose` emits per-step events.
+- `--provider <id>` / `--model <id>` select or override the provider and
+  model; `--api-key`, `--api-key-env`, `--base-url`, and
+  `--context-window` override the other provider fields. With `--provider`,
+  a config file is optional (an ephemeral config is rooted at the current
+  directory).
+- `--list-providers`, `--list-models`, and `--setup` (alias `--login`) are
+  catalog/setup surfaces: they exit before a session starts. `--save-key`
+  persists a `--api-key` for `--provider` in the auth store.
 - `--session` / `-s <id>` resumes a saved session, or starts one under that
   id if it does not exist yet (on both the one-shot and interactive surfaces);
   `--help` / `-h` prints usage.
@@ -305,16 +390,18 @@ mise exec -- dart run bin/sudoer.dart -c /path/to/config.json \
   listed order. Observations return bound to their calls by id, in the
   listed order; a sibling's timeout or denial never discards completed
   observations (C8).
-- **Two surfaces, one CLI.** Styled human output by default on a terminal;
-  `--automate` (or a non-interactive stdin/stdout) selects the plain surface,
-  so scripts never hang. Neither is full-screen.
+- **Two surfaces, one CLI.** The full-screen TUI is the default human surface
+  on a terminal; `--inline` selects the scrollback variant, and `--automate`
+  (or a non-interactive stdin/stdout) selects the plain surface, so scripts
+  never hang.
 - **Streaming.** On the human surface the reply streams as tokens arrive
-  (OpenAI SSE, ollama NDJSON); a fenced `plan` block is withheld until
-  complete and a `<think>` reasoning block streams dim/italic to stderr,
-  apart from the answer. The visible reply is markdown and is rendered block
-  by block. The automation path takes the one-shot request and prints the
-  whole reply raw. Streamed tool-call deltas are merged per call index, so
-  an interleaved batch reassembles into the same action.
+  (OpenAI SSE, ollama NDJSON) and is applied to the transcript; a fenced
+  `plan` block is withheld until complete and a `<think>` reasoning block
+  streams dim/italic, apart from the answer. The visible reply is markdown
+  and is rendered block by block. The automation path takes the one-shot
+  request and prints the whole reply raw. Streamed tool-call deltas are
+  merged per call index, so an interleaved batch reassembles into the same
+  action.
 - **Reasoning.** If the model wraps private reasoning in `<think> … </think>`,
   the adapter strips it from the visible text and normalizes it to a separate
   `reasoning` value; it is never part of the answer and never replayed to the
@@ -355,11 +442,12 @@ mise exec -- dart run bin/sudoer.dart -c /path/to/config.json \
 - **Background jobs are reaped.** Every `job` runs under the same host shell
   as `run_command`; jobs are killed when the run is cancelled and when the
   session closes, so no child process outlives the agent.
-- **Verbose routing.** `/verbose on` (or `--verbose`) prints `[C1]`–`[C8]`-
-  tagged events on stderr: session/provider selection, prompt fit (C4), each
-  tool call and its evaluated result (C3), plan updates and progress/stall
-  accounting (C1), guard timeouts (C8), and the final status. Off by default; stdout
-  stays clean.
+- **Verbose routing.** `/verbose on` (or `--verbose`) emits `[C1]`–`[C8]`-
+  tagged events: session/provider selection, prompt fit (C4), each tool call
+  and its evaluated result (C3), plan updates and progress/stall accounting
+  (C1), guard timeouts (C8), and the final status. They join the TUI
+  transcript, go to stderr under `--inline`, and use the automate stderr log
+  otherwise. Off by default; automate stdout stays clean.
 - **Tools are workspace-rooted** (`read`, `write`, `edit`, `multi_edit`,
   `glob`, `search`, `diff`, `restore`); a path that escapes `workspace_root`
   is a guard denial. The root defaults to the invocation directory and can
@@ -392,9 +480,10 @@ mise run gate:suite    # suite only
 ```
 
 - Tasks live in [`00_bp/agent_prop/tasks/`](../../00_bp/agent_prop/tasks)
-  (24 tasks: reading, editing, orientation, execution, baseline diff/restore,
+  (32 tasks: reading, editing, orientation, execution, baseline diff/restore,
   batch/parallel calls, error/denial/timeout paths, context overflow and
-  watermark compaction, sessions, plans, and the REPL). A task whose
+  watermark compaction, sessions, plans, the REPL, and provider/model
+  switching). A task whose
   `run_command` strings assume the POSIX host shell declares
   `"host_shell": "posix"` and is skipped (not failed) on Windows, where the
   host-shell paths are unit-tested.

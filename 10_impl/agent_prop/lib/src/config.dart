@@ -4,9 +4,9 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import 'errors.dart';
+import 'providers/catalog.dart';
 
-/// Provider adapter selected by configuration (C2).
-enum ProviderKind { openAiCompatible, ollama }
+export 'providers/catalog.dart';
 
 ProviderKind _parseKind(Object? value) => switch (value) {
       'openai-compatible' => ProviderKind.openAiCompatible,
@@ -129,45 +129,104 @@ final class ProviderConfig {
     required this.kind,
     required this.model,
     required this.contextWindow,
+    this.preset,
     this.baseUrl,
     this.apiKey,
+    this.apiKeyEnv,
     this.sampling,
   });
 
   final ProviderKind kind;
   final String model;
   final int contextWindow;
+
+  /// The catalog preset this provider came from (C2). Informational when the
+  /// provider is configured explicitly, but it binds the auth store lookup
+  /// and `/provider` display to a stable id.
+  final String? preset;
+
   final String? baseUrl;
+
+  /// A literal key, or a key already expanded from `$VAR` by config loading.
   final String? apiKey;
+
+  /// The name of an environment variable holding the key. Mutually exclusive
+  /// with [apiKey].
+  final String? apiKeyEnv;
 
   /// Optional sampling parameters (C2); null means endpoint defaults.
   final SamplingConfig? sampling;
 
+  /// The human label used by the CLI and the session header.
+  String get display => '${preset ?? kind.wire}/$model';
+
   /// Parse and validate against `config.schema.json` (hand-checked; the
   /// schema remains the source of truth).
+  ///
+  /// A [preset] fills in `kind`, `base_url`, and `context_window` when they
+  /// are omitted, so a config can be as small as
+  /// `{"provider": {"preset": "openai", "model": "gpt-6-astra"}}`.
   factory ProviderConfig.fromJson(Map<String, dynamic> json) {
-    final kind = _parseKind(json['kind']);
+    final presetId = json['preset'];
+    if (presetId != null && (presetId is! String || presetId.isEmpty)) {
+      throw const ConfigException('provider.preset must be a non-empty string');
+    }
+    final preset = presetId == null ? null : providerPreset(presetId);
+    if (presetId != null && preset == null) {
+      throw ConfigException('unknown provider preset: $presetId '
+          '(known: ${kProviderPresets.take(8).map((p) => p.id).join(', ')}, …; '
+          'run `sudoer-prop --list-providers`)');
+    }
+
+    final rawKind = json['kind'];
+    final kind = rawKind == null ? preset?.kind : _parseKind(rawKind);
+    if (kind == null) {
+      throw const ConfigException(
+          'provider.kind is required unless provider.preset is set');
+    }
+
     final model = json['model'];
     if (model is! String || model.isEmpty) {
       throw const ConfigException('provider.model must be a non-empty string');
     }
-    final window = json['context_window'];
-    if (window is! int || window < 1) {
+
+    final rawBase = json['base_url'];
+    if (rawBase != null && rawBase is! String) {
+      throw const ConfigException('provider.base_url must be a string');
+    }
+    final baseUrl = (rawBase as String?) ?? preset?.baseUrl;
+    if (kind == ProviderKind.openAiCompatible &&
+        (baseUrl == null || baseUrl.isEmpty)) {
+      throw const ConfigException(
+          'provider.base_url is required for the openai-compatible adapter '
+          '(or set provider.preset)');
+    }
+
+    final rawWindow = json['context_window'];
+    if (rawWindow != null && (rawWindow is! int || rawWindow < 1)) {
       throw const ConfigException(
           'provider.context_window must be an integer >= 1');
     }
-    final baseUrl = json['base_url'];
-    if (baseUrl != null && baseUrl is! String) {
-      throw const ConfigException('provider.base_url must be a string');
-    }
-    if (kind == ProviderKind.openAiCompatible && baseUrl == null) {
-      throw const ConfigException(
-          'provider.base_url is required for the openai-compatible adapter');
-    }
+    final contextWindow = rawWindow as int? ??
+        preset?.model(model)?.contextWindow ??
+        (preset == null ? null : kDefaultContextWindow) ??
+        (throw const ConfigException(
+            'provider.context_window is required unless provider.preset is set'));
+
     final apiKey = json['api_key'];
     if (apiKey != null && apiKey is! String) {
       throw const ConfigException('provider.api_key must be a string');
     }
+    final apiKeyEnv = json['api_key_env'];
+    if (apiKeyEnv != null && (apiKeyEnv is! String || apiKeyEnv.isEmpty)) {
+      throw const ConfigException(
+          'provider.api_key_env must be a non-empty string when set');
+    }
+    if (apiKey != null && apiKeyEnv != null) {
+      throw const ConfigException(
+          'set at most one of provider.api_key and provider.api_key_env');
+    }
+
     final sampling = json['sampling'];
     if (sampling != null && sampling is! Map) {
       throw const ConfigException('provider.sampling must be an object');
@@ -175,9 +234,11 @@ final class ProviderConfig {
     return ProviderConfig(
       kind: kind,
       model: model,
-      contextWindow: window,
-      baseUrl: baseUrl as String?,
+      contextWindow: contextWindow,
+      preset: preset?.id,
+      baseUrl: baseUrl,
       apiKey: apiKey as String?,
+      apiKeyEnv: apiKeyEnv as String?,
       sampling: sampling == null
           ? null
           : SamplingConfig.fromJson(sampling.cast<String, dynamic>()),
@@ -185,16 +246,37 @@ final class ProviderConfig {
   }
 
   Map<String, dynamic> toJson() => {
-        'kind': switch (kind) {
-          ProviderKind.openAiCompatible => 'openai-compatible',
-          ProviderKind.ollama => 'ollama',
-        },
+        'kind': kind.wire,
         'model': model,
         'context_window': contextWindow,
+        if (preset != null) 'preset': preset,
         if (baseUrl != null) 'base_url': baseUrl,
         if (apiKey != null) 'api_key': apiKey,
+        if (apiKeyEnv != null) 'api_key_env': apiKeyEnv,
         if (sampling != null) 'sampling': sampling!.toJson(),
       };
+
+  /// A copy with selected provider fields replaced. Null means "keep".
+  ProviderConfig copyWith({
+    ProviderKind? kind,
+    String? model,
+    int? contextWindow,
+    String? preset,
+    String? baseUrl,
+    String? apiKey,
+    String? apiKeyEnv,
+    SamplingConfig? sampling,
+  }) =>
+      ProviderConfig(
+        kind: kind ?? this.kind,
+        model: model ?? this.model,
+        contextWindow: contextWindow ?? this.contextWindow,
+        preset: preset ?? this.preset,
+        baseUrl: baseUrl ?? this.baseUrl,
+        apiKey: apiKey ?? this.apiKey,
+        apiKeyEnv: apiKeyEnv ?? this.apiKeyEnv,
+        sampling: sampling ?? this.sampling,
+      );
 }
 
 /// Network capability for the web tools (C3). Enabled and open by default
@@ -381,11 +463,16 @@ final class Config {
         'context': context.toJson(),
       };
 
-  /// A copy with a new [workspaceRoot] and/or [context] strategy, keeping the
-  /// provider, the session directory, and the network policy fixed for the
-  /// process (C6).
-  Config copyWith({String? workspaceRoot, ContextConfig? context}) => Config(
-        provider: provider,
+  /// A copy with a new [workspaceRoot], [context] strategy, and/or
+  /// [provider], keeping the session directory and the network policy fixed
+  /// for the process (C6).
+  Config copyWith({
+    String? workspaceRoot,
+    ContextConfig? context,
+    ProviderConfig? provider,
+  }) =>
+      Config(
+        provider: provider ?? this.provider,
         workspaceRoot: workspaceRoot ?? this.workspaceRoot,
         sessionDir: sessionDir,
         web: web,

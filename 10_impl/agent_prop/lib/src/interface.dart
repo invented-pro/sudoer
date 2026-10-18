@@ -2,6 +2,27 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:dart_tui/dart_tui.dart'
+    show
+        Cmd,
+        KeyCode,
+        KeyMod,
+        KeyPressMsg,
+        Model,
+        Msg,
+        PasteMsg,
+        Program,
+        QuitMsg,
+        RgbColor,
+        Style,
+        TeaKey,
+        TextAreaModel,
+        TextAreaStyles,
+        View,
+        ViewportModel,
+        WindowSizeMsg,
+        withAltScreen,
+        withInput;
 import 'package:path/path.dart' as p;
 
 import 'agent.dart';
@@ -14,22 +35,29 @@ import 'line_editor.dart';
 import 'modality.dart';
 import 'models.dart';
 import 'platform.dart';
+import 'providers/auth.dart';
+import 'providers/discovery.dart' show presetForConfig;
 import 'providers/ollama.dart';
 import 'providers/openai_compatible.dart';
 import 'providers/provider.dart';
 import 'providers/scripted.dart';
+import 'providers/setup.dart' show formatContextWindow, modelListText, providerListText;
 import 'reliability.dart';
 import 'session.dart';
 import 'tools/job.dart';
+import 'tui_console.dart';
 
-/// The two Prop surfaces (C6). Both are line CLIs on the normal terminal
-/// scrollback: [human] adds color, italics, a spinner, streamed replies, and
-/// a status line; [automate] is plain, one-shot, and pipe-friendly.
+part 'tui_app.dart';
+
+/// The two Prop surfaces (C6). [human] is the full-screen terminal app by
+/// default (transcript, editor, status); `--inline` keeps the older styled
+/// scrollback surface. [automate] is plain, one-shot, and pipe-friendly.
 enum UiMode { human, automate }
 
 /// Choose the surface. Human is the default; `--automate`, or a
 /// non-interactive terminal, selects the plain line path so scripts never
-/// hang. `--human` forces the styled path (useful when detection is wrong).
+/// hang. `--human` forces the styled path (useful when detection is wrong);
+/// whether it takes the full screen is a separate `--inline` choice.
 UiMode chooseMode({
   required bool automate,
   required bool human,
@@ -52,9 +80,13 @@ Provider providerFor(ProviderConfig config) {
         jsonDecode(File(scriptPath).readAsStringSync()) as Map<String, dynamic>;
     return ScriptedProvider.fromJson(json);
   }
-  return switch (config.kind) {
-    ProviderKind.openAiCompatible => OpenAiCompatibleProvider(config),
-    ProviderKind.ollama => OllamaProvider(config),
+  // C2: resolve the key with the documented precedence (config, auth store,
+  // api_key_env, well-known env var) so the adapters only ever see a value.
+  final key = resolveApiKey(config);
+  final effective = key == null ? config : config.copyWith(apiKey: key);
+  return switch (effective.kind) {
+    ProviderKind.openAiCompatible => OpenAiCompatibleProvider(effective),
+    ProviderKind.ollama => OllamaProvider(effective),
   };
 }
 
@@ -88,9 +120,10 @@ Future<int> runCli({
     return 2;
   }
 
+  final provider = factory(config.provider);
   final agent = PropAgent.assemble(
     config: config,
-    provider: factory(config.provider),
+    provider: provider,
     callLog: callLog,
     session: session,
     reliability: reliability,
@@ -107,8 +140,7 @@ Future<int> runCli({
       // The greeting: version first, then the repo link (C6, build identity).
       console.banner('Sudoer $kBuildLabel');
       console.header(kRepoUrl);
-      console.header('${providerLabel(config.provider.kind)}/'
-          '${config.provider.model}');
+      console.header(config.provider.display);
       console.user(goal);
     }
     final result = await agent
@@ -149,6 +181,7 @@ Future<int> runCli({
   } finally {
     // Reap any background job this one-shot run started (C3/C8).
     await agent.dispose();
+    if (provider is ClosableProvider) (provider as ClosableProvider).close();
   }
 }
 
@@ -164,16 +197,17 @@ final class ReplOutcome {
 /// `/` is a command, any other line is a goal run inside the current session.
 /// Answers go to [out]; diagnostics, plan, and status go to [err].
 ///
-/// On a real terminal ([interactive] plus [rawInput]) the human surface takes
-/// over the keyboard in raw mode: a [LineEditor] gives arrow-key cursor
-/// movement, Up/Down history, and multi-line goals (a trailing `\` continues
-/// the line), and a double `Esc` interrupts the in-flight run. Off a terminal
-/// the plain line path is used unchanged.
+/// On a real terminal ([interactive] plus [rawInput]) the default human
+/// surface is the full-screen TUI ([tui]): a scrollable transcript, a
+/// multi-line editor, and a fixed status footer. With `tui: false` the older
+/// inline surface uses a [LineEditor] and the normal scrollback. Off a
+/// terminal the plain line path is used unchanged.
 Future<ReplOutcome> runRepl({
   required Config config,
   required Stream<String> input,
   Stream<List<int>>? rawInput,
   bool interactive = false,
+  bool tui = false,
   StringSink? out,
   StringSink? err,
   Provider Function(ProviderConfig config)? providerFactory,
@@ -184,25 +218,42 @@ Future<ReplOutcome> runRepl({
   List<String>? callLog,
   Reliability? reliability,
 }) async {
+  final factory = providerFactory ?? providerFor;
+  final useTui = tui && human && interactive && rawInput != null;
+  final ConsoleSurface surface = useTui
+      ? TuiConsole(
+          width: (stdout.hasTerminal ? stdout.terminalColumns : 80)
+              .clamp(20, 500))
+      : Console(
+          out: out ?? stdout,
+          // Automate surface: stderr is the log, so timestamp every line (C6).
+          err: human ? (err ?? stderr) : StampingSink(err ?? stderr),
+          ansi: human,
+          spinner: human,
+        );
   final repl = _Repl(
     config: config,
-    console: Console(
-      out: out ?? stdout,
-      // Automate surface: stderr is the log, so timestamp every line (C6).
-      err: human ? (err ?? stderr) : StampingSink(err ?? stderr),
-      ansi: human,
-      spinner: human,
-    ),
-    provider: (providerFactory ?? providerFor)(config.provider),
+    console: surface,
+    provider: factory(config.provider),
+    providerFactory: factory,
     session: session ?? Session.create(workspaceRoot: config.workspaceRoot),
     verbose: verbose,
     human: human,
     interactive: interactive,
+    tui: useTui,
     echoInput: echoInput,
     callLog: callLog,
     reliability: reliability,
   );
-  final outcome = await repl.start(input: input, rawInput: rawInput);
+  final ReplOutcome outcome;
+  try {
+    outcome = await repl.start(input: input, rawInput: rawInput);
+  } finally {
+    // C2: release the transport of the provider the session ends on. A
+    // provider replaced earlier was closed by `_rebuildProvider`.
+    final current = repl.provider;
+    if (current is ClosableProvider) (current as ClosableProvider).close();
+  }
   // C6: on the automate surface, log the session id on close so the next run
   // can resume it with `--session <id>`.
   if (!human) _printSession(repl.console.err, outcome.session);
@@ -217,10 +268,12 @@ final class _Repl {
     required this.config,
     required this.console,
     required this.provider,
+    required this.providerFactory,
     required this.session,
     required this.verbose,
     required this.human,
     required this.interactive,
+    required this.tui,
     required this.echoInput,
     this.callLog,
     this.reliability,
@@ -236,14 +289,20 @@ final class _Repl {
     agent = _build();
   }
 
-  /// Mutable so a session-level command (`/workspace`, `/context`) can
-  /// rebuild the agent with an updated setting (C6).
+  /// Mutable so a session-level command (`/workspace`, `/context`, or a
+  /// provider/model switch) can rebuild the agent with an updated setting
+  /// (C6).
   Config config;
-  final Console console;
-  final Provider provider;
+  final ConsoleSurface console;
+
+  /// Rebuilt on `/provider` and `/model`; kept in sync with
+  /// [providerFactory].
+  Provider provider;
+  final Provider Function(ProviderConfig config) providerFactory;
   final bool verbose;
   final bool human;
   final bool interactive;
+  final bool tui;
   final bool echoInput;
   final List<String>? callLog;
   final Reliability? reliability;
@@ -273,16 +332,27 @@ final class _Repl {
         jobs: jobs,
       );
 
+  /// C2/C6: rebuild the provider and the agent after `/provider` or `/model`,
+  /// releasing the replaced adapter's transport.
+  void _rebuildProvider() {
+    final previous = provider;
+    provider = providerFactory(config.provider);
+    if (previous is ClosableProvider) (previous as ClosableProvider).close();
+    agent = _build();
+  }
+
   Future<ReplOutcome> start({
     required Stream<String> input,
     Stream<List<int>>? rawInput,
   }) {
+    if (tui && rawInput != null) {
+      return _tui(rawInput);
+    }
     if (human) {
       // The greeting: version first, then the repo link (C6, build identity).
       console.banner('Sudoer $kBuildLabel');
       console.header(kRepoUrl);
-      console.header('${providerLabel(config.provider.kind)}/'
-          '${config.provider.model}');
+      console.header(config.provider.display);
       console.header('workspace $workspaceRoot');
       console.header('Type a goal, or /help. Ctrl+C to quit.');
     }
@@ -290,6 +360,78 @@ final class _Repl {
       return _interactive(rawInput);
     }
     return _stream(input);
+  }
+
+  /// The full-screen path. [Program] owns raw mode, the alternate screen,
+  /// bracketed paste, and SIGINT; the app owns the layout and the run queue.
+  /// On the way out any in-flight run is cancelled and awaited before the
+  /// console is closed, so no callback can write into a dead frame.
+  Future<ReplOutcome> _tui(Stream<List<int>> rawInput) async {
+    final terminal = console as TuiConsole;
+    // Program owns the screen and lifecycle; KeyReader owns the keyboard so
+    // escape sequences, bracketed paste, and control bytes are decoded
+    // correctly before they reach the editor.
+    final reader = KeyReader(rawInput);
+    final program = Program(options: [
+      withAltScreen(),
+      withInput(null),
+    ]);
+    final app = _TuiApp(repl: this, console: terminal, program: program);
+    terminal.onChange = () => program.send(const _TuiRedraw());
+    app.model = _TuiModel(app);
+    final running = program.run(app.model);
+    final subscription = reader.keys.listen(
+      (key) {
+        final msg = _tuiMessage(key);
+        if (msg != null) program.send(msg);
+      },
+      onDone: () => app.close(),
+      onError: (Object _) => app.close(natural: false),
+    );
+    try {
+      await running;
+    } finally {
+      app.shutdown();
+      await app.drained;
+      await subscription.cancel();
+      await reader.close();
+      terminal.close();
+      // The session is closing: reap every background job (C3/C8).
+      await jobs.reapAll();
+    }
+    if (!app.naturalExit) exitCode = 130;
+    return ReplOutcome(exitCode: exitCode, runs: runs, session: session);
+  }
+
+  /// Dispatch one submitted TUI turn. The caller has already echoed the user
+  /// line; this mirrors the inline path's command/goal/shell split and returns
+  /// false when the session should close.
+  Future<bool> submitTui(String line) async {
+    final trimmed = line.trim();
+    if (trimmed.isEmpty) return true;
+    if (trimmed.startsWith('!')) {
+      console.startThinking('running command');
+      try {
+        await _shell(trimmed.substring(1).trim());
+      } finally {
+        console.stopThinking();
+      }
+      return true;
+    }
+    if (trimmed.startsWith('/')) {
+      if (_isCompact(trimmed)) {
+        await _compact();
+        return true;
+      }
+      return _command(trimmed);
+    }
+    final embedded = embeddedCommand(line);
+    if (embedded != null) {
+      console.info("note: '$embedded' is on a continuation line, so this is a "
+          'multi-line goal, not a command (commands must be one line)');
+    }
+    await _runGoal(line);
+    return true;
   }
 
   /// The piped / non-terminal path: one line per turn.
@@ -474,6 +616,79 @@ final class _Repl {
     return ReplOutcome(exitCode: exitCode, runs: runs, session: session);
   }
 
+  /// C2/C6: list providers, or switch to a preset (rebuilding the provider
+  /// and agent). A missing key is reported, not fatal: the switch still
+  /// applies, and the first call explains how to add one.
+  void _providerCommand(String? argument) {
+    if (argument == null) {
+      console.info(providerListText(current: config.provider));
+      console.info('switch: /provider <id> (session only; '
+          '`sudoer-prop --setup` persists and sets keys)');
+      return;
+    }
+    final preset = providerPreset(argument);
+    if (preset == null) {
+      console.error('unknown provider: $argument');
+      return;
+    }
+    if (preset.id == config.provider.preset) {
+      console.info('already using ${preset.id}');
+      return;
+    }
+    if (preset.baseUrl == null) {
+      console.error('${preset.id} needs a base URL; '
+          'use `sudoer-prop --setup`');
+      return;
+    }
+    final nextModel = preset.defaultModel.isEmpty
+        ? config.provider.model
+        : preset.defaultModel;
+    final nextWindow =
+        preset.model(nextModel)?.contextWindow ?? kDefaultContextWindow;
+    final provider = ProviderConfig(
+      kind: preset.kind,
+      model: nextModel,
+      contextWindow: nextWindow,
+      preset: preset.id,
+      baseUrl: preset.baseUrl,
+      sampling: config.provider.sampling,
+    );
+    config = config.copyWith(provider: provider);
+    _rebuildProvider();
+    diagnostics.event('C2 provider', 'provider -> ${preset.id}');
+    console.info('provider: ${preset.id}  model: $nextModel');
+    final hint = missingKeyHint(provider);
+    if (hint != null) console.info(hint);
+  }
+
+  /// C2/C6: list the current provider's models, or switch model. An id the
+  /// catalog does not know keeps the current context window.
+  void _modelCommand(String? argument) {
+    final preset = providerPreset(config.provider.preset) ??
+        presetForConfig(config.provider);
+    if (argument == null) {
+      console.info(modelListText(preset, current: config.provider.model));
+      console.info('switch: /model <id> (session only)');
+      return;
+    }
+    if (argument.trim().isEmpty) {
+      console.error('usage: /model <id>');
+      return;
+    }
+    final info = preset.model(argument);
+    final window = info?.contextWindow ?? config.provider.contextWindow;
+    config = config.copyWith(
+      provider:
+          config.provider.copyWith(model: argument, contextWindow: window),
+    );
+    _rebuildProvider();
+    diagnostics.event('C2 provider', 'model -> $argument');
+    console.info('model: $argument  [${formatContextWindow(window)} context]');
+    if (info == null) {
+      console.info('(not in the catalog; kept the previous context window)');
+    }
+  }
+
   /// C4/C6: print the active context strategy and, under CLM, the live file.
   void _printContext() {
     final path = agent.contextFilePath;
@@ -531,8 +746,29 @@ final class _Repl {
     final parsed = _parseGoalInput(goal);
     if (parsed == null) return null;
     final observer = human ? _CliObserver(console) : null;
-    final result = await agent
-        .run(RunRequest(parsed.text, images: parsed.images), observer: observer);
+    final RunResult result;
+    try {
+      result = await agent.run(
+          RunRequest(parsed.text, images: parsed.images), observer: observer);
+    } on Object catch (e) {
+      if (human) {
+        console.stopThinking();
+        console.endLine();
+      }
+      // StepFailure normally becomes a blocked result inside the loop; this
+      // is the last line of defence for a transport-level exception. Never
+      // interpolate the raw error: it can contain a header or key value.
+      final detail = switch (e) {
+        StepFailure(:final message) => message,
+        ConfigException(:final message) => message,
+        GuardDeniedException(:final message) => message,
+        _ => '${e.runtimeType}',
+      };
+      console.error('run failed: $detail');
+      if (human) console.stopThinking();
+      exitCode = 1;
+      return null;
+    }
     runs.add(result);
     // Any non-`complete` final run makes the process exit non-zero (C6);
     // a later `complete` run resets it.
@@ -568,7 +804,8 @@ final class _Repl {
     }
   }
 
-  List<String> get _helpLines => helpLines(interactive: interactive);
+  List<String> get _helpLines =>
+      helpLines(interactive: interactive, tui: tui);
 
   /// Handle a `/command`. Returns false when the REPL should exit.
   bool _command(String line) {
@@ -586,6 +823,7 @@ final class _Repl {
       case '/new':
         session = Session.create(workspaceRoot: workspaceRoot);
         agent = _build();
+        if (console case TuiConsole tui) tui.resetTranscript();
         console.info('new session ${session.id}');
       case '/sessions':
         final ids = Session.list(config.sessionDir);
@@ -597,6 +835,10 @@ final class _Repl {
           try {
             session = Session.load(config.sessionDir, argument);
             agent = _build();
+            if (console case TuiConsole tui) {
+              tui.resetTranscript();
+              tui.replay(session.transcript);
+            }
             console.info('resumed ${session.id}');
           } on Object catch (e) {
             console.error('cannot resume: $e');
@@ -656,6 +898,10 @@ final class _Repl {
         }
         diagnostics.event('C4 context', 'mode -> ${mode.name}');
         _printContext();
+      case '/provider':
+        _providerCommand(argument);
+      case '/model':
+        _modelCommand(argument);
       case '/workspace':
         if (argument == null) {
           console.info(workspaceRoot);
@@ -681,6 +927,43 @@ final class _Repl {
   }
 }
 
+/// Translate a raw-terminal [Key] into the message the TUI model consumes.
+Msg? _tuiMessage(Key key) => switch (key.kind) {
+      KeyKind.rune => KeyPressMsg(
+          TeaKey(code: KeyCode.rune, text: String.fromCharCode(key.rune))),
+      KeyKind.enter => KeyPressMsg(const TeaKey(code: KeyCode.enter)),
+      // A bare LF is another form of Enter (some terminals send it instead of
+      // CR); an explicit Alt+Enter or Kitty Shift+Enter adds a line.
+      KeyKind.newline => KeyPressMsg(const TeaKey(code: KeyCode.enter)),
+      KeyKind.altEnter => KeyPressMsg(
+          const TeaKey(code: KeyCode.enter, modifiers: {KeyMod.shift})),
+      KeyKind.paste => PasteMsg(key.text),
+      KeyKind.backspace =>
+        KeyPressMsg(const TeaKey(code: KeyCode.backspace)),
+      KeyKind.delete => KeyPressMsg(const TeaKey(code: KeyCode.delete)),
+      KeyKind.left => KeyPressMsg(const TeaKey(code: KeyCode.left)),
+      KeyKind.right => KeyPressMsg(const TeaKey(code: KeyCode.right)),
+      KeyKind.up => KeyPressMsg(const TeaKey(code: KeyCode.up)),
+      KeyKind.down => KeyPressMsg(const TeaKey(code: KeyCode.down)),
+      KeyKind.home => KeyPressMsg(const TeaKey(code: KeyCode.home)),
+      KeyKind.end => KeyPressMsg(const TeaKey(code: KeyCode.end)),
+      KeyKind.pageUp => KeyPressMsg(const TeaKey(code: KeyCode.pageUp)),
+      KeyKind.pageDown => KeyPressMsg(const TeaKey(code: KeyCode.pageDown)),
+      KeyKind.esc => KeyPressMsg(const TeaKey(code: KeyCode.escape)),
+      KeyKind.tab => KeyPressMsg(const TeaKey(code: KeyCode.tab)),
+      KeyKind.ctrlC => KeyPressMsg(
+          const TeaKey(
+              code: KeyCode.rune,
+              text: 'c',
+              modifiers: {KeyMod.ctrl})),
+      KeyKind.ctrlD => KeyPressMsg(
+          const TeaKey(
+              code: KeyCode.rune,
+              text: 'd',
+              modifiers: {KeyMod.ctrl})),
+      KeyKind.other => null,
+    };
+
 void _render(StringSink out, StringSink err, RunResult result) {
   if (result.reason == 'cancelled') {
     // A cancelled automate run has no answer to emit; keep stdout clean.
@@ -703,7 +986,7 @@ void _render(StringSink out, StringSink err, RunResult result) {
 /// Turn the loop's live signals into inline terminal output (C6).
 final class _CliObserver implements RunObserver {
   _CliObserver(this.console);
-  final Console console;
+  final ConsoleSurface console;
   int step = 0;
   int stalls = 0;
   int stallBudget = 0;
@@ -860,6 +1143,8 @@ const Set<String> kReplCommands = {
   '/resume',
   '/plan',
   '/status',
+  '/provider',
+  '/model',
   '/context',
   '/compact',
   '/diff',
@@ -870,7 +1155,7 @@ const Set<String> kReplCommands = {
 /// The `/help` lines for a surface. `/cancel` is a command on the automate
 /// surface only; the human CLI interrupts with a double `Esc`, so it is not
 /// listed there.
-List<String> helpLines({required bool interactive}) => [
+List<String> helpLines({required bool interactive, bool tui = false}) => [
       'Commands:',
       '  /help            show this help',
       '  /exit, /quit     persist and close the session, then exit',
@@ -879,6 +1164,8 @@ List<String> helpLines({required bool interactive}) => [
       '  /resume <id>     switch to a saved session',
       '  /plan            print the current plan',
       '  /status          print the session status',
+      '  /provider [id]   list or switch the LLM provider preset (C2)',
+      '  /model [id]      list or switch the model for the current provider',
       '  /context [mode]  show or switch the context strategy (harness|clm)',
       '  /diff [path]     show workspace changes against the session baseline',
       if (!interactive) '  /cancel          cancel the in-flight run',
@@ -889,7 +1176,9 @@ List<String> helpLines({required bool interactive}) => [
       if (interactive)
         '  !<command>       run a shell command here (not sent to the model)',
       'Anything else is a goal for the agent.',
-      if (interactive)
+      if (tui)
+        '  (Shift+Enter or Alt+Enter adds a line; Enter sends; Esc cancels)'
+      else if (interactive)
         '  (end a line with \\ to continue the goal on the next line)',
     ];
 

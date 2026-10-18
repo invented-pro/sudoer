@@ -24,20 +24,42 @@ Future<void> main() async {
       repo, '90_dist', 'sudoer-prop-$version-${_os()}-${_arch()}');
   Directory(release).createSync(recursive: true);
   final output = p.join(release, exe);
-
-  final result = await Process.run(
-    Platform.resolvedExecutable,
-    [
-      'compile', 'exe', p.join(pkg, 'bin', 'sudoer.dart'), '-o', output,
-      // Build identity (lib/src/build_info.dart): the pubspec version is the
-      // single source of truth, so it is injected as a define rather than
-      // duplicated; the repo URL keeps its compile-time default.
-      '-DSUDOER_VERSION=$version',
-    ],
-  );
-  stdout.write(result.stdout);
-  stderr.write(result.stderr);
-  if (result.exitCode != 0) exit(result.exitCode);
+  // Compile beside the target, then rename over it. On POSIX an atomic rename
+  // replaces the path even while another process is running the old inode, so
+  // rebuilding does not fail with ETXTBSY ("Text file busy") simply because a
+  // TUI session is open. Windows cannot replace a running image; there the
+  // delete+rename fallback reports the usual error instead.
+  final temp = p.join(release, '.$exe.tmp');
+  final tempFile = File(temp);
+  if (tempFile.existsSync()) tempFile.deleteSync();
+  try {
+    final result = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'compile', 'exe', p.join(pkg, 'bin', 'sudoer.dart'), '-o', temp,
+        // Build identity (lib/src/build_info.dart): the pubspec version is the
+        // single source of truth, so it is injected as a define rather than
+        // duplicated; the repo URL keeps its compile-time default.
+        '-DSUDOER_VERSION=$version',
+      ],
+    );
+    stdout.write(result.stdout);
+    stderr.write(result.stderr);
+    if (result.exitCode != 0) {
+      if (tempFile.existsSync()) tempFile.deleteSync();
+      exit(result.exitCode);
+    }
+    try {
+      tempFile.renameSync(output);
+    } on FileSystemException {
+      // Windows: rename cannot replace an existing path. Delete the old image
+      // first when it is not in use, then retry.
+      if (File(output).existsSync()) File(output).deleteSync();
+      tempFile.renameSync(output);
+    }
+  } finally {
+    if (tempFile.existsSync()) tempFile.deleteSync();
+  }
 
   // 10_impl and 20_eval call the executable through symlinks into 90_dist/,
   // re-pointed on every build (the version directory name changes).

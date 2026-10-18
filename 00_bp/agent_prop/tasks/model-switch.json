@@ -1,0 +1,24 @@
+{
+  "id": "model-switch",
+  "description": "The /model command lists the current provider's catalog and /model <id> switches the model (taking its context window) at a goal boundary.",
+  "turns": [
+    { "command": "/model" },
+    { "command": "/model qwen2.5-coder:7b" },
+    { "goal": "Say hi." }
+  ],
+  "config": {
+    "provider": { "preset": "ollama" }
+  },
+  "script": {
+    "steps": [
+      { "complete": { "text": "hi" } }
+    ]
+  },
+  "expect": {
+    "status": "complete",
+    "answer": { "equals": "hi" },
+    "tools": [],
+    "stdoutContains": "model: qwen2.5-coder:7b",
+    "sessionPersisted": true
+  }
+}

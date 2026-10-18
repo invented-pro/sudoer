@@ -3,7 +3,6 @@ import 'dart:convert';
 
 import 'package:dart_tui/dart_tui.dart' show RgbColor, Style;
 
-import 'config.dart';
 import 'diagnostics.dart';
 import 'markdown_render.dart';
 import 'models.dart';
@@ -33,9 +32,49 @@ const RgbColor _command = _yellow;
 /// Longest tool/command result body shown before the rest is summarized.
 const int _maxBodyLines = 8;
 
+/// The rendering surface shared by the inline console and the full-screen
+/// TUI. The REPL only needs these operations, so the same command and run
+/// logic drives either presentation.
+abstract interface class ConsoleSurface {
+  StringSink get out;
+  StringSink get err;
+
+  String style(
+    String text, {
+    bool bold,
+    bool dim,
+    bool italic,
+    bool reverse,
+    RgbColor? fg,
+  });
+
+  void banner(String text);
+  void header(String text);
+  void prompt();
+  void user(String text);
+  void info(String text);
+  void error(String text);
+  void reasoning(String text);
+  void tool(String name, Map<String, dynamic> arguments, {Duration? elapsed});
+  void observation(Outcome outcome, String text,
+      {String? label, Duration? elapsed});
+  void diagnostic(String line);
+  void startThinking(String label);
+  void ensureThinking();
+  void updateThinking(String label);
+  void setDetail(String? detail);
+  void setHint(String? hint);
+  void stopThinking();
+  void delta(String text);
+  void answer(String text);
+  void endLine();
+  void status(String text, {String? kind});
+  void close();
+}
+
 final RegExp _diagTag = RegExp(r'^\[([^\]]+)\]\s?(.*)$');
 
-final class Console {
+final class Console implements ConsoleSurface {
   Console({
     required this.out,
     required this.err,
@@ -45,7 +84,9 @@ final class Console {
   })  : _spinnerEnabled = spinner && ansi,
         _markdown = MarkdownStream(width: width);
 
+  @override
   final StringSink out;
+  @override
   final StringSink err;
   final bool ansi;
   final bool _spinnerEnabled;
@@ -62,6 +103,7 @@ final class Console {
 
   /// Wrap [text] in ANSI attributes, or return it unchanged when styling is
   /// off.
+  @override
   String style(
     String text, {
     bool bold = false,
@@ -84,18 +126,22 @@ final class Console {
   }
 
   /// A startup banner line, e.g. the product/config header.
+  @override
   void banner(String text) {
     endLine();
     err.writeln(style('── ', fg: _sky) + style(text, bold: true, fg: _sky));
   }
 
+  @override
   void header(String text) => err.writeln(style('   $text', dim: true));
 
   /// The leading input prompt, e.g. `› `. Left in the default color.
+  @override
   void prompt() => out.write(style('› ', bold: true));
 
   /// Echo a user goal as its own turn header when it was not typed on the
   /// terminal (e.g. a piped script). Left in the default color.
+  @override
   void user(String text) {
     endLine();
     err.writeln(style('❯ ', bold: true) + style(text, bold: true));
@@ -104,11 +150,13 @@ final class Console {
   /// Local command output (`/help`, `/plan`, `/status`, …). Yellow marks the
   /// interface's own output, distinct from the model's answer. The status
   /// spinner is cleared first so the two never share a line, then resumed.
+  @override
   void info(String text) => _aroundSpinner(() {
         endLine();
         out.writeln(style(text, fg: _command));
       });
 
+  @override
   void error(String text) => _aroundSpinner(() {
         endLine();
         err.writeln(style('  ✗ ', fg: _red) + style(text, fg: _red, bold: true));
@@ -125,6 +173,7 @@ final class Console {
 
   /// Stream a chunk of private model reasoning as a dim italic block, prefixed
   /// with a `│` gutter on every line.
+  @override
   void reasoning(String text) {
     if (text.isEmpty) return;
     stopThinking();
@@ -159,6 +208,7 @@ final class Console {
     _reasoningOpen = false;
   }
 
+  @override
   void tool(String name, Map<String, dynamic> arguments,
       {Duration? elapsed}) {
     endLine();
@@ -173,6 +223,7 @@ final class Console {
   /// Render a tool or command result. [label] names the tool; multi-line
   /// results (e.g. `run_command`, `search`, `read`) are indented beneath the
   /// first line and capped. [elapsed] is the dispatch time when measured.
+  @override
   void observation(Outcome outcome, String text,
       {String? label, Duration? elapsed}) {
     endLine();
@@ -207,6 +258,7 @@ final class Console {
   /// A verbose `[C1]`–`[C8]` diagnostic: a dim gutter and a component-coloured
   /// tag, with the detail dimmed. Clears the status spinner first so the two
   /// never share a line, then resumes it.
+  @override
   void diagnostic(String line) => _aroundSpinner(() {
         endLine();
         if (!ansi) {
@@ -220,10 +272,11 @@ final class Console {
         }
         final tag = match.group(1)!;
         err.writeln(style('  · ', fg: _slate) +
-            style('[$tag]', fg: _componentColor(tag)) +
+            style('[$tag]', fg: componentColor(tag)) +
             style(' ${match.group(2)!}', dim: true));
       });
 
+  @override
   void startThinking(String label) {
     _label = label;
     _detail = null;
@@ -237,6 +290,7 @@ final class Console {
   /// Start the spinner without flushing the markdown stream, used while a
   /// block is still buffering so the surface does not look frozen. Safe
   /// because no visible reply text is pending on the current line.
+  @override
   void ensureThinking() {
     if (!_spinnerEnabled || _timer != null) return;
     if (_label.isEmpty) _label = 'composing';
@@ -249,16 +303,19 @@ final class Console {
     _tick();
   }
 
+  @override
   void updateThinking(String label) {
     _label = label;
   }
 
   /// Secondary text shown after the elapsed time, e.g. `step 2` or
   /// `ctx 421/8.2K`. Null clears it.
+  @override
   void setDetail(String? detail) => _detail = detail;
 
   /// A short suffix appended to the spinner label, e.g. `press Esc twice to
   /// interrupt`. Pass null to clear it.
+  @override
   void setHint(String? hint) => _hint = hint;
 
   void _tick() {
@@ -282,6 +339,7 @@ final class Console {
 
   /// Stop the spinner, if one is running. A no-op otherwise — importantly,
   /// it must not emit a line-clear when idle, or it would wipe streamed text.
+  @override
   void stopThinking() {
     final timer = _timer;
     if (timer == null) return;
@@ -294,6 +352,7 @@ final class Console {
   /// A chunk of streamed reply text. Rendering is progressive, but a partial
   /// line is held until its newline; while nothing is visible the spinner is
   /// kept alive so a slow block does not look like a freeze.
+  @override
   void delta(String text) {
     _closeReasoning();
     final rendered = _markdown.add(text, style);
@@ -307,6 +366,7 @@ final class Console {
   }
 
   /// Render a whole (one-shot) answer through the markdown renderer.
+  @override
   void answer(String text) {
     endLine();
     final rendered = _markdown.add('$text\n', style) + _markdown.flush(style);
@@ -319,6 +379,7 @@ final class Console {
   }
 
   /// Finish a partially streamed block, if any.
+  @override
   void endLine() {
     _closeReasoning();
     final tail = _markdown.flush(style);
@@ -332,6 +393,7 @@ final class Console {
     }
   }
 
+  @override
   void status(String text, {String? kind}) {
     endLine();
     stopThinking();
@@ -352,6 +414,7 @@ final class Console {
     }
   }
 
+  @override
   void close() {
     endLine();
     stopThinking();
@@ -366,7 +429,7 @@ RgbColor _statusColor(String status) => switch (status) {
     };
 
 /// Colour for a diagnostic tag by its component prefix (`C1`, `C2`, …).
-RgbColor _componentColor(String tag) {
+RgbColor componentColor(String tag) {
   if (tag.startsWith('C1')) return _sky;
   if (tag.startsWith('C2')) return _mauve;
   if (tag.startsWith('C3')) return _green;
@@ -400,7 +463,3 @@ String briefText(Object? text, [int max = 100]) {
 /// Keep the tail of a path, prefixing `…` when it exceeds [max] columns.
 String shortPath(String path, int max) =>
     path.length > max ? '…${path.substring(path.length - max + 1)}' : path;
-
-/// The wire label for a provider kind (`openai-compatible` / `ollama`).
-String providerLabel(ProviderKind kind) =>
-    kind == ProviderKind.openAiCompatible ? 'openai-compatible' : 'ollama';

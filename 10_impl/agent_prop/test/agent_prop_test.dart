@@ -2,7 +2,19 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:dart_tui/dart_tui.dart' show RgbColor, stripAnsi;
+import 'package:dart_tui/dart_tui.dart'
+    show
+        Field,
+        Form,
+        Group,
+        KeyCode,
+        KeyPressMsg,
+        PasteEndMsg,
+        PasteMsg,
+        PasteStartMsg,
+        RgbColor,
+        TextInputModel,
+        stripAnsi;
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:path/path.dart' as p;
@@ -1579,6 +1591,122 @@ void main() {
     });
   });
 
+  group('full-screen TUI (C6)', () {
+    test('the console keeps a transcript, spinner, and status', () {
+      final console = TuiConsole(width: 80);
+      var changes = 0;
+      console.onChange = () => changes++;
+      console.user('hello');
+      console.startThinking('thinking');
+      console.setDetail('step 1');
+      console.delta('world\n');
+      console.endLine();
+      console.tool('read', {'path': 'a.txt'});
+      console.observation(Outcome.ok, 'contents', label: 'read');
+      console.status('complete #1', kind: 'complete');
+      console.close();
+
+      final text = stripAnsi(console.transcript.join('\n'));
+      expect(text, contains('› hello'));
+      expect(text, contains('world'));
+      expect(text, contains('→ read'));
+      expect(text, contains('✓ read contents'));
+      expect(console.statusText, 'complete #1');
+      expect(console.statusKind, 'complete');
+      expect(changes, greaterThan(0));
+    });
+
+    test('replaying a session does not duplicate a finish as reasoning', () {
+      final console = TuiConsole(width: 60);
+      console.replay(const [
+        UserEntry('old goal'),
+        AssistantEntry(thought: 'old answer', action: Finish('old answer')),
+        AssistantEntry(
+          thought: 'checking',
+          action: ToolBatch([
+            ToolCall(name: 'read', arguments: {'path': 'a.txt'}),
+          ]),
+        ),
+        ObservationEntry(text: 'contents', outcome: Outcome.ok),
+      ]);
+      final text = stripAnsi(console.transcript.join('\n'));
+      expect(text, contains('› old goal'));
+      expect(text, contains('old answer'));
+      expect(text, isNot(contains('│ old answer')));
+      expect(text, contains('│ checking'));
+      expect(text, contains('→ read'));
+      expect(text, contains('✓ contents'));
+    });
+
+    test('the frame fills the terminal and keeps the editor cursor', () {
+      final frame = TuiFrame(
+        width: 60,
+        height: 24,
+        header: const ['  Sudoer dev', '  workspace /tmp'],
+        transcript: const ['› hello', 'an answer'],
+        partial: '',
+        inputLines: const ['draft'],
+        cursorRow: 0,
+        cursorColumn: 5,
+        status: '  ready',
+        hint: '  Enter send',
+        running: false,
+        scrollOffset: 0,
+        follow: true,
+      ).render();
+      final lines = frame.content.split('\n');
+      expect(lines, hasLength(24));
+      expect(stripAnsi(frame.content), contains('Sudoer dev'));
+      expect(stripAnsi(frame.content), contains('message'));
+      expect(stripAnsi(frame.content), contains('draft'));
+      expect(stripAnsi(frame.content), contains('Enter send'));
+      expect(frame.cursor.y, greaterThan(0));
+      expect(frame.cursor.x, 9);
+      for (final line in lines) {
+        expect(stripAnsi(line).length, lessThanOrEqualTo(60));
+      }
+    });
+
+    test('the frame follows the bottom and supports a scroll offset', () {
+      final long = List<String>.generate(100, (i) => 'line $i');
+      final bottom = TuiFrame(
+        width: 40,
+        height: 16,
+        header: const ['  h1', '  h2'],
+        transcript: long,
+        partial: '',
+        inputLines: const [''],
+        cursorRow: 0,
+        cursorColumn: 0,
+        status: '',
+        hint: '',
+        running: false,
+        scrollOffset: 0,
+        follow: true,
+      ).render();
+      expect(stripAnsi(bottom.content), contains('line 99'));
+      expect(stripAnsi(bottom.content), isNot(contains('line 0')));
+
+      final top = TuiFrame(
+        width: 40,
+        height: 16,
+        header: const ['  h1', '  h2'],
+        transcript: long,
+        partial: '',
+        inputLines: const [''],
+        cursorRow: 0,
+        cursorColumn: 0,
+        status: '',
+        hint: '',
+        running: false,
+        scrollOffset: 0,
+        follow: false,
+      ).render();
+      expect(stripAnsi(top.content), contains('line 0'));
+      expect(stripAnsi(top.content), isNot(contains('line 99')));
+    });
+  });
+
   group('goal attachments (C7)', () {
     test('strips @path tokens and loads image bytes', () {
       final temp = Directory.systemTemp.createTempSync('sudoer-test-');
@@ -1860,6 +1988,46 @@ void main() {
       expect(
         [for (final item in response.plan!) '${item.text}:${item.done}'],
         ['a:false', 'b:true'],
+      );
+    });
+
+    test('an invalid key fails as a StepFailure before it reaches HTTP',
+        () async {
+      final config = ProviderConfig.fromJson({
+        'preset': 'openai',
+        'model': 'gpt-test',
+        'api_key': 'pasted ┃ transcript',
+      });
+      final client = MockClient((_) async {
+        fail('the client must not be called with an invalid header');
+      });
+      final provider = OpenAiCompatibleProvider(config, client: client);
+      await expectLater(
+        provider.complete(const ProviderRequest(
+            model: 'm', system: 's', messages: [UserEntry('go')], tools: [])),
+        throwsA(isA<StepFailure>()
+            .having((e) => e.message, 'message', contains('invalid'))),
+      );
+    });
+
+    test('a MiniMax 401 explains the region mismatch', () async {
+      final config = ProviderConfig.fromJson({
+        'preset': 'minimax',
+        'model': 'MiniMax-M3',
+        'api_key': 'sk-test',
+      });
+      final client = MockClient((_) async => http.Response(
+            '{"type":"error","error":{"type":"authorized_error",'
+            '"message":"invalid api key (2049)","http_code":"401"}}',
+            401,
+          ));
+      final provider = OpenAiCompatibleProvider(config, client: client);
+      await expectLater(
+        provider.complete(const ProviderRequest(
+            model: 'm', system: 's', messages: [UserEntry('go')], tools: [])),
+        throwsA(isA<StepFailure>()
+            .having((e) => e.message, 'message', contains('region-specific'))
+            .having((e) => e.message, 'message', contains('minimax-cn'))),
       );
     });
   });
@@ -3005,6 +3173,36 @@ void main() {
       expect(keys.first.kind, KeyKind.enter);
       await reader.close();
     });
+
+    test('decodes PageUp and PageDown', () async {
+      final reader =
+          KeyReader(Stream.fromIterable([utf8.encode('\x1b[5~\x1b[6~')]));
+      final keys = <Key>[];
+      await for (final key in reader.keys) {
+        keys.add(key);
+        if (keys.length == 2) break;
+      }
+      expect(keys.map((k) => k.kind), [KeyKind.pageUp, KeyKind.pageDown]);
+      await reader.close();
+    });
+
+    test('decodes Alt+Enter and Kitty Shift+Enter as newline', () async {
+      final reader = KeyReader(Stream.fromIterable([
+        [0x1b, 0x0d, 0x1b, 0x0a],
+        utf8.encode('\x1b[13;2u'),
+      ]));
+      final keys = <Key>[];
+      await for (final key in reader.keys) {
+        keys.add(key);
+        if (keys.length == 3) break;
+      }
+      expect(keys.map((k) => k.kind), [
+        KeyKind.altEnter,
+        KeyKind.altEnter,
+        KeyKind.altEnter,
+      ]);
+      await reader.close();
+    });
   });
 
   group('line editor (C6)', () {
@@ -3339,6 +3537,12 @@ void main() {
       expect(
           helpLines(interactive: false).join('\n'),
           isNot(contains('continue the goal on the next line')));
+    });
+
+    test('the TUI help teaches the multi-line editor instead', () {
+      final text = helpLines(interactive: true, tui: true).join('\n');
+      expect(text, contains('Shift+Enter or Alt+Enter adds a line'));
+      expect(text, isNot(contains('end a line with \\')));
     });
 
     test('a /cancel sent while idle does not leak into the next goal',
@@ -4161,6 +4365,514 @@ void main() {
         ContextLog.fileFor(config).path,
         p.join(Directory.systemTemp.path, 'ws', '.sudoer', 'context.md'),
       );
+    });
+  });
+
+  group('provider catalog and credentials (C2)', () {
+    test('a preset fills kind, base URL, and context window', () {
+      final config = Config.fromJson({
+        'provider': {'preset': 'openai', 'model': 'gpt-6-astra'},
+      });
+      expect(config.provider.kind, ProviderKind.openAiCompatible);
+      expect(config.provider.baseUrl, 'https://api.openai.com/v1');
+      expect(config.provider.contextWindow, 1050000);
+      expect(config.provider.preset, 'openai');
+      expect(config.toJson()['provider'], containsPair('preset', 'openai'));
+    });
+
+    test('a legacy explicit provider block still parses', () {
+      final config = Config.fromJson({
+        'provider': {
+          'kind': 'openai-compatible',
+          'base_url': 'https://example.test/v1',
+          'model': 'm',
+          'context_window': 4096,
+        },
+      });
+      expect(config.provider.kind, ProviderKind.openAiCompatible);
+      expect(config.provider.preset, isNull);
+      expect(config.provider.contextWindow, 4096);
+    });
+
+    test('invalid provider shapes are rejected', () {
+      expect(
+        () => Config.fromJson({
+          'provider': {'preset': 'nope', 'model': 'm'},
+        }),
+        throwsA(isA<ConfigException>()),
+      );
+      expect(
+        () => Config.fromJson({
+          'provider': {'model': 'm', 'context_window': 10},
+        }),
+        throwsA(isA<ConfigException>()), // kind required
+      );
+      expect(
+        () => Config.fromJson({
+          'provider': {'kind': 'ollama', 'model': 'm'},
+        }),
+        throwsA(isA<ConfigException>()), // window required without a preset
+      );
+      expect(
+        () => Config.fromJson({
+          'provider': {
+            'preset': 'openai',
+            'model': 'm',
+            'api_key': 'a',
+            'api_key_env': 'B',
+          },
+        }),
+        throwsA(isA<ConfigException>()),
+      );
+    });
+
+    test('the catalog exposes presets, models, and URL lookups', () {
+      final deepseek = providerPreset('deepseek');
+      expect(deepseek, isNotNull);
+      expect(deepseek!.defaultModel, 'deepseek-v4-pro');
+      expect(deepseek.model('deepseek-v4-flash')!.contextWindow, 1000000);
+      expect(deepseek.model('does-not-exist'), isNull);
+      expect(providerPreset('nope'), isNull);
+      expect(presetForBaseUrl('https://api.deepseek.com/')!.id, 'deepseek');
+
+      final minimax = providerPreset('minimax')!;
+      final minimaxCn = providerPreset('minimax-cn')!;
+      expect(minimax.baseUrl, 'https://api.minimax.io/v1');
+      expect(minimaxCn.baseUrl, 'https://api.minimax.cn/v1');
+      expect(presetForBaseUrl('https://api.minimax.cn/v1')!.id, 'minimax-cn');
+      expect(
+        minimaxRegionHint(presetId: minimax.id, baseUrl: minimax.baseUrl),
+        contains('minimax-cn'),
+      );
+      expect(
+        minimaxRegionHint(presetId: minimaxCn.id, baseUrl: minimaxCn.baseUrl),
+        contains('minimax preset'),
+      );
+      expect(minimaxRegionHint(presetId: 'openai'), isEmpty);
+
+      // The generated catalog carries the full OpenAI-compatible
+      // models.dev/OpenCode provider set, not just the curated core.
+      expect(kProviderPresets.length, greaterThan(150));
+      final ids = [for (final preset in kProviderPresets) preset.id];
+      expect(ids.toSet().length, ids.length);
+      expect(providerPreset('nvidia'), isNotNull);
+      expect(providerPreset('opencode')!.baseUrl, contains('opencode.ai'));
+      expect(providerPreset('zai-coding-plan'), isNotNull);
+      expect(providerPreset('minimax-cn-coding-plan'), isNotNull);
+      expect(providerPreset('fireworks')!.id, 'fireworks-ai');
+      expect(providerPreset('togetherai')!.baseUrl, 'https://api.together.xyz/v1');
+      for (final preset in kProviderPresets) {
+        if (preset.baseUrl != null) {
+          expect(preset.baseUrl, isNot(contains(r'${')), reason: preset.id);
+        }
+        if (preset.id != 'custom') {
+          expect(preset.models, isNotEmpty, reason: preset.id);
+        }
+      }
+    });
+
+    test('the auth store round-trips keys and restricts the file', () {
+      final temp = Directory.systemTemp.createTempSync('sudoer-auth-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final path = p.join(temp.path, 'auth.json');
+      final store = AuthStore(path: path);
+      expect(store.keyFor('openai'), isNull);
+      store.setKey('openai', 'sk-test');
+      expect(store.keyFor('openai'), 'sk-test');
+      final raw = File(path).readAsStringSync();
+      expect(raw, contains('"type": "api"'));
+      expect(raw, contains('sk-test'));
+      if (!Platform.isWindows) {
+        expect(File(path).statSync().mode & 0x1FF, 0x180); // 0600
+      }
+      store.remove('openai');
+      expect(store.keyFor('openai'), isNull);
+    });
+
+    test('key precedence is config > store > api_key_env > preset env', () {
+      final temp = Directory.systemTemp.createTempSync('sudoer-auth-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final store = AuthStore(path: p.join(temp.path, 'auth.json'));
+      final direct = ProviderConfig.fromJson({
+        'preset': 'openai',
+        'model': 'gpt-6-astra',
+        'api_key': 'direct',
+      });
+      expect(
+        resolveApiKey(direct, store: store, env: (_) => 'env'),
+        'direct',
+      );
+      store.setKey('openai', 'stored');
+      final envRef = ProviderConfig.fromJson({
+        'preset': 'openai',
+        'model': 'gpt-6-astra',
+        'api_key_env': 'MY_KEY',
+      });
+      expect(resolveApiKey(envRef, store: store, env: (_) => 'env'), 'stored');
+      store.remove('openai');
+      expect(
+        resolveApiKey(
+          envRef,
+          store: store,
+          env: (name) => name == 'MY_KEY' ? 'my-key' : 'openai-env',
+        ),
+        'my-key',
+      );
+      expect(
+        resolveApiKey(
+          ProviderConfig.fromJson(
+              {'preset': 'openai', 'model': 'gpt-6-astra'}),
+          store: store,
+          env: (name) => name == 'OPENAI_API_KEY' ? 'openai-env' : null,
+        ),
+        'openai-env',
+      );
+    });
+
+    test('the missing-key hint names the env var and never the key', () {
+      final temp = Directory.systemTemp.createTempSync('sudoer-auth-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final store = AuthStore(path: p.join(temp.path, 'auth.json'));
+      final openai = ProviderConfig.fromJson(
+          {'preset': 'openai', 'model': 'gpt-6-astra'});
+      final hint = missingKeyHint(openai, store: store, env: (_) => null);
+      expect(hint, contains('OPENAI_API_KEY'));
+      expect(hint, contains('--setup'));
+      expect(hint, isNot(contains('sk-')));
+      store.setKey('openai', 'sk-hidden');
+      expect(missingKeyHint(openai, store: store, env: (_) => null), isNull);
+      final ollama = ProviderConfig.fromJson(
+          {'preset': 'ollama', 'model': 'llama3.1:8b'});
+      expect(missingKeyHint(ollama, store: store, env: (_) => null), isNull);
+    });
+
+    test('API keys are printable ASCII without whitespace', () {
+      expect(apiKeyProblem('sk-test_123.abc'), isNull);
+      expect(apiKeyProblem('  sk-test\n'), isNull);
+      expect(apiKeyProblem(''), contains('empty'));
+      expect(apiKeyProblem('   '), contains('empty'));
+      expect(apiKeyProblem('sk test'), contains('whitespace'));
+      expect(apiKeyProblem('sk-test\nmore'), contains('whitespace'));
+      expect(apiKeyProblem('┃ pasted transcript'), contains('non-ASCII'));
+      expect(apiKeyProblem('a'.padRight(4097, 'a')), contains('too long'));
+    });
+
+    test('an invalid stored key is reported, never sent or echoed', () {
+      final temp = Directory.systemTemp.createTempSync('sudoer-auth-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final store = AuthStore(path: p.join(temp.path, 'auth.json'));
+      final openai = ProviderConfig.fromJson(
+          {'preset': 'openai', 'model': 'gpt-6-astra'});
+      store.setKey('openai', 'Bearer ┃ pasted transcript');
+      final hint = missingKeyHint(openai, store: store, env: (_) => null);
+      expect(hint, contains('invalid'));
+      expect(hint, contains('--setup'));
+      expect(hint, isNot(contains('pasted transcript')));
+      expect(hint, isNot(contains('Bearer')));
+      final listed =
+          providerListText(current: openai, store: store, env: (_) => null);
+      expect(listed, contains('invalid'));
+      expect(listed, isNot(contains('pasted transcript')));
+    });
+
+    test('resolveApiKey trims surrounding whitespace and ignores blanks', () {
+      final temp = Directory.systemTemp.createTempSync('sudoer-auth-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final store = AuthStore(path: p.join(temp.path, 'auth.json'));
+      final config = ProviderConfig.fromJson({
+        'preset': 'openai',
+        'model': 'gpt-6-astra',
+        'api_key': '  sk-padded \n',
+      });
+      expect(resolveApiKey(config, store: store, env: (_) => null), 'sk-padded');
+      final blank = ProviderConfig.fromJson({
+        'preset': 'openai',
+        'model': 'gpt-6-astra',
+        'api_key': '   ',
+      });
+      expect(
+        resolveApiKey(blank, store: store, env: (_) => null),
+        isNull,
+      );
+    });
+
+    test('model discovery parses both wire shapes and merges the catalog', () {
+      expect(parseOpenAiModels('{"data":[{"id":"a"},{"id":"b"}]}'), ['a', 'b']);
+      expect(parseOllamaModels('{"models":[{"name":"x:1"},{"model":"y"}]}'),
+          ['x:1', 'y']);
+      const preset = ProviderPreset(
+        id: 'test',
+        name: 'Test',
+        kind: ProviderKind.openAiCompatible,
+        baseUrl: 'https://example.test/v1',
+        models: [ModelInfo('a', 'A', 1000)],
+      );
+      final merged = mergeModels(['b', 'a'], preset);
+      expect(merged.map((m) => m.id), ['a', 'b']);
+      expect(merged.first.contextWindow, 1000);
+      expect(merged.last.contextWindow, kDefaultContextWindow);
+      expect(mergeModels(const [], preset).map((m) => m.id), ['a']);
+    });
+
+    test('discovery sends the bearer key and merges the live list', () async {
+      const preset = ProviderPreset(
+        id: 'test',
+        name: 'Test',
+        kind: ProviderKind.openAiCompatible,
+        baseUrl: 'https://example.test/v1',
+        models: [ModelInfo('a', 'A', 1000)],
+      );
+      final client = MockClient((request) async {
+        expect(request.url.toString(), 'https://example.test/v1/models');
+        expect(request.headers['authorization'], 'Bearer sk-test');
+        return http.Response('{"data":[{"id":"a"},{"id":"new"}]}', 200);
+      });
+      final models =
+          await discoverModels(preset, apiKey: 'sk-test', client: client);
+      expect(models.map((m) => m.id), ['a', 'new']);
+      expect(models.first.contextWindow, 1000);
+      expect(models.last.contextWindow, kDefaultContextWindow);
+
+      final rejected = MockClient((_) async => http.Response('nope', 401));
+      expect(
+        () => discoverModels(preset, apiKey: 'sk-test', client: rejected),
+        throwsA(isA<HttpException>()),
+      );
+    });
+
+    test('bracketed paste becomes a printable key for text inputs', () {
+      final pasted = pasteAsRunes(PasteMsg('sk-test\r\n'));
+      expect(pasted, isA<KeyPressMsg>());
+      final key = (pasted as KeyPressMsg).keyEvent;
+      expect(key.code, KeyCode.rune);
+      expect(key.text, 'sk-test');
+      expect(pasteAsRunes(PasteStartMsg()), isNull);
+      expect(pasteAsRunes(PasteEndMsg()), isNull);
+      expect(pasteAsRunes(PasteMsg('\r\n')), isNull);
+
+      // This is exactly the path a Form's TextInputModel takes for a typed
+      // rune, so a paste inserts at the cursor.
+      final input = TextInputModel(value: 'sk-', cursorPos: 3);
+      final (next, _) = input.update(pasted);
+      expect((next as TextInputModel).value, 'sk-sk-test');
+      expect(next.cursorPos, 10);
+
+      // The wizard's secret field is the first field in its form, so the
+      // synthetic key reaches it directly (no note field to swallow it).
+      final form = Form([
+        Group([
+          Field.password(key: 'key', title: 'API key'),
+        ]),
+      ]);
+      final (formNext, _) = form.update(pasted);
+      expect((formNext as Form).values.get<String>('key'), 'sk-test');
+    });
+
+    test('configWithProvider switches presets and honors overrides', () {
+      final base = Config.fromJson({
+        'provider': {'preset': 'openai', 'model': 'gpt-6-astra'},
+      });
+      final next = configWithProvider(base, presetId: 'deepseek');
+      expect(next.provider.preset, 'deepseek');
+      expect(next.provider.model, 'deepseek-v4-pro');
+      expect(next.provider.baseUrl, 'https://api.deepseek.com');
+      expect(next.provider.contextWindow, 1000000);
+      final over = configWithProvider(
+        base,
+        presetId: 'deepseek',
+        model: 'deepseek-v4-flash',
+        contextWindow: 5000,
+        apiKey: 'sk-override',
+        replaceKey: true,
+      );
+      expect(over.provider.model, 'deepseek-v4-flash');
+      expect(over.provider.contextWindow, 5000);
+      expect(over.provider.apiKey, 'sk-override');
+      final fresh = configWithProvider(null, presetId: 'ollama');
+      expect(fresh.provider.preset, 'ollama');
+      expect(fresh.provider.kind, ProviderKind.ollama);
+
+      // No --provider: an explicit legacy provider is preserved untouched.
+      final legacy = Config.fromJson({
+        'provider': {
+          'kind': 'openai-compatible',
+          'base_url': 'https://example.test/v1',
+          'model': 'm',
+          'context_window': 4096,
+        },
+      });
+      final preserved = configWithProvider(legacy);
+      expect(preserved.provider.kind, ProviderKind.openAiCompatible);
+      expect(preserved.provider.baseUrl, 'https://example.test/v1');
+      expect(preserved.provider.model, 'm');
+      expect(preserved.provider.contextWindow, 4096);
+    });
+
+    test('list text marks the current provider/model and hides keys', () {
+      final temp = Directory.systemTemp.createTempSync('sudoer-auth-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final store = AuthStore(path: p.join(temp.path, 'auth.json'));
+      store.setKey('openai', 'sk-never-print');
+      final current = ProviderConfig.fromJson(
+          {'preset': 'openai', 'model': 'gpt-6-astra'});
+      final providers =
+          providerListText(current: current, store: store, env: (_) => null);
+      expect(providers, contains('* openai'));
+      expect(providers, contains('stored'));
+      expect(providers, isNot(contains('sk-never-print')));
+      final models = modelListText(providerPreset('deepseek')!,
+          current: 'deepseek-v4-pro');
+      expect(models, contains('* deepseek-v4-pro'));
+    });
+
+    test('writeConfigFile round-trips through loadConfigFile', () {
+      final temp = Directory.systemTemp.createTempSync('sudoer-cfg-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final base = Config.fromJson({
+        'provider': {'preset': 'openai', 'model': 'gpt-6-astra'},
+        'workspace_root': temp.path,
+      });
+      final next = configWithProvider(base, presetId: 'deepseek');
+      final path = p.join(temp.path, 'sudoer.json');
+      writeConfigFile(path, next);
+      final loaded = loadConfigFile(path);
+      expect(loaded.provider.preset, 'deepseek');
+      expect(loaded.provider.model, 'deepseek-v4-pro');
+      expect(loaded.workspaceRoot, p.normalize(p.absolute(temp.path)));
+    });
+
+    test('the setup wizard writes config plus key without echoing it',
+        () async {
+      final temp = Directory.systemTemp.createTempSync('sudoer-setup-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final store = AuthStore(path: p.join(temp.path, 'auth.json'));
+      final configPath = p.join(temp.path, 'sudoer.json');
+      final out = StringBuffer();
+      final err = StringBuffer();
+      final code = await runProviderSetup(
+        configPath: configPath,
+        presetId: 'deepseek',
+        model: 'deepseek-v4-flash',
+        auth: store,
+        env: (_) => null,
+        out: out,
+        err: err,
+        select: (choices, {required title}) async => choices.first,
+        input: (label) async => null,
+        secret: (title, {bool optional = false}) async => 'sk-test',
+        confirm: (question) async => false,
+      );
+      expect(code, 0, reason: err.toString());
+      expect(store.keyFor('deepseek'), 'sk-test');
+      final loaded = loadConfigFile(configPath);
+      expect(loaded.provider.preset, 'deepseek');
+      expect(loaded.provider.model, 'deepseek-v4-flash');
+      expect(loaded.provider.apiKey, isNull);
+      expect(loaded.provider.apiKeyEnv, isNull);
+      expect(out.toString(), contains('stored in'));
+      expect(out.toString(), isNot(contains('sk-test')));
+    });
+
+    test('the setup wizard accepts an exact model query on a long list',
+        () async {
+      final temp = Directory.systemTemp.createTempSync('sudoer-setup-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final store = AuthStore(path: p.join(temp.path, 'auth.json'));
+      final configPath = p.join(temp.path, 'sudoer.json');
+      final out = StringBuffer();
+      final err = StringBuffer();
+      final models = <ModelInfo>[
+        for (var i = 0; i < 15; i++)
+          ModelInfo('model-$i', 'Model $i', 100000 + i),
+        const ModelInfo('gpt-6-astra', 'GPT-6 Astra', 1050000),
+      ];
+      final inputs = <String>['gpt-6-astra'];
+      final code = await runProviderSetup(
+        configPath: configPath,
+        presetId: 'openai',
+        auth: store,
+        env: (_) => null,
+        out: out,
+        err: err,
+        discover: (preset, apiKey) async => models,
+        select: (choices, {required title}) async => choices.first,
+        input: (label) async => inputs.isEmpty ? null : inputs.removeAt(0),
+        secret: (title, {bool optional = false}) async => 'sk-test',
+        confirm: (question) async => false,
+      );
+      expect(code, 0, reason: err.toString());
+      final loaded = loadConfigFile(configPath);
+      expect(loaded.provider.model, 'gpt-6-astra');
+      expect(loaded.provider.contextWindow, 1050000);
+      expect(out.toString(), contains('stored in'));
+      expect(out.toString(), isNot(contains('sk-test')));
+    });
+
+    test('the setup wizard rejects an invalid key before writing', () async {
+      final temp = Directory.systemTemp.createTempSync('sudoer-setup-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final store = AuthStore(path: p.join(temp.path, 'auth.json'));
+      final configPath = p.join(temp.path, 'sudoer.json');
+      final out = StringBuffer();
+      final err = StringBuffer();
+      final code = await runProviderSetup(
+        configPath: configPath,
+        presetId: 'openai',
+        apiKey: 'pasted ┃ transcript',
+        auth: store,
+        env: (_) => null,
+        out: out,
+        err: err,
+        select: (choices, {required title}) async => fail('no prompt'),
+        input: (label) async => fail('no prompt'),
+        secret: (title, {bool optional = false}) async => fail('no prompt'),
+        confirm: (question) async => fail('no prompt'),
+      );
+      expect(code, 1);
+      expect(err.toString(), contains('invalid API key'));
+      expect(err.toString(), isNot(contains('pasted transcript')));
+      expect(File(configPath).existsSync(), isFalse);
+    });
+
+    test('/provider lists and switches; /model switches model', () async {
+      final temp = Directory.systemTemp.createTempSync('sudoer-cmd-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final config = Config.fromJson({
+        'provider': {
+          'preset': 'ollama',
+          'model': 'scripted',
+          'context_window': 8192,
+        },
+        'workspace_root': temp.path,
+        'session_dir': p.join(temp.path, '.sudoer', 'sessions'),
+      });
+      final provider = ScriptedProvider.fromJson({
+        'steps': [
+          {'complete': {'text': 'hi'}},
+        ]
+      });
+      final out = StringBuffer();
+      final err = StringBuffer();
+      final outcome = await runRepl(
+        config: config,
+        input: Stream.fromIterable([
+          '/provider',
+          '/model',
+          '/model qwen2.5-coder:7b',
+          '/provider openai',
+          'hi',
+          '/exit',
+        ]),
+        out: out,
+        err: err,
+        providerFactory: (_) => provider,
+      );
+      expect(outcome.exitCode, 0, reason: err.toString());
+      expect(out.toString(), contains('ollama'));
+      expect(out.toString(), contains('qwen2.5-coder:7b'));
+      expect(out.toString(), contains('provider: openai'));
+      expect(out.toString(), contains('model: qwen2.5-coder:7b'));
+      expect(outcome.runs.length, 1);
     });
   });
 }
