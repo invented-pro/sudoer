@@ -26,27 +26,16 @@ final class AuthStore {
 
   final String path;
 
-  /// `<XDG_CONFIG_HOME>/sudoer/auth.json` (or `~/.config/sudoer/auth.json` on
-  /// POSIX, `%APPDATA%\sudoer\auth.json` on Windows). `SUDOER_AUTH_FILE`
-  /// overrides the location, which is also the seam used by tests.
+  /// `<app dir>/auth.json` — `~/.config/sudoer/auth.json` on POSIX (XDG),
+  /// `%APPDATA%\sudoer\auth.json` on Windows; see [defaultAppDir].
+  /// `SUDOER_AUTH_FILE` overrides the location, which is also the seam used
+  /// by tests.
   static String defaultAuthPath() {
     final override = Platform.environment['SUDOER_AUTH_FILE'];
     if (override != null && override.isNotEmpty) {
       return p.normalize(p.absolute(override));
     }
-    final xdg = Platform.environment['XDG_CONFIG_HOME'];
-    if (xdg != null && xdg.isNotEmpty) {
-      return p.join(xdg, 'sudoer', 'auth.json');
-    }
-    final home = Platform.environment['HOME'];
-    if (!Platform.isWindows && home != null && home.isNotEmpty) {
-      return p.join(home, '.config', 'sudoer', 'auth.json');
-    }
-    final appData = Platform.environment['APPDATA'];
-    if (appData != null && appData.isNotEmpty) {
-      return p.join(appData, 'sudoer', 'auth.json');
-    }
-    return p.join(Directory.current.path, '.sudoer', 'auth.json');
+    return p.join(defaultAppDir(), 'auth.json');
   }
 
   /// Every stored key, keyed by provider preset id.

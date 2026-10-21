@@ -117,6 +117,7 @@ Future<int> runCli({
   bool human = false,
   Session? session,
   Reliability? reliability,
+  SessionNamer? sessionNamer,
 }) async {
   final outSink = out ?? stdout;
   // Automate surface: stderr is the log, so every line written there is
@@ -145,6 +146,7 @@ Future<int> runCli({
     callLog: callLog,
     session: session,
     reliability: reliability,
+    sessionNamer: sessionNamer,
     diagnostics: Diagnostics(
       enabled: verbose,
       sink: human ? console.diagnostic : errSink.writeln,
@@ -243,6 +245,7 @@ Future<ReplOutcome> runRepl({
   bool echoInput = false,
   List<String>? callLog,
   Reliability? reliability,
+  SessionNamer? sessionNamer,
 }) async {
   final factory = providerFactory ?? providerFor;
   final useTui = tui && human && interactive && rawInput != null;
@@ -273,6 +276,7 @@ Future<ReplOutcome> runRepl({
     echoInput: echoInput,
     callLog: callLog,
     reliability: reliability,
+    sessionNamer: sessionNamer,
   );
   final ReplOutcome outcome;
   try {
@@ -306,6 +310,7 @@ final class _Repl {
     required this.echoInput,
     this.callLog,
     this.reliability,
+    this.sessionNamer,
   }) {
     workspaceRoot = session.workspaceRoot;
     diagnostics = Diagnostics(
@@ -346,6 +351,7 @@ final class _Repl {
   final bool echoInput;
   final List<String>? callLog;
   final Reliability? reliability;
+  final SessionNamer? sessionNamer;
 
   final List<RunResult> runs = [];
   late final Diagnostics diagnostics;
@@ -370,6 +376,7 @@ final class _Repl {
     diagnostics: diagnostics,
     reliability: reliability,
     jobs: jobs,
+    sessionNamer: sessionNamer,
   );
 
   /// C2/C6: rebuild the provider and the agent after `/provider` or `/model`,

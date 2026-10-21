@@ -160,12 +160,20 @@ void main() {
       expect(config.sessionDir, p.join(dir.path, 'ws', 'sessions'));
     });
 
-    test('defaults session_dir under the workspace', () {
+    test('defaults session_dir under the app dir', () {
       final config = _config(workspaceRoot: '/tmp/ws');
-      expect(
-        config.sessionDir,
-        p.join(config.workspaceRoot, '.sudoer', 'sessions'),
-      );
+      expect(config.sessionDir, defaultSessionsDir());
+    });
+
+    test('ensureAppDir creates the app dir and sessions sub-dir', () {
+      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final app = p.join(temp.path, 'sudoer');
+      ensureAppDir(at: app);
+      expect(Directory(app).existsSync(), isTrue);
+      expect(Directory(p.join(app, 'sessions')).existsSync(), isTrue);
+      // A second start is a no-op.
+      ensureAppDir(at: app);
     });
 
     test('defaults workspace_root to the working directory', () {
@@ -446,7 +454,7 @@ void main() {
   });
 
   group('session (C5)', () {
-    test('saves and reloads transcript and plan', () {
+    test('saves and reloads transcript and plan as jsonl', () {
       final temp = Directory.systemTemp.createTempSync('sudoer-test-');
       addTearDown(() => temp.deleteSync(recursive: true));
       final session = Session.create(workspaceRoot: temp.path)
@@ -457,21 +465,182 @@ void main() {
         );
 
       final path = session.save(temp.path);
+      expect(path, endsWith('.jsonl'));
+      expect(p.basename(path), '${session.id}.jsonl');
       final loaded = Session.load(temp.path, session.id);
-      expect(File(path).existsSync(), isTrue);
       expect(loaded.id, session.id);
       expect(loaded.transcript.length, 2);
       expect(loaded.plan.single.text, 'step one');
+      final lines = File(path).readAsStringSync().trim().split('\n');
+      final header = jsonDecode(lines.first) as Map<String, dynamic>;
+      expect(header['type'], 'header');
+      expect(header['id'], session.id);
+      expect(
+        (jsonDecode(lines[1]) as Map)['role'],
+        'user',
+      );
+      expect(
+        (jsonDecode(lines.last) as Map)['role'],
+        'observation',
+      );
     });
 
-    test('a new id is a readable UTC timestamp plus a suffix', () {
+    test('a new stamp is YYMMDD-HHmmSS and names the file', () {
       final temp = Directory.systemTemp.createTempSync('sudoer-test-');
       addTearDown(() => temp.deleteSync(recursive: true));
-      final a = Session.create(workspaceRoot: temp.path);
-      final b = Session.create(workspaceRoot: temp.path);
-      expect(a.id, matches(RegExp(r'^\d{8}-\d{6}-[0-9a-z]{2}$')));
-      // Two sessions opened back to back never collide.
-      expect(a.id, isNot(b.id));
+      final session = Session.create(workspaceRoot: temp.path);
+      expect(session.stamp, matches(RegExp(r'^\d{6}-\d{6}$')));
+      expect(session.id, session.stamp);
+      expect(p.basename(session.save(temp.path)), '${session.stamp}.jsonl');
+    });
+
+    test('keywords rename the file and remove the old one', () {
+      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final session = Session.create(workspaceRoot: temp.path)
+        ..transcript.add(const UserEntry('do it'));
+      final before = session.save(temp.path);
+      expect(File(before).existsSync(), isTrue);
+
+      session.keywords = 'fix-login-loop';
+      expect(session.id, '${session.stamp}_fix-login-loop');
+      final after = session.save(temp.path);
+      expect(p.basename(after), '${session.id}.jsonl');
+      expect(File(before).existsSync(), isFalse);
+
+      final loaded = Session.load(temp.path, session.id);
+      expect(loaded.id, session.id);
+      expect(loaded.keywords, 'fix-login-loop');
+      expect((loaded.transcript.single as UserEntry).text, 'do it');
+    });
+
+    test('a pinned id never gains keywords', () {
+      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final session = Session.create(
+        workspaceRoot: temp.path,
+        id: 'pinned-id',
+      );
+      expect(session.pinned, isTrue);
+      session.keywords = 'ignored';
+      expect(session.id, 'pinned-id');
+      expect(
+        p.basename(session.save(temp.path)),
+        'pinned-id.jsonl',
+      );
+    });
+
+    test('same-second sessions never share a file', () {
+      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final base = DateTime(2026);
+      final a = Session.create(workspaceRoot: temp.path, at: base);
+      final b = Session.create(
+        workspaceRoot: temp.path,
+        at: base.add(const Duration(microseconds: 1)),
+      );
+      final pathA = a.save(temp.path);
+      final pathB = b.save(temp.path);
+      expect(pathA, isNot(pathB));
+      expect(Session.load(temp.path, a.id).createdAt, a.createdAt);
+      expect(Session.load(temp.path, b.id).createdAt, b.createdAt);
+    });
+
+    test('keywordsToSlug keeps at most five hyphenated words', () {
+      expect(
+        keywordsToSlug('Fix the Login Redirect Loop, please!'),
+        'fix-the-login-redirect-loop',
+      );
+      expect(
+        keywordsToSlug('one two three four five six seven'),
+        'one-two-three-four-five',
+      );
+      expect(keywordsToSlug(''), '');
+      expect(keywordsToSlug('!!!'), '');
+      final long = keywordsToSlug('a' * 80);
+      expect(long.length, 48);
+    });
+
+    test('the namer names the session after the first run', () async {
+      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
+      final agent = PropAgent.assemble(
+        config: config,
+        provider: ScriptedProvider.fromJson({
+          'steps': [
+            {'complete': {'text': 'hello'}},
+          ],
+        }),
+        sessionNamer: (_) async => 'read-docs',
+      );
+      await agent.run(const RunRequest('read it'));
+      expect(agent.session.id, '${agent.session.stamp}_read-docs');
+      final loaded = Session.load(config.sessionDir, agent.session.id);
+      expect(loaded.transcript, isNotEmpty);
+      expect(
+        p.basename(
+          Directory(config.sessionDir)
+              .listSync()
+              .whereType<File>()
+              .map((f) => p.basename(f.path))
+              .where((name) => name.endsWith('.jsonl'))
+              .single,
+        ),
+        '${agent.session.id}.jsonl',
+      );
+    });
+
+    test('a failed namer keeps the timestamp id', () async {
+      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
+      final agent = PropAgent.assemble(
+        config: config,
+        provider: ScriptedProvider.fromJson({
+          'steps': [
+            {'complete': {'text': 'hello'}},
+          ],
+        }),
+        sessionNamer: (_) async => throw Exception('provider down'),
+      );
+      await agent.run(const RunRequest('read it'));
+      expect(agent.session.id, agent.session.stamp);
+      expect(agent.session.keywords, '');
+      expect(
+        p.basename(
+          Directory(config.sessionDir)
+              .listSync()
+              .whereType<File>()
+              .map((f) => p.basename(f.path))
+              .where((name) => name.endsWith('.jsonl'))
+              .single,
+        ),
+        '${agent.session.id}.jsonl',
+      );
+    });
+
+    test('summarizeSessionKeywords asks the model and slugs the answer',
+        () async {
+      final provider = ScriptedProvider.fromJson({
+        'steps': [
+          {
+            'complete': {
+              'text': 'Fix Login Redirect Loop (auth session handling)',
+            },
+          },
+        ],
+      });
+      ProviderRequest? seen;
+      final probing = _ProbingProvider(provider, onRequest: (r) => seen = r);
+      final slug = await summarizeSessionKeywords(
+        provider: probing,
+        model: 'scripted',
+        goal: 'Fix the login redirect loop',
+      );
+      expect(slug, 'fix-login-redirect-loop-auth');
+      expect(seen!.tools, isEmpty);
+      expect(seen!.system, contains('at most 5'));
     });
   });
 
@@ -6345,6 +6514,32 @@ final class _StreamClient extends http.BaseClient {
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async =>
       http.StreamedResponse(Stream.fromIterable(chunks.map(utf8.encode)), 200);
+}
+
+/// A provider that forwards to another and records the last request, so a
+/// test can assert on the prompt a helper builds (C5 naming).
+final class _ProbingProvider implements Provider {
+  _ProbingProvider(this.inner, {this.onRequest});
+  final Provider inner;
+  final void Function(ProviderRequest request)? onRequest;
+
+  @override
+  Future<ProviderResponse> complete(
+    ProviderRequest request, {
+    void Function(String delta)? onDelta,
+    void Function(String delta)? onReasoning,
+    void Function(List<PlanItem> plan)? onPlan,
+    CancelSignal? cancel,
+  }) {
+    onRequest?.call(request);
+    return inner.complete(
+      request,
+      onDelta: onDelta,
+      onReasoning: onReasoning,
+      onPlan: onPlan,
+      cancel: cancel,
+    );
+  }
 }
 
 /// A provider that blocks until its call is cancelled, so a test can drive the

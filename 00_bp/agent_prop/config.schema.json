@@ -94,7 +94,7 @@
       "minLength": 1
     },
     "session_dir": {
-      "description": "Directory holding persisted session files (C5). Defaults to <workspace_root>/.sudoer/sessions.",
+      "description": "Directory holding persisted session files (C5). Defaults to ~/.config/sudoer/sessions (the app dir; $SUDOER_HOME moves it).",
       "type": "string",
       "minLength": 1
     },

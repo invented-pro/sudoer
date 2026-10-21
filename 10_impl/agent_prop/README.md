@@ -116,7 +116,8 @@ mise exec -- dart run bin/sudoer.dart --setup
 
 It picks a provider preset, takes the key (stored in
 `~/.config/sudoer/auth.json`, owner-only 0600), discovers the endpoint's
-models when reachable, selects one, and writes `sudoer.json`. The prompts are
+models when reachable, selects one, and writes `~/.config/sudoer/config.json`.
+The prompts are
 full-screen, and the key/text fields accept a paste. The provider chooser is
 searchable (type to filter) because the catalog tracks the full
 OpenAI-compatible models.dev set. `--login` is an alias.
@@ -401,7 +402,9 @@ mise exec -- dart run bin/sudoer.dart -c /path/to/config.json \
 - On the automate surface, answers go to **stdout**; diagnostics, plan, and
   status to **stderr**. The human surfaces render those into the transcript
   and footer.
-- `--config` / `-c` defaults to `$SUDOER_CONFIG`, then `./sudoer.json`.
+- `--config` / `-c` defaults to `$SUDOER_CONFIG`, then
+  `~/.config/sudoer/config.json` (`$SUDOER_HOME` moves the whole app dir;
+  the dir and its `sessions/` sub-directory are created on first start).
 - `--automate` forces the plain surface; `--human` forces the styled surface;
   `--inline` uses the scrollback line editor instead of the full-screen TUI;
   `--verbose` emits per-step events.
@@ -416,9 +419,12 @@ mise exec -- dart run bin/sudoer.dart -c /path/to/config.json \
 - `--session` / `-s <id>` resumes a saved session, or starts one under that
   id if it does not exist yet (on both the one-shot and interactive surfaces);
   `--help` / `-h` prints usage.
-- Sessions live under `session_dir` (default `<workspace_root>/.sudoer/sessions`).
-  A new session's id is a readable UTC timestamp with a short suffix, e.g.
-  `20261006-064828-5i` (`/sessions` lists them).
+- Sessions live under `session_dir` (default `~/.config/sudoer/sessions`),
+  one JSONL file per session. A new session's id is the local time
+  `YYMMDD-HHmmSS`; after the first run the model summarizes the goal into at
+  most five keywords and the file becomes `YYMMDD-HHmmSS_<keywords>.jsonl`
+  (e.g. `261020-142530_fix-login-loop.jsonl`; `/sessions` lists them).
+  A `--session`-pinned id is kept verbatim and never renamed.
 - On the automate surface the session id is logged on exit as
   `session <id> (resume: --session <id>)`, so a one-shot or scripted run is
   easy to resume.

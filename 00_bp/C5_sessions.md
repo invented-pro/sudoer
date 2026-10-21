@@ -85,11 +85,14 @@ stop
 - **Resumable.** A session has an id; `C6` resumes a saved session and
   continues from its transcript and plan, re-adopting the session's recorded
   `workspace_root`.
-- **Readable id.** A new session's default id is a UTC timestamp
-  `YYYYMMDD-HHMMSS` plus a short random suffix (e.g. `20261006-064828-5i`):
-  sortable, recognisable at a glance, and safe as a filename. The suffix
-  keeps two sessions opened in the same second distinct. A caller may pin an
-  explicit id (`--session`, `C6`), which is used verbatim.
+- **Readable id.** A new session's id starts as the local-time stamp
+  `YYMMDD-HHMMSS` (e.g. `261020-142530`): sortable, recognisable at a glance,
+  and safe as a filename. After the first run, the model summarizes the
+  session's first goal into at most five keywords and the id (and file name)
+  gains them: `YYMMDD-HHMMSS_<keywords>` (e.g.
+  `261020-142530_fix-login-loop.jsonl`). Same-second collisions are resolved
+  on disk with a numeric suffix; a caller may pin an explicit id (`--session`,
+  `C6`), which is used verbatim and never renamed.
 - **Workspace.** The session records its active `workspace_root`; changing
   the workspace during a session (`C6`) updates and persists it.
 - **Workspace baseline.** When a session opens, `C3` captures a baseline of
@@ -108,10 +111,12 @@ stop
 
 ### Session file
 
-One JSON document per session, written under the workspace or a configured
-session directory; it holds at least `id`, `created_at`, `updated_at`,
-`workspace_root`, `plan`, and `transcript`, plus the workspace `baseline`
-handle backing `diff`/`restore` (`C3`). The exact shape is frozen in
+One JSONL file per session, written under the app directory
+(`~/.config/sudoer/sessions` at Prop) or a configured session directory; the
+first line is a header object holding at least `id`, `stamp`, `created_at`,
+`updated_at`, `workspace_root`, and `plan`, plus the workspace `baseline`
+handle backing `diff`/`restore` (`C3`) and the naming `keywords`; every
+following line is one transcript entry. The exact shape is frozen in
 [session.schema.json](agent_prop/session.schema.json) with the rest of
 Prop's contracts (`schemas.md`).
 

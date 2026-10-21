@@ -2,15 +2,33 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "session.schema.json",
   "title": "Session file",
-  "description": "One persisted session (C5): the transcript and plan that survive across runs and can be resumed by id. Written under the configured session directory.",
+  "description": "One persisted session (C5): the transcript and plan that survive across runs and can be resumed by id. One JSONL file per session under the session directory (default ~/.config/sudoer/sessions): the first line is this header object (type \"header\"), every following line is one transcript entry shaped as message.schema.json#/$defs/entry.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["id", "created_at", "updated_at", "workspace_root", "plan", "transcript"],
+  "required": ["id", "stamp", "created_at", "updated_at", "workspace_root", "plan"],
   "properties": {
+    "type": {
+      "description": "Marks the first JSONL line as the header.",
+      "const": "header"
+    },
     "id": {
-      "description": "Session identity used to resume (C5).",
+      "description": "Session identity used to resume (C5): the YYMMDD-HHmmSS stamp, plus _<keywords> once an LLM summary named it; a pinned id (--session) is used verbatim.",
       "type": "string",
       "minLength": 1
+    },
+    "stamp": {
+      "description": "The timestamp part of the id (YYMMDD-HHmmSS, local time), or a pinned caller-chosen id.",
+      "type": "string",
+      "minLength": 1
+    },
+    "keywords": {
+      "description": "The at-most-five keyword slug the model summarized from the session's first goal; part of the file name when present.",
+      "type": "string",
+      "minLength": 1
+    },
+    "pinned": {
+      "description": "True when the caller pinned the id: the id never gains keywords.",
+      "const": true
     },
     "created_at": { "type": "string", "format": "date-time" },
     "updated_at": { "type": "string", "format": "date-time" },
@@ -23,11 +41,6 @@
       "description": "The agent's plan (C1): a small ordered task list.",
       "type": "array",
       "items": { "$ref": "#/$defs/planItem" }
-    },
-    "transcript": {
-      "description": "The session transcript, shared across the goals in the session.",
-      "type": "array",
-      "items": { "$ref": "message.schema.json#/$defs/entry" }
     }
   },
   "$defs": {

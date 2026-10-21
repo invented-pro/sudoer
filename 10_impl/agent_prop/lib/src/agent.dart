@@ -14,6 +14,11 @@ import 'tools/job.dart';
 import 'tools/tool.dart';
 import 'tools/web.dart';
 
+/// Names a session after its first run: returns the keyword slug for the
+/// file name, or null to keep the plain timestamp id. Errors are treated as
+/// best-effort by the agent.
+typedef SessionNamer = Future<String?> Function(PropAgent agent);
+
 /// The assembled Prop agent: C1–C8 wired per `00_bp/agent_prop.md`. It runs
 /// goals inside a continuous, persistent session.
 final class PropAgent {
@@ -27,6 +32,7 @@ final class PropAgent {
     required this.baseline,
     required this.ownsJobs,
     this.contextLog,
+    this.sessionNamer,
   });
 
   final Config config;
@@ -39,6 +45,10 @@ final class PropAgent {
   /// C4 (CLM): the model-owned live context file, or null under the harness
   /// ladder.
   final ContextLog? contextLog;
+
+  /// C5: the best-effort session namer, or null to keep the plain timestamp
+  /// id (tests and the gate pass none).
+  final SessionNamer? sessionNamer;
 
   /// The live context file path (CLM only), for the interface and tests.
   String? get contextFilePath => contextLog?.file.path;
@@ -59,6 +69,7 @@ final class PropAgent {
     Diagnostics? diagnostics,
     JobRegistry? jobs,
     Reliability? reliability,
+    SessionNamer? sessionNamer,
   }) {
     final diag = diagnostics ?? Diagnostics.silent;
     final current =
@@ -123,6 +134,7 @@ final class PropAgent {
       baseline: baseline,
       ownsJobs: registry == null,
       contextLog: contextLog,
+      sessionNamer: sessionNamer,
     );
   }
 
@@ -167,6 +179,20 @@ final class PropAgent {
     );
     final result = await loop.run(request, session, observer: observer);
     session.updatedAt = DateTime.now().toUtc();
+    // C5: name the session from its first goal, once, before the first save.
+    // Best-effort: a failed summary keeps the plain timestamp id.
+    final namer = sessionNamer;
+    if (namer != null &&
+        !session.pinned &&
+        session.keywords.isEmpty &&
+        session.transcript.isNotEmpty) {
+      try {
+        final slug = await namer(this);
+        if (slug != null && slug.isNotEmpty) session.keywords = slug;
+      } on Object {
+        // Naming is best-effort; the next run retries while unnamed.
+      }
+    }
     final path = session.save(config.sessionDir);
     diagnostics.event(
       'C5 session',

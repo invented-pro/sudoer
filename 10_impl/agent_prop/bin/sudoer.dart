@@ -3,8 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:args/args.dart';
-import 'package:path/path.dart' as p;
 
+import 'package:sudoer_prop/src/agent.dart';
 import 'package:sudoer_prop/src/build_info.dart';
 import 'package:sudoer_prop/src/config.dart';
 import 'package:sudoer_prop/src/errors.dart';
@@ -24,7 +24,8 @@ Future<void> main(List<String> args) async {
       'config',
       abbr: 'c',
       help: 'Path to a JSON config file.',
-      defaultsTo: Platform.environment['SUDOER_CONFIG'] ?? 'sudoer.json',
+      defaultsTo:
+          Platform.environment['SUDOER_CONFIG'] ?? defaultConfigPath(),
     )
     ..addOption('session', abbr: 's', help: 'Resume (or create) a session by id.')
     ..addFlag('automate', negatable: false,
@@ -81,6 +82,10 @@ Future<void> main(List<String> args) async {
   }
 
   final configPath = results['config'] as String;
+  // First start: create the app dir (~/.config/sudoer) and its sessions
+  // sub-directory when missing, so the config, auth store, and session
+  // store all have a home (C5/C6).
+  ensureAppDir();
   final providerArg = results['provider'] as String?;
   final modelArg = results['model'] as String?;
   final apiKeyArg = results['api-key'] as String?;
@@ -249,11 +254,14 @@ Future<void> main(List<String> args) async {
     final resumeId = results['session'] as String?;
     Session? session;
     if (resumeId != null) {
-      final saved = File(p.join(config.sessionDir, '$resumeId.json'));
-      session = saved.existsSync()
-          ? Session.load(config.sessionDir, resumeId)
-          : Session.create(
-              workspaceRoot: config.workspaceRoot, id: resumeId);
+      try {
+        session = Session.load(config.sessionDir, resumeId);
+      } on StateError {
+        // Not saved yet: start a new session under that id (pinned, so it
+        // stays stable across runs; a pinned id never gains keywords).
+        session = Session.create(
+            workspaceRoot: config.workspaceRoot, id: resumeId);
+      }
     }
 
     // A positional goal is a one-shot convenience.
@@ -263,7 +271,8 @@ Future<void> main(List<String> args) async {
           goal: goal,
           verbose: verbose,
           human: human,
-          session: session));
+          session: session,
+          sessionNamer: _nameSession));
     }
 
     // Full-screen mode is the default human surface on a terminal. Program
@@ -318,6 +327,7 @@ Future<void> main(List<String> args) async {
         // On a real terminal the tty echoes the input; only echo a goal when
         // the input arrives from a pipe or redirect.
         echoInput: human && !interactive,
+        sessionNamer: _nameSession,
       );
       code = outcome.exitCode;
     } finally {
@@ -374,3 +384,12 @@ void _printUsage(ArgParser parser, {IOSink? to}) {
     ..writeln('                or a fatal error occurred;')
     ..writeln('            2 = usage or config error.');
 }
+
+/// C5: name the session after its first goal — at most five LLM-picked
+/// keywords become part of the file name (`YYMMDD-HHmmSS_<keywords>.jsonl`).
+Future<String?> _nameSession(PropAgent agent) => summarizeSessionKeywords(
+  provider: agent.provider,
+  model: agent.config.provider.model,
+  goal: sessionGoalSummary(agent.session),
+  cancel: agent.session.cancel,
+);

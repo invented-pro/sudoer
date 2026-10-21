@@ -8,6 +8,43 @@ import 'providers/catalog.dart';
 
 export 'providers/catalog.dart';
 
+/// The per-user Sudoer directory: `~/.config/sudoer` (XDG on POSIX,
+/// `%APPDATA%\sudoer` on Windows). `SUDOER_HOME` overrides the location,
+/// which is also the seam used by tests. The config file, the auth store,
+/// and the `sessions/` sub-directory all live here.
+String defaultAppDir() {
+  final override = Platform.environment['SUDOER_HOME'];
+  if (override != null && override.isNotEmpty) {
+    return p.normalize(p.absolute(override));
+  }
+  final xdg = Platform.environment['XDG_CONFIG_HOME'];
+  if (xdg != null && xdg.isNotEmpty) {
+    return p.join(xdg, 'sudoer');
+  }
+  final home = Platform.environment['HOME'];
+  if (!Platform.isWindows && home != null && home.isNotEmpty) {
+    return p.join(home, '.config', 'sudoer');
+  }
+  final appData = Platform.environment['APPDATA'];
+  if (appData != null && appData.isNotEmpty) {
+    return p.join(appData, 'sudoer');
+  }
+  return p.join(Directory.current.path, '.sudoer');
+}
+
+/// The default config file: `<app dir>/config.json`.
+String defaultConfigPath() => p.join(defaultAppDir(), 'config.json');
+
+/// The default session store: `<app dir>/sessions`.
+String defaultSessionsDir() => p.join(defaultAppDir(), 'sessions');
+
+/// First-start bootstrap: create the app dir and its `sessions` sub-directory
+/// when missing, so a fresh machine is usable without manual setup.
+void ensureAppDir({String? at}) {
+  final root = at ?? defaultAppDir();
+  Directory(p.join(root, 'sessions')).createSync(recursive: true);
+}
+
 ProviderKind _parseKind(Object? value) => switch (value) {
   'openai-compatible' => ProviderKind.openAiCompatible,
   'ollama' => ProviderKind.ollama,
@@ -466,9 +503,9 @@ final class Config {
     return Config(
       provider: ProviderConfig.fromJson(provider.cast<String, dynamic>()),
       workspaceRoot: workspaceRoot,
-      sessionDir:
-          (sessionDir as String?) ??
-          p.join(workspaceRoot, '.sudoer', 'sessions'),
+      // Sessions live under the app dir (~/.config/sudoer/sessions), not the
+      // workspace, so they survive across projects (C5).
+      sessionDir: (sessionDir as String?) ?? defaultSessionsDir(),
       web: web == null
           ? const WebConfig()
           : WebConfig.fromJson(web.cast<String, dynamic>()),

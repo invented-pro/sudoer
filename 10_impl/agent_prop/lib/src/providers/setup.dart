@@ -19,7 +19,6 @@ import 'package:dart_tui/dart_tui.dart'
         promptSelect,
         withAltScreen,
         withFilter;
-import 'package:path/path.dart' as p;
 
 import '../config.dart';
 import '../errors.dart';
@@ -162,7 +161,7 @@ Config configWithProvider(
   return Config(
     provider: provider,
     workspaceRoot: root,
-    sessionDir: p.join(root, '.sudoer', 'sessions'),
+    sessionDir: defaultSessionsDir(),
   );
 }
 
