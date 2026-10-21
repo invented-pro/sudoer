@@ -36,7 +36,8 @@ Future<T> raceCancel<T>(Future<T> future, CancelSignal? cancel) {
   return Future.any<T>([
     future,
     cancel.whenCancelled.then<T>(
-        (_) => throw const StepFailure.cancelled('cancelled by user')),
+      (_) => throw const StepFailure.cancelled('cancelled by user'),
+    ),
   ]);
 }
 

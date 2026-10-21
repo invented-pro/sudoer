@@ -52,30 +52,30 @@ final class Session {
   }
 
   factory Session.fromJson(Map<String, dynamic> json) => Session(
-        id: json['id'] as String,
-        workspaceRoot: json['workspace_root'] as String,
-        createdAt: DateTime.parse(json['created_at'] as String),
-        updatedAt: DateTime.parse(json['updated_at'] as String),
-        transcript: [
-          for (final entry in (json['transcript'] as List? ?? const []))
-            Entry.fromJson((entry as Map).cast<String, dynamic>()),
-        ],
-        plan: [
-          for (final item in (json['plan'] as List? ?? const []))
-            PlanItem.fromJson((item as Map).cast<String, dynamic>()),
-        ],
-        baseline: json['baseline'] as String?,
-      );
+    id: json['id'] as String,
+    workspaceRoot: json['workspace_root'] as String,
+    createdAt: DateTime.parse(json['created_at'] as String),
+    updatedAt: DateTime.parse(json['updated_at'] as String),
+    transcript: [
+      for (final entry in (json['transcript'] as List? ?? const []))
+        Entry.fromJson((entry as Map).cast<String, dynamic>()),
+    ],
+    plan: [
+      for (final item in (json['plan'] as List? ?? const []))
+        PlanItem.fromJson((item as Map).cast<String, dynamic>()),
+    ],
+    baseline: json['baseline'] as String?,
+  );
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'created_at': createdAt.toIso8601String(),
-        'updated_at': updatedAt.toIso8601String(),
-        'workspace_root': workspaceRoot,
-        if (baseline != null) 'baseline': baseline,
-        'plan': [for (final item in plan) item.toJson()],
-        'transcript': [for (final entry in transcript) entry.toJson()],
-      };
+    'id': id,
+    'created_at': createdAt.toIso8601String(),
+    'updated_at': updatedAt.toIso8601String(),
+    'workspace_root': workspaceRoot,
+    if (baseline != null) 'baseline': baseline,
+    'plan': [for (final item in plan) item.toJson()],
+    'transcript': [for (final entry in transcript) entry.toJson()],
+  };
 
   /// Write this session to [sessionDir]; returns the file path.
   String save(String sessionDir) {
@@ -118,7 +118,8 @@ final class Session {
   static String _newId() {
     final now = DateTime.now().toUtc();
     String two(int n) => n.toString().padLeft(2, '0');
-    final stamp = '${now.year}${two(now.month)}${two(now.day)}-'
+    final stamp =
+        '${now.year}${two(now.month)}${two(now.day)}-'
         '${two(now.hour)}${two(now.minute)}${two(now.second)}';
     final suffix = _rand.nextInt(36 * 36).toRadixString(36).padLeft(2, '0');
     return '$stamp-$suffix';

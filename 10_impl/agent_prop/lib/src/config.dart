@@ -9,11 +9,13 @@ import 'providers/catalog.dart';
 export 'providers/catalog.dart';
 
 ProviderKind _parseKind(Object? value) => switch (value) {
-      'openai-compatible' => ProviderKind.openAiCompatible,
-      'ollama' => ProviderKind.ollama,
-      _ => throw ConfigException('provider.kind must be one of '
-          '"openai-compatible", "ollama" (got: $value)'),
-    };
+  'openai-compatible' => ProviderKind.openAiCompatible,
+  'ollama' => ProviderKind.ollama,
+  _ => throw ConfigException(
+    'provider.kind must be one of '
+    '"openai-compatible", "ollama" (got: $value)',
+  ),
+};
 
 /// Sampling parameters for the configured model (C2): part of Prop's model
 /// config where the adapter supports them. Optional; omitted keys use the
@@ -48,8 +50,9 @@ final class SamplingConfig {
     for (final key in json.keys) {
       if (!_keys.containsKey(key)) {
         throw ConfigException(
-            'provider.sampling.$key is not a sampling parameter '
-            '(expected one of: ${_keys.keys.join(', ')})');
+          'provider.sampling.$key is not a sampling parameter '
+          '(expected one of: ${_keys.keys.join(', ')})',
+        );
       }
     }
     double? asDouble(String key) {
@@ -73,21 +76,26 @@ final class SamplingConfig {
     final temperature = asDouble('temperature');
     if (temperature != null && (temperature < 0 || temperature > 2)) {
       throw const ConfigException(
-          'provider.sampling.temperature must be within 0..2');
+        'provider.sampling.temperature must be within 0..2',
+      );
     }
     final topP = asDouble('top_p');
     if (topP != null && (topP < 0 || topP > 1)) {
-      throw const ConfigException('provider.sampling.top_p must be within 0..1');
+      throw const ConfigException(
+        'provider.sampling.top_p must be within 0..1',
+      );
     }
     final topK = asInt('top_k');
     if (topK != null && topK < 1) {
       throw const ConfigException(
-          'provider.sampling.top_k must be an integer >= 1');
+        'provider.sampling.top_k must be an integer >= 1',
+      );
     }
     final maxTokens = asInt('max_tokens');
     if (maxTokens != null && maxTokens < 1) {
       throw const ConfigException(
-          'provider.sampling.max_tokens must be an integer >= 1');
+        'provider.sampling.max_tokens must be an integer >= 1',
+      );
     }
     return SamplingConfig(
       temperature: temperature,
@@ -99,29 +107,29 @@ final class SamplingConfig {
   }
 
   Map<String, dynamic> toJson() => {
-        if (temperature != null) 'temperature': temperature,
-        if (topP != null) 'top_p': topP,
-        if (topK != null) 'top_k': topK,
-        if (seed != null) 'seed': seed,
-        if (maxTokens != null) 'max_tokens': maxTokens,
-      };
+    if (temperature != null) 'temperature': temperature,
+    if (topP != null) 'top_p': topP,
+    if (topK != null) 'top_k': topK,
+    if (seed != null) 'seed': seed,
+    if (maxTokens != null) 'max_tokens': maxTokens,
+  };
 
   /// The chat-completions body keys for these parameters.
   Map<String, dynamic> openAiJson() => {
-        if (temperature != null) 'temperature': temperature,
-        if (topP != null) 'top_p': topP,
-        if (seed != null) 'seed': seed,
-        if (maxTokens != null) 'max_tokens': maxTokens,
-      };
+    if (temperature != null) 'temperature': temperature,
+    if (topP != null) 'top_p': topP,
+    if (seed != null) 'seed': seed,
+    if (maxTokens != null) 'max_tokens': maxTokens,
+  };
 
   /// The ollama `options` map for these parameters.
   Map<String, dynamic> ollamaJson() => {
-        if (temperature != null) 'temperature': temperature,
-        if (topP != null) 'top_p': topP,
-        if (topK != null) 'top_k': topK,
-        if (seed != null) 'seed': seed,
-        if (maxTokens != null) 'num_predict': maxTokens,
-      };
+    if (temperature != null) 'temperature': temperature,
+    if (topP != null) 'top_p': topP,
+    if (topK != null) 'top_k': topK,
+    if (seed != null) 'seed': seed,
+    if (maxTokens != null) 'num_predict': maxTokens,
+  };
 }
 
 final class ProviderConfig {
@@ -173,16 +181,19 @@ final class ProviderConfig {
     }
     final preset = presetId == null ? null : providerPreset(presetId);
     if (presetId != null && preset == null) {
-      throw ConfigException('unknown provider preset: $presetId '
-          '(known: ${kProviderPresets.take(8).map((p) => p.id).join(', ')}, …; '
-          'run `sudoer-prop --list-providers`)');
+      throw ConfigException(
+        'unknown provider preset: $presetId '
+        '(known: ${kProviderPresets.take(8).map((p) => p.id).join(', ')}, …; '
+        'run `sudoer-prop --list-providers`)',
+      );
     }
 
     final rawKind = json['kind'];
     final kind = rawKind == null ? preset?.kind : _parseKind(rawKind);
     if (kind == null) {
       throw const ConfigException(
-          'provider.kind is required unless provider.preset is set');
+        'provider.kind is required unless provider.preset is set',
+      );
     }
 
     final model = json['model'];
@@ -198,20 +209,24 @@ final class ProviderConfig {
     if (kind == ProviderKind.openAiCompatible &&
         (baseUrl == null || baseUrl.isEmpty)) {
       throw const ConfigException(
-          'provider.base_url is required for the openai-compatible adapter '
-          '(or set provider.preset)');
+        'provider.base_url is required for the openai-compatible adapter '
+        '(or set provider.preset)',
+      );
     }
 
     final rawWindow = json['context_window'];
     if (rawWindow != null && (rawWindow is! int || rawWindow < 1)) {
       throw const ConfigException(
-          'provider.context_window must be an integer >= 1');
+        'provider.context_window must be an integer >= 1',
+      );
     }
-    final contextWindow = rawWindow as int? ??
+    final contextWindow =
+        rawWindow as int? ??
         preset?.model(model)?.contextWindow ??
         (preset == null ? null : kDefaultContextWindow) ??
         (throw const ConfigException(
-            'provider.context_window is required unless provider.preset is set'));
+          'provider.context_window is required unless provider.preset is set',
+        ));
 
     final apiKey = json['api_key'];
     if (apiKey != null && apiKey is! String) {
@@ -220,11 +235,13 @@ final class ProviderConfig {
     final apiKeyEnv = json['api_key_env'];
     if (apiKeyEnv != null && (apiKeyEnv is! String || apiKeyEnv.isEmpty)) {
       throw const ConfigException(
-          'provider.api_key_env must be a non-empty string when set');
+        'provider.api_key_env must be a non-empty string when set',
+      );
     }
     if (apiKey != null && apiKeyEnv != null) {
       throw const ConfigException(
-          'set at most one of provider.api_key and provider.api_key_env');
+        'set at most one of provider.api_key and provider.api_key_env',
+      );
     }
 
     final sampling = json['sampling'];
@@ -246,15 +263,15 @@ final class ProviderConfig {
   }
 
   Map<String, dynamic> toJson() => {
-        'kind': kind.wire,
-        'model': model,
-        'context_window': contextWindow,
-        if (preset != null) 'preset': preset,
-        if (baseUrl != null) 'base_url': baseUrl,
-        if (apiKey != null) 'api_key': apiKey,
-        if (apiKeyEnv != null) 'api_key_env': apiKeyEnv,
-        if (sampling != null) 'sampling': sampling!.toJson(),
-      };
+    'kind': kind.wire,
+    'model': model,
+    'context_window': contextWindow,
+    if (preset != null) 'preset': preset,
+    if (baseUrl != null) 'base_url': baseUrl,
+    if (apiKey != null) 'api_key': apiKey,
+    if (apiKeyEnv != null) 'api_key_env': apiKeyEnv,
+    if (sampling != null) 'sampling': sampling!.toJson(),
+  };
 
   /// A copy with selected provider fields replaced. Null means "keep".
   ProviderConfig copyWith({
@@ -266,17 +283,16 @@ final class ProviderConfig {
     String? apiKey,
     String? apiKeyEnv,
     SamplingConfig? sampling,
-  }) =>
-      ProviderConfig(
-        kind: kind ?? this.kind,
-        model: model ?? this.model,
-        contextWindow: contextWindow ?? this.contextWindow,
-        preset: preset ?? this.preset,
-        baseUrl: baseUrl ?? this.baseUrl,
-        apiKey: apiKey ?? this.apiKey,
-        apiKeyEnv: apiKeyEnv ?? this.apiKeyEnv,
-        sampling: sampling ?? this.sampling,
-      );
+  }) => ProviderConfig(
+    kind: kind ?? this.kind,
+    model: model ?? this.model,
+    contextWindow: contextWindow ?? this.contextWindow,
+    preset: preset ?? this.preset,
+    baseUrl: baseUrl ?? this.baseUrl,
+    apiKey: apiKey ?? this.apiKey,
+    apiKeyEnv: apiKeyEnv ?? this.apiKeyEnv,
+    sampling: sampling ?? this.sampling,
+  );
 }
 
 /// Network capability for the web tools (C3). Enabled and open by default
@@ -307,7 +323,8 @@ final class WebConfig {
     final searchUrl = json['search_url'];
     if (searchUrl != null && (searchUrl is! String || searchUrl.isEmpty)) {
       throw const ConfigException(
-          'web.search_url must be a non-empty string when set');
+        'web.search_url must be a non-empty string when set',
+      );
     }
     final hosts = json['deny_hosts'];
     if (hosts != null && hosts is! List) {
@@ -324,10 +341,10 @@ final class WebConfig {
   }
 
   Map<String, dynamic> toJson() => {
-        'enabled': enabled,
-        if (searchUrl != null) 'search_url': searchUrl,
-        if (denyHosts.isNotEmpty) 'deny_hosts': denyHosts,
-      };
+    'enabled': enabled,
+    if (searchUrl != null) 'search_url': searchUrl,
+    if (denyHosts.isNotEmpty) 'deny_hosts': denyHosts,
+  };
 }
 
 /// Which context-management strategy C4 uses (C4). `harness` (the default)
@@ -337,11 +354,12 @@ final class WebConfig {
 enum ContextMode { harness, clm }
 
 ContextMode _parseContextMode(Object? value) => switch (value) {
-      null || 'harness' => ContextMode.harness,
-      'clm' => ContextMode.clm,
-      _ => throw ConfigException(
-          'context.mode must be one of "harness", "clm" (got: $value)'),
-    };
+  null || 'harness' => ContextMode.harness,
+  'clm' => ContextMode.clm,
+  _ => throw ConfigException(
+    'context.mode must be one of "harness", "clm" (got: $value)',
+  ),
+};
 
 /// Context assembly and management (C4). `harness` is the default pinned
 /// ladder; `clm` mirrors the live context to [file] and lets the model edit
@@ -370,7 +388,8 @@ final class ContextConfig {
     final file = json['file'];
     if (file != null && (file is! String || file.isEmpty)) {
       throw const ConfigException(
-          'context.file must be a non-empty string when set');
+        'context.file must be a non-empty string when set',
+      );
     }
     final strategy = json['strategy'];
     if (strategy != null && strategy is! String) {
@@ -384,10 +403,10 @@ final class ContextConfig {
   }
 
   Map<String, dynamic> toJson() => {
-        'mode': mode == ContextMode.clm ? 'clm' : 'harness',
-        if (file != null) 'file': file,
-        if (strategy.isNotEmpty) 'strategy': strategy,
-      };
+    'mode': mode == ContextMode.clm ? 'clm' : 'harness',
+    if (file != null) 'file': file,
+    if (strategy.isNotEmpty) 'strategy': strategy,
+  };
 
   /// A copy with a different [mode], keeping the file and strategy, so the
   /// interface can switch strategy at runtime (`/context clm|harness`, C6).
@@ -423,15 +442,18 @@ final class Config {
     final root = expanded['workspace_root'];
     if (root != null && (root is! String || root.isEmpty)) {
       throw const ConfigException(
-          'workspace_root must be a non-empty string when set');
+        'workspace_root must be a non-empty string when set',
+      );
     }
     // Default to the working directory the agent was invoked from (C6).
-    final workspaceRoot =
-        p.normalize(p.absolute((root as String?) ?? Directory.current.path));
+    final workspaceRoot = p.normalize(
+      p.absolute((root as String?) ?? Directory.current.path),
+    );
     final sessionDir = expanded['session_dir'];
     if (sessionDir != null && (sessionDir is! String || sessionDir.isEmpty)) {
       throw const ConfigException(
-          'session_dir must be a non-empty string when set');
+        'session_dir must be a non-empty string when set',
+      );
     }
     final web = expanded['web'];
     if (web != null && web is! Map) {
@@ -445,7 +467,8 @@ final class Config {
       provider: ProviderConfig.fromJson(provider.cast<String, dynamic>()),
       workspaceRoot: workspaceRoot,
       sessionDir:
-          (sessionDir as String?) ?? p.join(workspaceRoot, '.sudoer', 'sessions'),
+          (sessionDir as String?) ??
+          p.join(workspaceRoot, '.sudoer', 'sessions'),
       web: web == null
           ? const WebConfig()
           : WebConfig.fromJson(web.cast<String, dynamic>()),
@@ -456,12 +479,12 @@ final class Config {
   }
 
   Map<String, dynamic> toJson() => {
-        'provider': provider.toJson(),
-        'workspace_root': workspaceRoot,
-        'session_dir': sessionDir,
-        'web': web.toJson(),
-        'context': context.toJson(),
-      };
+    'provider': provider.toJson(),
+    'workspace_root': workspaceRoot,
+    'session_dir': sessionDir,
+    'web': web.toJson(),
+    'context': context.toJson(),
+  };
 
   /// A copy with a new [workspaceRoot], [context] strategy, and/or
   /// [provider], keeping the session directory and the network policy fixed
@@ -470,14 +493,13 @@ final class Config {
     String? workspaceRoot,
     ContextConfig? context,
     ProviderConfig? provider,
-  }) =>
-      Config(
-        provider: provider ?? this.provider,
-        workspaceRoot: workspaceRoot ?? this.workspaceRoot,
-        sessionDir: sessionDir,
-        web: web,
-        context: context ?? this.context,
-      );
+  }) => Config(
+    provider: provider ?? this.provider,
+    workspaceRoot: workspaceRoot ?? this.workspaceRoot,
+    sessionDir: sessionDir,
+    web: web,
+    context: context ?? this.context,
+  );
 
   /// Deep-merge an override map (gate tasks) over this config, then validate.
   Config merge(Map<String, dynamic> override) =>
@@ -521,7 +543,8 @@ const String kSampleConfig = '''
 
 /// The stderr report for a missing config (C6): where we looked and a sample
 /// to create there. Kept in one place so every surface prints it identically.
-String missingConfigReport(String path) => '''
+String missingConfigReport(String path) =>
+    '''
 config error: config file not found: $path
 
 Create $path with a provider and optional web settings, for example:
@@ -548,8 +571,9 @@ Config loadConfigFile(String path) {
     throw const ConfigException('config must be a JSON object');
   }
   final expanded = _expandEnvDeep(decoded.cast<String, dynamic>());
-  return Config.fromJson(_resolvePaths(expanded,
-      p.normalize(p.absolute(file.parent.path))));
+  return Config.fromJson(
+    _resolvePaths(expanded, p.normalize(p.absolute(file.parent.path))),
+  );
 }
 
 /// Rewrite relative path values as absolute, anchored at [base] (the
@@ -569,8 +593,9 @@ Map<String, dynamic> _resolvePaths(Map<String, dynamic> json, String base) {
 /// Expand `$VAR` and `${VAR}` references in [value] from the environment.
 /// A referenced variable that is unset is an error.
 String expandEnv(String value) {
-  final pattern =
-      RegExp(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)');
+  final pattern = RegExp(
+    r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)',
+  );
   return value.replaceAllMapped(pattern, (match) {
     final name = match.group(1) ?? match.group(2)!;
     final resolved = Platform.environment[name];

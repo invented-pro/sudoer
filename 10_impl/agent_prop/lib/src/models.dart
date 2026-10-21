@@ -15,17 +15,17 @@ enum Outcome { ok, error, guardDenied }
 
 extension OutcomeJson on Outcome {
   String get wire => switch (this) {
-        Outcome.ok => 'ok',
-        Outcome.error => 'error',
-        Outcome.guardDenied => 'guard_denied',
-      };
+    Outcome.ok => 'ok',
+    Outcome.error => 'error',
+    Outcome.guardDenied => 'guard_denied',
+  };
 
   static Outcome fromWire(String value) => switch (value) {
-        'ok' => Outcome.ok,
-        'error' => Outcome.error,
-        'guard_denied' => Outcome.guardDenied,
-        _ => throw FormatException('unknown outcome: $value'),
-      };
+    'ok' => Outcome.ok,
+    'error' => Outcome.error,
+    'guard_denied' => Outcome.guardDenied,
+    _ => throw FormatException('unknown outcome: $value'),
+  };
 }
 
 extension RunStatusJson on RunStatus {
@@ -40,9 +40,9 @@ final class PlanItem {
   final bool done;
 
   factory PlanItem.fromJson(Map<String, dynamic> json) => PlanItem(
-        text: json['text'] as String,
-        done: json['done'] as bool? ?? false,
-      );
+    text: json['text'] as String,
+    done: json['done'] as bool? ?? false,
+  );
 
   Map<String, dynamic> toJson() => {'text': text, 'done': done};
 }
@@ -53,15 +53,15 @@ sealed class Action {
   const Action();
 
   factory Action.fromJson(Map<String, dynamic> json) => switch (json['type']) {
-        'finish' => Finish(json['answer'] as String),
-        // Legacy single-call actions (pre-batch sessions) wrap into a
-        // batch of one so an old session file still resumes.
-        'tool_call' => ToolBatch([ToolCall.fromJson(json)]),
-        _ => ToolBatch([
-            for (final call in (json['tool_calls'] as List? ?? const []))
-              ToolCall.fromJson((call as Map).cast<String, dynamic>()),
-          ]),
-      };
+    'finish' => Finish(json['answer'] as String),
+    // Legacy single-call actions (pre-batch sessions) wrap into a
+    // batch of one so an old session file still resumes.
+    'tool_call' => ToolBatch([ToolCall.fromJson(json)]),
+    _ => ToolBatch([
+      for (final call in (json['tool_calls'] as List? ?? const []))
+        ToolCall.fromJson((call as Map).cast<String, dynamic>()),
+    ]),
+  };
 
   /// The tool calls this action carries, in the model's listed order;
   /// empty for a finish.
@@ -83,17 +83,17 @@ final class ToolCall {
   final Map<String, dynamic> arguments;
 
   factory ToolCall.fromJson(Map<String, dynamic> json) => ToolCall(
-        id: json['id'] as String?,
-        name: json['name'] as String,
-        arguments: (json['arguments'] as Map).cast<String, dynamic>(),
-      );
+    id: json['id'] as String?,
+    name: json['name'] as String,
+    arguments: (json['arguments'] as Map).cast<String, dynamic>(),
+  );
 
   Map<String, dynamic> toJson() => {
-        'type': 'tool_call',
-        if (id != null) 'id': id,
-        'name': name,
-        'arguments': arguments,
-      };
+    'type': 'tool_call',
+    if (id != null) 'id': id,
+    'name': name,
+    'arguments': arguments,
+  };
 }
 
 /// One step's action: one or more tool calls emitted together. Independent
@@ -107,9 +107,9 @@ final class ToolBatch extends Action {
 
   @override
   Map<String, dynamic> toJson() => {
-        'type': 'tool_calls',
-        'tool_calls': [for (final call in calls) call.toJson()],
-      };
+    'type': 'tool_calls',
+    'tool_calls': [for (final call in calls) call.toJson()],
+  };
 }
 
 final class Finish extends Action {
@@ -126,25 +126,24 @@ sealed class Entry {
   const Entry();
 
   factory Entry.fromJson(Map<String, dynamic> json) => switch (json['role']) {
-        'user' => UserEntry(
-            json['text'] as String,
-            images: [
-              for (final image in (json['images'] as List? ?? const []))
-                image as String,
-            ],
-          ),
-        'assistant' => AssistantEntry(
-            thought: json['thought'] as String,
-            action:
-                Action.fromJson((json['action'] as Map).cast<String, dynamic>()),
-          ),
-        'observation' => ObservationEntry(
-            text: json['text'] as String,
-            outcome: OutcomeJson.fromWire(json['outcome'] as String),
-            toolCallId: json['tool_call_id'] as String?,
-          ),
-        _ => throw FormatException('unknown entry role: ${json['role']}'),
-      };
+    'user' => UserEntry(
+      json['text'] as String,
+      images: [
+        for (final image in (json['images'] as List? ?? const []))
+          image as String,
+      ],
+    ),
+    'assistant' => AssistantEntry(
+      thought: json['thought'] as String,
+      action: Action.fromJson((json['action'] as Map).cast<String, dynamic>()),
+    ),
+    'observation' => ObservationEntry(
+      text: json['text'] as String,
+      outcome: OutcomeJson.fromWire(json['outcome'] as String),
+      toolCallId: json['tool_call_id'] as String?,
+    ),
+    _ => throw FormatException('unknown entry role: ${json['role']}'),
+  };
 
   Map<String, dynamic> toJson();
 }
@@ -160,10 +159,10 @@ final class UserEntry extends Entry {
 
   @override
   Map<String, dynamic> toJson() => {
-        'role': 'user',
-        'text': text,
-        if (images.isNotEmpty) 'images': images,
-      };
+    'role': 'user',
+    'text': text,
+    if (images.isNotEmpty) 'images': images,
+  };
 }
 
 final class AssistantEntry extends Entry {
@@ -172,8 +171,11 @@ final class AssistantEntry extends Entry {
   final Action action;
 
   @override
-  Map<String, dynamic> toJson() =>
-      {'role': 'assistant', 'thought': thought, 'action': action.toJson()};
+  Map<String, dynamic> toJson() => {
+    'role': 'assistant',
+    'thought': thought,
+    'action': action.toJson(),
+  };
 }
 
 final class ObservationEntry extends Entry {
@@ -192,11 +194,11 @@ final class ObservationEntry extends Entry {
 
   @override
   Map<String, dynamic> toJson() => {
-        'role': 'observation',
-        'text': text,
-        'outcome': outcome.wire,
-        if (toolCallId != null) 'tool_call_id': toolCallId,
-      };
+    'role': 'observation',
+    'text': text,
+    'outcome': outcome.wire,
+    if (toolCallId != null) 'tool_call_id': toolCallId,
+  };
 }
 
 final class ProviderResponse {
@@ -244,10 +246,10 @@ final class ToolDefinition {
   final Map<String, dynamic> parameters;
 
   Map<String, dynamic> toJson() => {
-        'name': name,
-        'description': description,
-        'parameters': parameters,
-      };
+    'name': name,
+    'description': description,
+    'parameters': parameters,
+  };
 }
 
 final class ToolOutcome {
@@ -255,7 +257,7 @@ final class ToolOutcome {
   const ToolOutcome.ok(String text) : this(Outcome.ok, text);
   const ToolOutcome.error(String text) : this(Outcome.error, text);
   const ToolOutcome.guardDenied(String text, {GuardArea? guard})
-      : this(Outcome.guardDenied, text, guard: guard);
+    : this(Outcome.guardDenied, text, guard: guard);
 
   final Outcome outcome;
   final String text;
@@ -299,6 +301,10 @@ abstract interface class RunObserver {
 
   /// A short phase label: `thinking`, `acting`, `done`, `blocked`.
   void onPhase(String phase);
+
+  /// The session plan was replaced (created or updated by the model, C1);
+  /// a human surface repaints its progress area.
+  void onPlan(List<PlanItem> plan);
 }
 
 final class ProviderRequest {
@@ -327,13 +333,14 @@ final class ImageAttachment {
   final List<int> bytes;
 
   /// The MIME type for [path], or null when the extension is unknown.
-  static String? mimeFor(String path) => switch (p.extension(path).toLowerCase()) {
-    '.png' => 'image/png',
-    '.jpg' || '.jpeg' => 'image/jpeg',
-    '.gif' => 'image/gif',
-    '.webp' => 'image/webp',
-    _ => null,
-  };
+  static String? mimeFor(String path) =>
+      switch (p.extension(path).toLowerCase()) {
+        '.png' => 'image/png',
+        '.jpg' || '.jpeg' => 'image/jpeg',
+        '.gif' => 'image/gif',
+        '.webp' => 'image/webp',
+        _ => null,
+      };
 }
 
 final class RunRequest {
@@ -361,25 +368,30 @@ final class RunResult {
   /// run wire shape); the human and automate surfaces render it.
   final List<RunTiming> timings;
 
-  factory RunResult.complete(String answer,
-          {List<RunTiming> timings = const <RunTiming>[]}) =>
-      RunResult(status: RunStatus.complete, answer: answer, timings: timings);
-  factory RunResult.incomplete(String answer,
-          {String? reason, List<RunTiming> timings = const <RunTiming>[]}) =>
-      RunResult(
-          status: RunStatus.incomplete,
-          answer: answer,
-          reason: reason,
-          timings: timings);
-  factory RunResult.blocked(
-          {String? reason, List<RunTiming> timings = const <RunTiming>[]}) =>
-      RunResult(status: RunStatus.blocked, reason: reason, timings: timings);
+  factory RunResult.complete(
+    String answer, {
+    List<RunTiming> timings = const <RunTiming>[],
+  }) => RunResult(status: RunStatus.complete, answer: answer, timings: timings);
+  factory RunResult.incomplete(
+    String answer, {
+    String? reason,
+    List<RunTiming> timings = const <RunTiming>[],
+  }) => RunResult(
+    status: RunStatus.incomplete,
+    answer: answer,
+    reason: reason,
+    timings: timings,
+  );
+  factory RunResult.blocked({
+    String? reason,
+    List<RunTiming> timings = const <RunTiming>[],
+  }) => RunResult(status: RunStatus.blocked, reason: reason, timings: timings);
 
   Map<String, dynamic> toJson() => {
-        'status': status.wire,
-        if (answer != null) 'answer': answer,
-        if (reason != null) 'reason': reason,
-      };
+    'status': status.wire,
+    if (answer != null) 'answer': answer,
+    if (reason != null) 'reason': reason,
+  };
 }
 
 /// One measured span of a run (C1/C6): a provider response, a tool dispatch,

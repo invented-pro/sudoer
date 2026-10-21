@@ -33,6 +33,10 @@ const RgbColor _model = RgbColor(245, 194, 231);
 
 final RegExp _ansi = RegExp(r'\x1b\[[0-9;]*m');
 
+/// The SGR escape pattern, public for the TUI's tokenizer (the tokens must
+/// agree with [visibleWidth] on what occupies a cell).
+final RegExp ansiSgrPattern = _ansi;
+
 /// Display width of [text] ignoring ANSI escape sequences.
 int visibleWidth(String text) => text.replaceAll(_ansi, '').length;
 
@@ -222,8 +226,7 @@ final class _Renderer {
     bool dim = false,
     bool italic = false,
     RgbColor? fg,
-  }) =>
-      _stylize(text, bold: bold, dim: dim, italic: italic, fg: fg);
+  }) => _stylize(text, bold: bold, dim: dim, italic: italic, fg: fg);
 
   List<String> blocks(List<md.Node> nodes) {
     final out = <String>[];
@@ -293,8 +296,11 @@ final class _Renderer {
         if (href == null || href == node.textContent) return label;
         return label + _s(' ($href)', dim: true);
       case 'img':
-        return _s('[image: ${node.attributes['alt'] ?? ''}]',
-            dim: true, fg: base ?? _model);
+        return _s(
+          '[image: ${node.attributes['alt'] ?? ''}]',
+          dim: true,
+          fg: base ?? _model,
+        );
       case 'br':
         return '\n';
       case 'input':
@@ -383,9 +389,20 @@ final class _Renderer {
   }
 
   static bool _isBlockTag(String tag) => const {
-        'p', 'ul', 'ol', 'blockquote', 'pre', 'table',
-        'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr',
-      }.contains(tag);
+    'p',
+    'ul',
+    'ol',
+    'blockquote',
+    'pre',
+    'table',
+    'h1',
+    'h2',
+    'h3',
+    'h4',
+    'h5',
+    'h6',
+    'hr',
+  }.contains(tag);
 
   List<String> _table(md.Element table) {
     final headerRows = <List<String>>[];
@@ -404,7 +421,10 @@ final class _Renderer {
     }
     final rows = [...headerRows, ...bodyRows];
     if (rows.isEmpty) return const [];
-    final cols = rows.fold<int>(0, (max, row) => row.length > max ? row.length : max);
+    final cols = rows.fold<int>(
+      0,
+      (max, row) => row.length > max ? row.length : max,
+    );
     final widths = List<int>.filled(cols, 1);
     for (final row in rows) {
       for (var i = 0; i < row.length; i++) {
@@ -420,7 +440,9 @@ final class _Renderer {
         cells.add(cell + ' ' * (gap < 0 ? 0 : gap));
       }
       return _s('│ ', fg: _slate) +
-          cells.map((cell) => bold ? _s(cell, bold: true) : cell).join(_s(' │ ', fg: _slate)) +
+          cells
+              .map((cell) => bold ? _s(cell, bold: true) : cell)
+              .join(_s(' │ ', fg: _slate)) +
           _s(' │', fg: _slate);
     }
 
@@ -429,7 +451,9 @@ final class _Renderer {
       out.add(render(row, bold: true));
     }
     if (headerRows.isNotEmpty) {
-      out.add(_s('├${widths.map((w) => '─' * (w + 2)).join('┼')}┤', fg: _slate));
+      out.add(
+        _s('├${widths.map((w) => '─' * (w + 2)).join('┼')}┤', fg: _slate),
+      );
     }
     for (final row in bodyRows) {
       out.add(render(row, bold: false));

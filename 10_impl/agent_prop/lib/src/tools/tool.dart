@@ -60,18 +60,22 @@ final class NetworkGuard {
   /// permitted by configuration.
   void check(Uri uri) {
     if (uri.scheme != 'http' && uri.scheme != 'https') {
-      throw const GuardDeniedException('only http/https URLs can be fetched',
-          area: GuardArea.network);
+      throw const GuardDeniedException(
+        'only http/https URLs can be fetched',
+        area: GuardArea.network,
+      );
     }
     if (!enabled) {
       throw const GuardDeniedException(
-          'web access is disabled; set web.enabled in the config to allow it',
-          area: GuardArea.network);
+        'web access is disabled; set web.enabled in the config to allow it',
+        area: GuardArea.network,
+      );
     }
     if (_denied(uri.host)) {
       throw GuardDeniedException(
-          'web egress to ${uri.host} is blocked by web.deny_hosts',
-          area: GuardArea.network);
+        'web egress to ${uri.host} is blocked by web.deny_hosts',
+        area: GuardArea.network,
+      );
     }
   }
 }
@@ -98,10 +102,10 @@ abstract class Tool {
   Future<ToolOutcome> execute(Map<String, dynamic> arguments);
 
   ToolDefinition get definition => ToolDefinition(
-        name: name,
-        description: description,
-        parameters: parameters,
-      );
+    name: name,
+    description: description,
+    parameters: parameters,
+  );
 }
 
 /// A tool whose execution can be aborted mid-flight (C8). The registry hands
@@ -109,7 +113,9 @@ abstract class Tool {
 /// to let finish before the loop notices the cancel.
 abstract interface class Cancellable {
   Future<ToolOutcome> executeCancellable(
-      Map<String, dynamic> args, CancelSignal cancel);
+    Map<String, dynamic> args,
+    CancelSignal cancel,
+  );
 }
 
 String? requireString(Map<String, dynamic> args, String key) {
@@ -188,8 +194,10 @@ final class ToolRegistry {
     final tool = tools[call.name];
     if (tool == null) {
       if (call.name.isEmpty) {
-        return ToolOutcome.error('tool call is missing a name; '
-            'available tools: ${tools.keys.join(', ')}');
+        return ToolOutcome.error(
+          'tool call is missing a name; '
+          'available tools: ${tools.keys.join(', ')}',
+        );
       }
       return ToolOutcome.error('unknown tool: ${call.name}');
     }
@@ -197,8 +205,10 @@ final class ToolRegistry {
     if (invalid != null) return ToolOutcome.error(invalid);
     try {
       if (cancel != null && tool is Cancellable) {
-        return await (tool as Cancellable)
-            .executeCancellable(call.arguments, cancel);
+        return await (tool as Cancellable).executeCancellable(
+          call.arguments,
+          cancel,
+        );
       }
       return await tool.execute(call.arguments);
     } on GuardDeniedException catch (e) {
@@ -217,19 +227,18 @@ List<Tool> builtinTools(
   WorkspaceBaseline? baseline,
   JobRegistry? jobs,
   Duration? buildTimeout,
-}) =>
-    [
-      ReadTool(guard),
-      WriteTool(guard),
-      EditTool(guard),
-      MultiEditTool(guard),
-      GlobTool(guard),
-      RunCommandTool(guard, timeoutOverride: buildTimeout),
-      SearchTool(guard),
-      JobTool(guard, jobs: jobs),
-      DiffTool(guard, baseline: baseline),
-      RestoreTool(guard, baseline: baseline),
-    ];
+}) => [
+  ReadTool(guard),
+  WriteTool(guard),
+  EditTool(guard),
+  MultiEditTool(guard),
+  GlobTool(guard),
+  RunCommandTool(guard, timeoutOverride: buildTimeout),
+  SearchTool(guard),
+  JobTool(guard, jobs: jobs),
+  DiffTool(guard, baseline: baseline),
+  RestoreTool(guard, baseline: baseline),
+];
 
 /// The built-in tools whose calls are independent and read-only: a step may
 /// dispatch them together in parallel (C1). Everything else (write, edit,
@@ -272,23 +281,23 @@ final class ReadTool extends Tool {
 
   @override
   Map<String, dynamic> get parameters => {
-        'type': 'object',
-        'additionalProperties': false,
-        'required': ['path'],
-        'properties': {
-          'path': {'type': 'string'},
-          'offset': {
-            'type': 'integer',
-            'minimum': 0,
-            'description': '0-based line index to start from',
-          },
-          'limit': {
-            'type': 'integer',
-            'minimum': 1,
-            'description': 'Maximum number of lines to return',
-          },
-        },
-      };
+    'type': 'object',
+    'additionalProperties': false,
+    'required': ['path'],
+    'properties': {
+      'path': {'type': 'string'},
+      'offset': {
+        'type': 'integer',
+        'minimum': 0,
+        'description': '0-based line index to start from',
+      },
+      'limit': {
+        'type': 'integer',
+        'minimum': 1,
+        'description': 'Maximum number of lines to return',
+      },
+    },
+  };
 
   @override
   String? validate(Map<String, dynamic> args) =>
@@ -310,7 +319,10 @@ final class ReadTool extends Tool {
       // numbers or other prefixes (frozen in the gate contract).
       final lines = file.readAsLinesSync();
       return ToolOutcome.ok(
-        lines.skip(offset is int ? offset : 0).take(limit is int ? limit : lines.length).join('\n'),
+        lines
+            .skip(offset is int ? offset : 0)
+            .take(limit is int ? limit : lines.length)
+            .join('\n'),
       );
     }
     return ToolOutcome.ok(content);
@@ -328,14 +340,14 @@ final class WriteTool extends Tool {
 
   @override
   Map<String, dynamic> get parameters => {
-        'type': 'object',
-        'additionalProperties': false,
-        'required': ['path', 'content'],
-        'properties': {
-          'path': {'type': 'string'},
-          'content': {'type': 'string'},
-        },
-      };
+    'type': 'object',
+    'additionalProperties': false,
+    'required': ['path', 'content'],
+    'properties': {
+      'path': {'type': 'string'},
+      'content': {'type': 'string'},
+    },
+  };
 
   @override
   String? validate(Map<String, dynamic> args) =>
@@ -363,20 +375,21 @@ final class EditTool extends Tool {
 
   @override
   Map<String, dynamic> get parameters => {
-        'type': 'object',
-        'additionalProperties': false,
-        'required': ['path', 'old', 'new'],
-        'properties': {
-          'path': {'type': 'string'},
-          'old': {'type': 'string'},
-          'new': {'type': 'string'},
-          'replace_all': {
-            'type': 'boolean',
-            'description': 'Rewrite every occurrence instead of requiring a '
-                'unique match',
-          },
-        },
-      };
+    'type': 'object',
+    'additionalProperties': false,
+    'required': ['path', 'old', 'new'],
+    'properties': {
+      'path': {'type': 'string'},
+      'old': {'type': 'string'},
+      'new': {'type': 'string'},
+      'replace_all': {
+        'type': 'boolean',
+        'description':
+            'Rewrite every occurrence instead of requiring a '
+            'unique match',
+      },
+    },
+  };
 
   @override
   String? validate(Map<String, dynamic> args) =>
@@ -397,15 +410,17 @@ final class EditTool extends Tool {
     if (count == 0) return ToolOutcome.error('old text not found');
     if (count > 1 && !replaceAll) {
       return ToolOutcome.error(
-          'old text is ambiguous: $count matches; '
-          'pass replace_all to rewrite all of them');
+        'old text is ambiguous: $count matches; '
+        'pass replace_all to rewrite all of them',
+      );
     }
     final updated = replaceAll
         ? content.replaceAll(old, args['new'] as String)
         : content.replaceFirst(old, args['new'] as String);
     file.writeAsStringSync(updated);
     return ToolOutcome.ok(
-        'edited ${args['path']} ($count occurrence${count == 1 ? '' : 's'})');
+      'edited ${args['path']} ($count occurrence${count == 1 ? '' : 's'})',
+    );
   }
 }
 
@@ -424,27 +439,27 @@ final class MultiEditTool extends Tool {
 
   @override
   Map<String, dynamic> get parameters => {
-        'type': 'object',
-        'additionalProperties': false,
-        'required': ['path', 'edits'],
-        'properties': {
-          'path': {'type': 'string'},
-          'edits': {
-            'type': 'array',
-            'minItems': 1,
-            'items': {
-              'type': 'object',
-              'additionalProperties': false,
-              'required': ['old', 'new'],
-              'properties': {
-                'old': {'type': 'string'},
-                'new': {'type': 'string'},
-                'replace_all': {'type': 'boolean'},
-              },
-            },
+    'type': 'object',
+    'additionalProperties': false,
+    'required': ['path', 'edits'],
+    'properties': {
+      'path': {'type': 'string'},
+      'edits': {
+        'type': 'array',
+        'minItems': 1,
+        'items': {
+          'type': 'object',
+          'additionalProperties': false,
+          'required': ['old', 'new'],
+          'properties': {
+            'old': {'type': 'string'},
+            'new': {'type': 'string'},
+            'replace_all': {'type': 'boolean'},
           },
         },
-      };
+      },
+    },
+  };
 
   @override
   String? validate(Map<String, dynamic> args) {
@@ -481,12 +496,14 @@ final class MultiEditTool extends Tool {
       final count = old.allMatches(content).length;
       if (count == 0) {
         return ToolOutcome.error(
-            'edit ${i + 1}: old text not found; no edits applied');
+          'edit ${i + 1}: old text not found; no edits applied',
+        );
       }
       if (count > 1 && !replaceAll) {
         return ToolOutcome.error(
-            'edit ${i + 1}: old text is ambiguous ($count matches); '
-            'no edits applied');
+          'edit ${i + 1}: old text is ambiguous ($count matches); '
+          'no edits applied',
+        );
       }
       content = replaceAll
           ? content.replaceAll(old, edit['new'] as String)
@@ -518,35 +535,36 @@ final class RunCommandTool extends Tool implements Cancellable {
 
   @override
   Map<String, dynamic> get parameters => {
-        'type': 'object',
-        'additionalProperties': false,
-        'required': ['command'],
-        'properties': {
-          'command': {'type': 'string'},
-        },
-      };
+    'type': 'object',
+    'additionalProperties': false,
+    'required': ['command'],
+    'properties': {
+      'command': {'type': 'string'},
+    },
+  };
 
   @override
-  String? validate(Map<String, dynamic> args) =>
-      requireString(args, 'command');
+  String? validate(Map<String, dynamic> args) => requireString(args, 'command');
 
   @override
   Future<ToolOutcome> execute(Map<String, dynamic> args) => _run(args, null);
 
   @override
   Future<ToolOutcome> executeCancellable(
-          Map<String, dynamic> args, CancelSignal cancel) =>
-      _run(args, cancel);
+    Map<String, dynamic> args,
+    CancelSignal cancel,
+  ) => _run(args, cancel);
 
   Future<ToolOutcome> _run(
-      Map<String, dynamic> args, CancelSignal? cancel) async {
+    Map<String, dynamic> args,
+    CancelSignal? cancel,
+  ) async {
     if (cancel?.isCancelled ?? false) {
       return const ToolOutcome.error('command cancelled');
     }
     final dir = p.normalize(p.absolute(workspaceRoot));
     final host = shell ?? HostShell.host;
-    final (process, grouped) =
-        await host.start(args['command'] as String, dir);
+    final (process, grouped) = await host.start(args['command'] as String, dir);
     var timedOut = false;
     var cancelled = false;
     // Kill the whole process tree when the host leads one, so a shell that
@@ -569,14 +587,22 @@ final class RunCommandTool extends Tool implements Cancellable {
 
     process.stdout
         .transform(utf8.decoder)
-        .listen(output.write, onDone: () => complete(outDone), onError: (_) {
-      complete(outDone);
-    });
+        .listen(
+          output.write,
+          onDone: () => complete(outDone),
+          onError: (_) {
+            complete(outDone);
+          },
+        );
     process.stderr
         .transform(utf8.decoder)
-        .listen(output.write, onDone: () => complete(errDone), onError: (_) {
-      complete(errDone);
-    });
+        .listen(
+          output.write,
+          onDone: () => complete(errDone),
+          onError: (_) {
+            complete(errDone);
+          },
+        );
     final exitCode = await process.exitCode;
     killer.cancel();
     if (cancelled) {
@@ -612,17 +638,17 @@ final class GlobTool extends Tool {
 
   @override
   Map<String, dynamic> get parameters => {
-        'type': 'object',
-        'additionalProperties': false,
-        'required': ['pattern'],
-        'properties': {
-          'pattern': {'type': 'string'},
-          'path': {
-            'type': 'string',
-            'description': 'Directory to search under, workspace-relative',
-          },
-        },
-      };
+    'type': 'object',
+    'additionalProperties': false,
+    'required': ['pattern'],
+    'properties': {
+      'pattern': {'type': 'string'},
+      'path': {
+        'type': 'string',
+        'description': 'Directory to search under, workspace-relative',
+      },
+    },
+  };
 
   @override
   String? validate(Map<String, dynamic> args) {
@@ -645,8 +671,8 @@ final class GlobTool extends Tool {
     final matches = <String>[];
     var capped = false;
     void walk(Directory dir) {
-      final entries = dir.listSync(followLinks: false)..sort(
-          (a, b) => a.path.compareTo(b.path));
+      final entries = dir.listSync(followLinks: false)
+        ..sort((a, b) => a.path.compareTo(b.path));
       for (final entry in entries) {
         final name = p.basename(entry.path);
         if (entry is Directory) {
@@ -655,8 +681,9 @@ final class GlobTool extends Tool {
           continue;
         }
         if (entry is! File) continue;
-        final relative = p.posix
-            .joinAll(p.relative(entry.path, from: root).split(p.separator));
+        final relative = p.posix.joinAll(
+          p.relative(entry.path, from: root).split(p.separator),
+        );
         if (!globMatch(pattern, relative)) continue;
         if (matches.length >= kGlobCap) {
           capped = true;
@@ -669,9 +696,11 @@ final class GlobTool extends Tool {
     walk(scopeDir);
     if (matches.isEmpty) return ToolOutcome.ok('no matches');
     matches.sort();
-    return ToolOutcome.ok(capped
-        ? '${matches.join('\n')}\n… more than $kGlobCap matches'
-        : matches.join('\n'));
+    return ToolOutcome.ok(
+      capped
+          ? '${matches.join('\n')}\n… more than $kGlobCap matches'
+          : matches.join('\n'),
+    );
   }
 }
 
@@ -738,14 +767,14 @@ final class SearchTool extends Tool {
 
   @override
   Map<String, dynamic> get parameters => {
-        'type': 'object',
-        'additionalProperties': false,
-        'required': ['pattern'],
-        'properties': {
-          'pattern': {'type': 'string'},
-          'path': {'type': 'string'},
-        },
-      };
+    'type': 'object',
+    'additionalProperties': false,
+    'required': ['pattern'],
+    'properties': {
+      'pattern': {'type': 'string'},
+      'path': {'type': 'string'},
+    },
+  };
 
   @override
   String? validate(Map<String, dynamic> args) {

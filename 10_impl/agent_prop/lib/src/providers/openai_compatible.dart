@@ -16,7 +16,7 @@ import 'provider.dart';
 /// C2 adapter for any OpenAI-compatible chat-completions endpoint.
 final class OpenAiCompatibleProvider implements Provider, ClosableProvider {
   OpenAiCompatibleProvider(this.config, {http.Client? client})
-      : _client = client ?? http.Client();
+    : _client = client ?? http.Client();
 
   final ProviderConfig config;
   final http.Client _client;
@@ -29,6 +29,7 @@ final class OpenAiCompatibleProvider implements Provider, ClosableProvider {
     ProviderRequest request, {
     void Function(String delta)? onDelta,
     void Function(String delta)? onReasoning,
+    void Function(List<PlanItem> plan)? onPlan,
     CancelSignal? cancel,
   }) async {
     if (cancel?.isCancelled ?? false) {
@@ -58,43 +59,61 @@ final class OpenAiCompatibleProvider implements Provider, ClosableProvider {
       final problem = apiKeyProblem(apiKey);
       if (problem != null) {
         throw StepFailure.unrecoverable(
-            'provider API key is invalid: $problem; '
-            'run `sudoer-prop --setup` to replace it');
+          'provider API key is invalid: $problem; '
+          'run `sudoer-prop --setup` to replace it',
+        );
       }
       httpRequest.headers['authorization'] = 'Bearer $apiKey';
     }
 
     final http.StreamedResponse response;
     try {
-      response =
-          await raceCancel(_client.send(httpRequest), cancel).timeout(kModelTimeout);
+      response = await raceCancel(
+        _client.send(httpRequest),
+        cancel,
+      ).timeout(kModelTimeout);
     } on TimeoutException {
       throw const StepFailure.timeout('model call timed out');
     }
     if (response.statusCode != 200) {
       final body = await response.stream.bytesToString();
-      final hint = (response.statusCode == 401 || response.statusCode == 403) &&
+      final hint =
+          (response.statusCode == 401 || response.statusCode == 403) &&
               apiKey != null &&
               apiKey.isNotEmpty
-          ? minimaxRegionHint(
-              presetId: config.preset, baseUrl: config.baseUrl)
+          ? minimaxRegionHint(presetId: config.preset, baseUrl: config.baseUrl)
           : '';
       throw StepFailure.unrecoverable(
-          'provider HTTP ${response.statusCode}: $body'
-          '${hint.isEmpty ? '' : ' $hint'}');
+        'provider HTTP ${response.statusCode}: $body'
+        '${hint.isEmpty ? '' : ' $hint'}',
+      );
     }
-    return _stream(response, onDelta, onReasoning, cancel);
+    return _stream(response, onDelta, onReasoning, onPlan, cancel);
   }
 
   Future<ProviderResponse> _stream(
     http.StreamedResponse response,
     void Function(String delta)? onDelta,
     void Function(String delta)? onReasoning,
+    void Function(List<PlanItem> plan)? onPlan,
     CancelSignal? cancel,
   ) async {
     final think = ThinkTextStream();
     final text = PlanTextStream();
     final calls = <int, _CallBuilder>{};
+    // The plan panel advances while the block is still streaming: whenever
+    // the parser has items that differ from the last report, push them out.
+    var livePlanKey = '';
+    void pushLivePlan() {
+      final live = text.plan;
+      if (live == null || onPlan == null) return;
+      final key = [
+        for (final item in live) '${item.done ? 'x' : ' '}:${item.text}',
+      ].join('\u{1}');
+      if (key == livePlanKey) return;
+      livePlanKey = key;
+      onPlan(List<PlanItem>.of(live));
+    }
     // Reasoning carried in its own delta field (GLM/Qwen-style
     // `reasoning_content`) instead of an inline `<think>` block: the two
     // conventions compose — field reasoning is never visible text.
@@ -130,11 +149,14 @@ final class OpenAiCompatibleProvider implements Provider, ClosableProvider {
             final chunk = text.add(thinkChunk.visible);
             if (chunk.isNotEmpty) onDelta?.call(chunk);
           }
+          pushLivePlan();
         }
         for (final raw in (delta['tool_calls'] as List? ?? const [])) {
           final tc = (raw as Map).cast<String, dynamic>();
           final builder = calls.putIfAbsent(
-              (tc['index'] as int?) ?? 0, () => _CallBuilder());
+            (tc['index'] as int?) ?? 0,
+            () => _CallBuilder(),
+          );
           // MiniMax (and possibly other vendors) repeat the call on later
           // chunks with empty strings for id/name; merge only non-empty
           // values so the first chunk's id and name survive to the end.
@@ -167,25 +189,27 @@ final class OpenAiCompatibleProvider implements Provider, ClosableProvider {
       if (think.reasoning.isNotEmpty) think.reasoning,
       if (fieldReasoning.isNotEmpty) fieldReasoning.toString(),
     ].join('\n');
-    return parseCompletion(Completion(
-      text: parsed.text,
-      toolCalls: _toolCalls(calls),
-      plan: parsed.plan,
-      reasoning: reasoning,
-    ));
+    return parseCompletion(
+      Completion(
+        text: parsed.text,
+        toolCalls: _toolCalls(calls),
+        plan: parsed.plan,
+        reasoning: reasoning,
+      ),
+    );
   }
 
   List<Map<String, dynamic>> _toolJson(List<ToolDefinition> tools) => [
-        for (final tool in tools)
-          {
-            'type': 'function',
-            'function': {
-              'name': tool.name,
-              'description': tool.description,
-              'parameters': tool.parameters,
-            },
-          }
-      ];
+    for (final tool in tools)
+      {
+        'type': 'function',
+        'function': {
+          'name': tool.name,
+          'description': tool.description,
+          'parameters': tool.parameters,
+        },
+      },
+  ];
 }
 
 final class _CallBuilder {
@@ -195,13 +219,13 @@ final class _CallBuilder {
 }
 
 List<ToolCall> _toolCalls(Map<int, _CallBuilder> calls) => [
-      for (final index in calls.keys.toList()..sort())
-        ToolCall(
-          id: calls[index]!.id,
-          name: calls[index]!.name ?? '',
-          arguments: _decodeArguments(calls[index]!.arguments.toString()),
-        ),
-    ];
+  for (final index in calls.keys.toList()..sort())
+    ToolCall(
+      id: calls[index]!.id,
+      name: calls[index]!.name ?? '',
+      arguments: _decodeArguments(calls[index]!.arguments.toString()),
+    ),
+];
 
 Map<String, dynamic> _decodeArguments(String raw) {
   if (raw.isEmpty) return const {};

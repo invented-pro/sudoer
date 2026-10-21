@@ -49,7 +49,7 @@ String _blockingCommand() =>
 /// Delete a temp directory, tolerating Windows holding a just-killed
 /// process's working directory inside it for a moment (errno 32).
 Future<void> _deleteTemp(Directory dir) async {
-  for (var attempt = 0;; attempt++) {
+  for (var attempt = 0; ; attempt++) {
     try {
       dir.deleteSync(recursive: true);
       return;
@@ -73,7 +73,10 @@ class _RecordingObserver implements RunObserver {
   final List<Duration?> observations = [];
   final List<String> phases = [];
   final List<String> compactions = [];
+  int plans = 0;
 
+  @override
+  void onPlan(List<PlanItem> plan) => plans++;
   @override
   void onDelta(String text) {}
   @override
@@ -105,8 +108,10 @@ void main() {
     });
 
     test('requires base_url for openai-compatible', () {
-      expect(() => _config(kind: 'openai-compatible'),
-          throwsA(isA<ConfigException>()));
+      expect(
+        () => _config(kind: 'openai-compatible'),
+        throwsA(isA<ConfigException>()),
+      );
     });
 
     test('rejects a non-positive context window', () {
@@ -119,8 +124,9 @@ void main() {
       final path = p.join(dir.path, 'sudoer.json');
       expect(
         () => loadConfigFile(path),
-        throwsA(isA<ConfigNotFoundException>()
-            .having((e) => e.path, 'path', path)),
+        throwsA(
+          isA<ConfigNotFoundException>().having((e) => e.path, 'path', path),
+        ),
       );
       final report = missingConfigReport(path);
       expect(report, contains(path));
@@ -134,20 +140,21 @@ void main() {
       expect(decoded['web'], isA<Map>());
     });
 
-    test('relative paths in a config file resolve against its directory',
-        () {
+    test('relative paths in a config file resolve against its directory', () {
       final dir = Directory.systemTemp.createTempSync('sudoer_cfg');
       addTearDown(() => dir.deleteSync(recursive: true));
       final path = p.join(dir.path, 'sudoer.json');
-      File(path).writeAsStringSync(jsonEncode({
-        'provider': {
-          'kind': 'ollama',
-          'model': 'llama3.1',
-          'context_window': 8192,
-        },
-        'workspace_root': 'ws',
-        'session_dir': 'ws/sessions',
-      }));
+      File(path).writeAsStringSync(
+        jsonEncode({
+          'provider': {
+            'kind': 'ollama',
+            'model': 'llama3.1',
+            'context_window': 8192,
+          },
+          'workspace_root': 'ws',
+          'session_dir': 'ws/sessions',
+        }),
+      );
       final config = loadConfigFile(path);
       expect(config.workspaceRoot, p.join(dir.path, 'ws'));
       expect(config.sessionDir, p.join(dir.path, 'ws', 'sessions'));
@@ -155,16 +162,20 @@ void main() {
 
     test('defaults session_dir under the workspace', () {
       final config = _config(workspaceRoot: '/tmp/ws');
-      expect(config.sessionDir,
-          p.join(config.workspaceRoot, '.sudoer', 'sessions'));
+      expect(
+        config.sessionDir,
+        p.join(config.workspaceRoot, '.sudoer', 'sessions'),
+      );
     });
 
     test('defaults workspace_root to the working directory', () {
       final config = Config.fromJson({
         'provider': {'kind': 'ollama', 'model': 'm', 'context_window': 100},
       });
-      expect(config.workspaceRoot,
-          p.normalize(p.absolute(Directory.current.path)));
+      expect(
+        config.workspaceRoot,
+        p.normalize(p.absolute(Directory.current.path)),
+      );
     });
 
     test('copyWith changes the workspace but keeps session_dir', () {
@@ -183,39 +194,50 @@ void main() {
     });
 
     test('a tool call is taken as the action', () {
-      final response = parseCompletion(const Completion(
-        text: 'reading',
-        toolCalls: [ToolCall(name: 'read', arguments: {'path': 'a.txt'})],
-      ));
+      final response = parseCompletion(
+        const Completion(
+          text: 'reading',
+          toolCalls: [
+            ToolCall(name: 'read', arguments: {'path': 'a.txt'}),
+          ],
+        ),
+      );
       expect(response.action, isA<ToolBatch>());
       expect((response.action as ToolBatch).calls.single.name, 'read');
     });
 
     test('a plan update rides alongside the action', () {
-      final response = parseCompletion(const Completion(
-        text: 'planning',
-        toolCalls: [ToolCall(name: 'read', arguments: {'path': 'a.txt'})],
-        plan: [PlanItem(text: 'read it')],
-      ));
+      final response = parseCompletion(
+        const Completion(
+          text: 'planning',
+          toolCalls: [
+            ToolCall(name: 'read', arguments: {'path': 'a.txt'}),
+          ],
+          plan: [PlanItem(text: 'read it')],
+        ),
+      );
       expect(response.plan, isNotNull);
       expect(response.plan!.single.text, 'read it');
     });
   });
 
   group('tools (C3)', () {
-    test('a path outside the workspace root resolves and reads (anchor)', () async {
-      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
-      addTearDown(() => temp.deleteSync(recursive: true));
-      final workspace = Directory('${temp.path}/ws')..createSync();
-      File('${temp.path}/secret.txt').writeAsStringSync('top secret');
-      final registry = ToolRegistry(workspaceRoot: workspace.path);
-      final outcome = await registry.dispatch(
-        const ToolCall(name: 'read', arguments: {'path': '../secret.txt'}),
-      );
-      // The root is an anchor, not a fence: the read is an ordinary path.
-      expect(outcome.outcome, Outcome.ok);
-      expect(outcome.text, contains('top secret'));
-    });
+    test(
+      'a path outside the workspace root resolves and reads (anchor)',
+      () async {
+        final temp = Directory.systemTemp.createTempSync('sudoer-test-');
+        addTearDown(() => temp.deleteSync(recursive: true));
+        final workspace = Directory('${temp.path}/ws')..createSync();
+        File('${temp.path}/secret.txt').writeAsStringSync('top secret');
+        final registry = ToolRegistry(workspaceRoot: workspace.path);
+        final outcome = await registry.dispatch(
+          const ToolCall(name: 'read', arguments: {'path': '../secret.txt'}),
+        );
+        // The root is an anchor, not a fence: the read is an ordinary path.
+        expect(outcome.outcome, Outcome.ok);
+        expect(outcome.text, contains('top secret'));
+      },
+    );
 
     test('a missing file is a recoverable error', () async {
       final temp = Directory.systemTemp.createTempSync('sudoer-test-');
@@ -248,7 +270,9 @@ void main() {
 
     test('deny a host on the blacklist', () async {
       final tool = WebFetchTool(
-          guard(), NetworkGuard(denyHosts: ['blocked.com']));
+        guard(),
+        NetworkGuard(denyHosts: ['blocked.com']),
+      );
       final outcome = await tool.execute({'url': 'https://blocked.com'});
       expect(outcome.outcome, Outcome.guardDenied);
     });
@@ -257,8 +281,10 @@ void main() {
       final tool = WebFetchTool(
         guard(),
         NetworkGuard(),
-        client: MockClient((_) async =>
-            http.Response('ok', 200, headers: {'content-type': 'text/plain'})),
+        client: MockClient(
+          (_) async =>
+              http.Response('ok', 200, headers: {'content-type': 'text/plain'}),
+        ),
       );
       final outcome = await tool.execute({'url': 'https://anywhere.example'});
       expect(outcome.outcome, Outcome.ok);
@@ -269,12 +295,14 @@ void main() {
       final tool = WebFetchTool(
         guard(),
         NetworkGuard(enabled: true),
-        client: MockClient((_) async => http.Response(
-              '<html><body><h1>Hi</h1><script>evil()</script>'
-              '<p>A &amp; B</p></body></html>',
-              200,
-              headers: {'content-type': 'text/html'},
-            )),
+        client: MockClient(
+          (_) async => http.Response(
+            '<html><body><h1>Hi</h1><script>evil()</script>'
+            '<p>A &amp; B</p></body></html>',
+            200,
+            headers: {'content-type': 'text/html'},
+          ),
+        ),
       );
       final outcome = await tool.execute({'url': 'https://example.com/'});
       expect(outcome.outcome, Outcome.ok);
@@ -290,8 +318,10 @@ void main() {
       final tool = WebFetchTool(
         guard(),
         NetworkGuard(enabled: true),
-        client: MockClient((_) async => http.Response(body, 200,
-            headers: {'content-type': 'text/plain'})),
+        client: MockClient(
+          (_) async =>
+              http.Response(body, 200, headers: {'content-type': 'text/plain'}),
+        ),
       );
       final outcome = await tool.execute({'url': 'https://example.com/big'});
       expect(outcome.outcome, Outcome.ok);
@@ -302,8 +332,10 @@ void main() {
       final tool = WebFetchTool(
         guard(),
         NetworkGuard(enabled: true),
-        client: MockClient((_) async => http.Response('PNG', 200,
-            headers: {'content-type': 'image/png'})),
+        client: MockClient(
+          (_) async =>
+              http.Response('PNG', 200, headers: {'content-type': 'image/png'}),
+        ),
       );
       final outcome = await tool.execute({'url': 'https://example.com/i.png'});
       expect(outcome.outcome, Outcome.error);
@@ -320,8 +352,11 @@ void main() {
           if (calls == 1) {
             return http.Response('', 302, headers: {'location': '/final'});
           }
-          return http.Response('done', 200,
-              headers: {'content-type': 'text/plain'});
+          return http.Response(
+            'done',
+            200,
+            headers: {'content-type': 'text/plain'},
+          );
         }),
       );
       final outcome = await tool.execute({'url': 'https://example.com/start'});
@@ -331,8 +366,7 @@ void main() {
     });
 
     test('search formats results from the backend', () async {
-      final web =
-          WebConfig(enabled: true, searchUrl: 'http://localhost:8080');
+      final web = WebConfig(enabled: true, searchUrl: 'http://localhost:8080');
       final tool = WebSearchTool(
         guard(),
         NetworkGuard(enabled: true),
@@ -344,12 +378,8 @@ void main() {
           return http.Response(
             jsonEncode({
               'results': [
-                {
-                  'title': 'Dart',
-                  'url': 'https://dart.dev',
-                  'content': 'lang',
-                }
-              ]
+                {'title': 'Dart', 'url': 'https://dart.dev', 'content': 'lang'},
+              ],
             }),
             200,
             headers: {'content-type': 'application/json'},
@@ -378,13 +408,16 @@ void main() {
       final temp = Directory.systemTemp.createTempSync('sudoer-test-');
       addTearDown(() => temp.deleteSync(recursive: true));
 
-      final defaults =
-          _config(workspaceRoot: temp.path, sessionDir: temp.path);
+      final defaults = _config(workspaceRoot: temp.path, sessionDir: temp.path);
       expect(defaults.web.enabled, isTrue);
       final onAgent = PropAgent.assemble(
-          config: defaults, provider: ScriptedProvider.fromJson({'steps': []}));
-      expect(onAgent.tools.definitions.map((d) => d.name),
-          containsAll(['web_search', 'web_fetch']));
+        config: defaults,
+        provider: ScriptedProvider.fromJson({'steps': []}),
+      );
+      expect(
+        onAgent.tools.definitions.map((d) => d.name),
+        containsAll(['web_search', 'web_fetch']),
+      );
 
       final off = Config.fromJson({
         'provider': {
@@ -394,14 +427,21 @@ void main() {
         },
         'workspace_root': temp.path,
         'session_dir': temp.path,
-        'web': {'enabled': false, 'deny_hosts': ['example.com']},
+        'web': {
+          'enabled': false,
+          'deny_hosts': ['example.com'],
+        },
       });
       expect(off.web.enabled, isFalse);
       expect(off.web.denyHosts, ['example.com']);
       final offAgent = PropAgent.assemble(
-          config: off, provider: ScriptedProvider.fromJson({'steps': []}));
-      expect(offAgent.tools.definitions.map((d) => d.name),
-          isNot(contains('web_fetch')));
+        config: off,
+        provider: ScriptedProvider.fromJson({'steps': []}),
+      );
+      expect(
+        offAgent.tools.definitions.map((d) => d.name),
+        isNot(contains('web_fetch')),
+      );
     });
   });
 
@@ -412,8 +452,9 @@ void main() {
       final session = Session.create(workspaceRoot: temp.path)
         ..plan.add(const PlanItem(text: 'step one'))
         ..transcript.add(const UserEntry('do it'))
-        ..transcript.add(const ObservationEntry(
-            text: 'ok', outcome: Outcome.ok));
+        ..transcript.add(
+          const ObservationEntry(text: 'ok', outcome: Outcome.ok),
+        );
 
       final path = session.save(temp.path);
       final loaded = Session.load(temp.path, session.id);
@@ -451,16 +492,17 @@ void main() {
                   'type': 'tool_call',
                   'name': 'read',
                   'arguments': {'path': 'README.md'},
-                }
+                },
               ],
-            }
+            },
           },
-          {'complete': {'text': 'hello'}},
-        ]
+          {
+            'complete': {'text': 'hello'},
+          },
+        ],
       });
 
-      final agent =
-          PropAgent.assemble(config: config, provider: provider);
+      final agent = PropAgent.assemble(config: config, provider: provider);
       final result = await agent.run(const RunRequest('read it'));
 
       expect(result.status, RunStatus.complete);
@@ -474,12 +516,13 @@ void main() {
       final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
       final provider = ScriptedProvider.fromJson({
         'steps': [
-          {'error': 'unrecoverable'}
-        ]
+          {'error': 'unrecoverable'},
+        ],
       });
-      final result =
-          await PropAgent.assemble(config: config, provider: provider)
-              .run(const RunRequest('do it'));
+      final result = await PropAgent.assemble(
+        config: config,
+        provider: provider,
+      ).run(const RunRequest('do it'));
       expect(result.status, RunStatus.blocked);
     });
 
@@ -488,8 +531,10 @@ void main() {
       addTearDown(() => temp.deleteSync(recursive: true));
       final workspace = Directory('${temp.path}/ws')..createSync();
       File('${temp.path}/secret.txt').writeAsStringSync('top secret');
-      final config =
-          _config(workspaceRoot: workspace.path, sessionDir: temp.path);
+      final config = _config(
+        workspaceRoot: workspace.path,
+        sessionDir: temp.path,
+      );
       final provider = ScriptedProvider.fromJson({
         'steps': [
           {
@@ -500,12 +545,14 @@ void main() {
                   'type': 'tool_call',
                   'name': 'read',
                   'arguments': {'path': '../secret.txt'},
-                }
+                },
               ],
-            }
+            },
           },
-          {'complete': {'text': 'got it'}},
-        ]
+          {
+            'complete': {'text': 'got it'},
+          },
+        ],
       });
       final agent = PropAgent.assemble(config: config, provider: provider);
       final result = await agent.run(const RunRequest('read it'));
@@ -513,8 +560,9 @@ void main() {
       // A path outside the workspace root is an ordinary path: the read
       // succeeds and the run completes; only the network guard denies.
       expect(result.status, RunStatus.complete);
-      final observation =
-          agent.session.transcript.whereType<ObservationEntry>().first;
+      final observation = agent.session.transcript
+          .whereType<ObservationEntry>()
+          .first;
       expect(observation.outcome, Outcome.ok);
       expect(observation.text, contains('top secret'));
     });
@@ -538,9 +586,9 @@ void main() {
                   'type': 'tool_call',
                   'name': 'read',
                   'arguments': {'path': 'a.txt'},
-                }
+                },
               ],
-            }
+            },
           },
           {
             'complete': {
@@ -549,15 +597,22 @@ void main() {
                 {'text': 'read a.txt', 'done': true},
                 {'text': 'answer', 'done': true},
               ],
-            }
+            },
           },
-        ]
+        ],
       });
       final agent = PropAgent.assemble(config: config, provider: provider);
-      await agent.run(const RunRequest('read and answer'));
-      expect([for (final item in agent.session.plan) item.text],
-          ['read a.txt', 'answer']);
+      final observer = _RecordingObserver();
+      await agent.run(const RunRequest('read and answer'), observer: observer);
+      expect(
+        [for (final item in agent.session.plan) item.text],
+        ['read a.txt', 'answer'],
+      );
       expect(agent.session.plan.every((item) => item.done), isTrue);
+      // Every plan revision reaches the live observer as it lands (C1): the
+      // loop applies each response's plan through the streaming hook, and a
+      // TUI repaints its progress panel the moment the model revises.
+      expect(observer.plans, 2);
     });
 
     test('sustained productive steps run past the old step cap', () async {
@@ -574,18 +629,24 @@ void main() {
                 'type': 'tool_call',
                 'name': 'read',
                 'arguments': {'path': 'f$i.txt'},
-              }
+              },
             ],
-          }
+          },
         });
       }
       final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
       final provider = ScriptedProvider.fromJson({
-        'steps': [...reads, {'complete': {'text': 'done'}}]
+        'steps': [
+          ...reads,
+          {
+            'complete': {'text': 'done'},
+          },
+        ],
       });
-      final result =
-          await PropAgent.assemble(config: config, provider: provider)
-              .run(const RunRequest('read every file'));
+      final result = await PropAgent.assemble(
+        config: config,
+        provider: provider,
+      ).run(const RunRequest('read every file'));
       expect(result.status, RunStatus.complete);
       expect(result.answer, 'done');
     });
@@ -603,9 +664,9 @@ void main() {
               'type': 'tool_call',
               'name': 'read',
               'arguments': {'path': 'a.txt'},
-            }
+            },
           ],
-        }
+        },
       };
       final provider = ScriptedProvider.fromJson({
         'steps': [
@@ -613,8 +674,10 @@ void main() {
           read,
           read,
           read,
-          {'complete': {'text': 'a.txt contains static'}},
-        ]
+          {
+            'complete': {'text': 'a.txt contains static'},
+          },
+        ],
       });
       final agent = PropAgent.assemble(config: config, provider: provider);
       final result = await agent.run(const RunRequest('read it repeatedly'));
@@ -622,133 +685,146 @@ void main() {
       expect(result.status, RunStatus.incomplete);
       expect(result.answer, 'a.txt contains static');
       expect(result.reason, contains('stalled'));
-      expect(
-          agent.session.transcript.whereType<ObservationEntry>().length, 4);
+      expect(agent.session.transcript.whereType<ObservationEntry>().length, 4);
     });
 
-    test('a re-fetch recovering a cleared observation is progress, not a stall',
-        () async {
-      if (Platform.isWindows) {
-        // The bulky command that pushes the read out of the tail is POSIX
-        // shell syntax; the clearing logic itself is platform-neutral.
-        return;
-      }
-      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
-      addTearDown(() => temp.deleteSync(recursive: true));
-      // A big file read, then bulky non-refetchable output pushing it out of
-      // the verbatim tail: C4 clears the read to a placeholder, and the
-      // model's re-fetch must count as recovery progress (C8), not a repeat.
-      File('${temp.path}/a.txt')
-          .writeAsStringSync(List.filled(1300, 'filler line').join('\n'));
-      final config = _config(
-          workspaceRoot: temp.path, sessionDir: temp.path, window: 8000);
-      final read = {
-        'complete': {
-          'text': 'reading',
-          'tool_calls': [
-            {
-              'type': 'tool_call',
-              'name': 'read',
-              'arguments': {'path': 'a.txt'},
-            }
-          ],
+    test(
+      'a re-fetch recovering a cleared observation is progress, not a stall',
+      () async {
+        if (Platform.isWindows) {
+          // The bulky command that pushes the read out of the tail is POSIX
+          // shell syntax; the clearing logic itself is platform-neutral.
+          return;
         }
-      };
-      final provider = ScriptedProvider.fromJson({
-        'steps': [
-          read,
-          {
-            'complete': {
-              'text': 'building',
-                  'tool_calls': [
-                {
-                  'type': 'tool_call',
-                  'name': 'run_command',
-                  'arguments': {
-                    'command':
-                        "i=0; while [ \$i -lt 150 ]; do echo \"report line \$i\"; i=\$((i+1)); done"
-                  },
-                }
-              ],
-            }
+        final temp = Directory.systemTemp.createTempSync('sudoer-test-');
+        addTearDown(() => temp.deleteSync(recursive: true));
+        // A big file read, then bulky non-refetchable output pushing it out of
+        // the verbatim tail: C4 clears the read to a placeholder, and the
+        // model's re-fetch must count as recovery progress (C8), not a repeat.
+        File('${temp.path}/a.txt')
+            .writeAsStringSync(List.filled(1300, 'filler line').join('\n'));
+        final config = _config(
+          workspaceRoot: temp.path,
+          sessionDir: temp.path,
+          window: 8000,
+        );
+        final read = {
+          'complete': {
+            'text': 'reading',
+            'tool_calls': [
+              {
+                'type': 'tool_call',
+                'name': 'read',
+                'arguments': {'path': 'a.txt'},
+              },
+            ],
           },
-          read,
-          {'complete': {'text': 'a.txt recovered'}},
-        ]
-      });
-      final agent = PropAgent.assemble(config: config, provider: provider);
-      final result = await agent.run(const RunRequest('read it again'));
-
-      expect(result.status, RunStatus.complete);
-      expect(result.answer, 'a.txt recovered');
-    });
-
-    test('a stalled run with no best-effort answer summarizes locally',
-        () async {
-      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
-      addTearDown(() => temp.deleteSync(recursive: true));
-      File('${temp.path}/a.txt').writeAsStringSync('static');
-      final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
-      final read = {
-        'complete': {
-          'text': 'reading',
-          'tool_calls': [
+        };
+        final provider = ScriptedProvider.fromJson({
+          'steps': [
+            read,
             {
-              'type': 'tool_call',
-              'name': 'read',
-              'arguments': {'path': 'a.txt'},
-            }
+              'complete': {
+                'text': 'building',
+                'tool_calls': [
+                  {
+                    'type': 'tool_call',
+                    'name': 'run_command',
+                    'arguments': {
+                      'command': "i=0; while [ \$i -lt 150 ]; do echo \"report line \$i\"; i=\$((i+1)); done",
+                    },
+                  },
+                ],
+              },
+            },
+            read,
+            {
+              'complete': {'text': 'a.txt recovered'},
+            },
           ],
-        }
-      };
-      final provider = ScriptedProvider.fromJson({
-        'steps': [
-          read,
-          read,
-          read,
-          read,
-          {'error': 'timeout'},
-        ]
-      });
-      final result =
-          await PropAgent.assemble(config: config, provider: provider)
-              .run(const RunRequest('read it repeatedly'));
+        });
+        final agent = PropAgent.assemble(config: config, provider: provider);
+        final result = await agent.run(const RunRequest('read it again'));
 
-      expect(result.status, RunStatus.incomplete);
-      expect(result.answer, contains('Last observation'));
-      expect(result.answer, contains('static'));
-    });
+        expect(result.status, RunStatus.complete);
+        expect(result.answer, 'a.txt recovered');
+      },
+    );
 
-    test('a provider timeout retries in place before it counts as a stall',
-        () async {
-      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
-      addTearDown(() => temp.deleteSync(recursive: true));
-      final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
-      final provider = ScriptedProvider.fromJson({
-        'steps': [
-          {'error': 'timeout'},
-          {'error': 'timeout'},
-          {'complete': {'text': 'recovered'}}
-        ]
-      });
-      final agent = PropAgent.assemble(
-        config: config,
-        provider: provider,
-        // The backoff is real in production; tests never wait (C8).
-        reliability: Reliability(sleep: (Duration _) async {}),
-      );
-      final result = await agent.run(const RunRequest('do it'));
+    test(
+      'a stalled run with no best-effort answer summarizes locally',
+      () async {
+        final temp = Directory.systemTemp.createTempSync('sudoer-test-');
+        addTearDown(() => temp.deleteSync(recursive: true));
+        File('${temp.path}/a.txt').writeAsStringSync('static');
+        final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
+        final read = {
+          'complete': {
+            'text': 'reading',
+            'tool_calls': [
+              {
+                'type': 'tool_call',
+                'name': 'read',
+                'arguments': {'path': 'a.txt'},
+              },
+            ],
+          },
+        };
+        final provider = ScriptedProvider.fromJson({
+          'steps': [
+            read,
+            read,
+            read,
+            read,
+            {'error': 'timeout'},
+          ],
+        });
+        final result = await PropAgent.assemble(
+          config: config,
+          provider: provider,
+        ).run(const RunRequest('read it repeatedly'));
 
-      expect(result.status, RunStatus.complete);
-      expect(result.answer, 'recovered');
-      expect(provider.calls, 3);
-      // A recovered timeout is invisible: no error observation is recorded.
-      expect(
-          agent.session.transcript
-              .whereType<ObservationEntry>()
-              .any((o) => o.text.contains('provider error')),
-          isFalse);
-    });
+        expect(result.status, RunStatus.incomplete);
+        expect(result.answer, contains('Last observation'));
+        expect(result.answer, contains('static'));
+      },
+    );
+
+    test(
+      'a provider timeout retries in place before it counts as a stall',
+      () async {
+        final temp = Directory.systemTemp.createTempSync('sudoer-test-');
+        addTearDown(() => temp.deleteSync(recursive: true));
+        final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
+        final provider = ScriptedProvider.fromJson({
+          'steps': [
+            {'error': 'timeout'},
+            {'error': 'timeout'},
+            {
+              'complete': {'text': 'recovered'},
+            },
+          ],
+        });
+        final agent = PropAgent.assemble(
+          config: config,
+          provider: provider,
+          // The backoff is real in production; tests never wait (C8).
+          reliability: Reliability(sleep: (Duration _) async {}),
+        );
+        final result = await agent.run(const RunRequest('do it'));
+
+        expect(result.status, RunStatus.complete);
+        expect(result.answer, 'recovered');
+        expect(provider.calls, 3);
+        // A recovered timeout is invisible: no error observation is recorded.
+        expect(
+          agent.session.transcript.whereType<ObservationEntry>().any(
+            (o) => o.text.contains('provider error'),
+          ),
+          isFalse,
+        );
+      },
+    );
 
     test('an empty finish is nudged instead of completing silently', () async {
       final temp = Directory.systemTemp.createTempSync('sudoer-test-');
@@ -756,9 +832,13 @@ void main() {
       final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
       final provider = ScriptedProvider.fromJson({
         'steps': [
-          {'complete': {'text': ''}},
-          {'complete': {'text': 'the answer'}},
-        ]
+          {
+            'complete': {'text': ''},
+          },
+          {
+            'complete': {'text': 'the answer'},
+          },
+        ],
       });
       final agent = PropAgent.assemble(config: config, provider: provider);
       final result = await agent.run(const RunRequest('answer me'));
@@ -767,9 +847,11 @@ void main() {
       expect(result.answer, 'the answer');
       // The model was told its response had no answer.
       expect(
-          agent.session.transcript.whereType<ObservationEntry>().any(
-              (o) => o.text.contains('no answer')),
-          isTrue);
+        agent.session.transcript.whereType<ObservationEntry>().any(
+          (o) => o.text.contains('no answer'),
+        ),
+        isTrue,
+      );
     });
 
     test('repeated empty finishes stall to best-effort, never empty', () async {
@@ -778,15 +860,24 @@ void main() {
       final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
       final provider = ScriptedProvider.fromJson({
         'steps': [
-          {'complete': {'text': ''}},
-          {'complete': {'text': ''}},
-          {'complete': {'text': ''}},
-          {'complete': {'text': 'a best-effort answer'}},
-        ]
+          {
+            'complete': {'text': ''},
+          },
+          {
+            'complete': {'text': ''},
+          },
+          {
+            'complete': {'text': ''},
+          },
+          {
+            'complete': {'text': 'a best-effort answer'},
+          },
+        ],
       });
-      final result =
-          await PropAgent.assemble(config: config, provider: provider)
-              .run(const RunRequest('answer me'));
+      final result = await PropAgent.assemble(
+        config: config,
+        provider: provider,
+      ).run(const RunRequest('answer me'));
 
       expect(result.status, RunStatus.incomplete);
       expect(result.answer, 'a best-effort answer');
@@ -798,13 +889,18 @@ void main() {
       final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
       final provider = ScriptedProvider.fromJson({
         'steps': [
-          {'complete': {'text': '\u200b'}},
-          {'complete': {'text': 'a real answer'}},
-        ]
+          {
+            'complete': {'text': '\u200b'},
+          },
+          {
+            'complete': {'text': 'a real answer'},
+          },
+        ],
       });
-      final result =
-          await PropAgent.assemble(config: config, provider: provider)
-              .run(const RunRequest('answer me'));
+      final result = await PropAgent.assemble(
+        config: config,
+        provider: provider,
+      ).run(const RunRequest('answer me'));
       expect(result.status, RunStatus.complete);
       expect(result.answer, 'a real answer');
     });
@@ -815,8 +911,10 @@ void main() {
       final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
       final provider = ScriptedProvider.fromJson({
         'steps': [
-          {'complete': {'text': 'first answer'}},
-        ]
+          {
+            'complete': {'text': 'first answer'},
+          },
+        ],
       });
       final agent = PropAgent.assemble(config: config, provider: provider);
       await agent.run(const RunRequest('one'));
@@ -841,10 +939,12 @@ void main() {
               'plan': [
                 {'text': 'step one', 'done': true},
               ],
-            }
+            },
           },
-          {'complete': {'text': 'done two'}},
-        ]
+          {
+            'complete': {'text': 'done two'},
+          },
+        ],
       });
       final agent = PropAgent.assemble(config: config, provider: provider);
       await agent.run(const RunRequest('one'));
@@ -866,54 +966,64 @@ void main() {
                 {'text': 'step one', 'done': true},
                 {'text': 'step two', 'done': false},
               ],
-            }
+            },
           },
-          {'complete': {'text': 'done two'}},
-        ]
+          {
+            'complete': {'text': 'done two'},
+          },
+        ],
       });
       final agent = PropAgent.assemble(config: config, provider: provider);
       await agent.run(const RunRequest('one'));
       await agent.run(const RunRequest('two'));
-      expect([for (final item in agent.session.plan) item.text],
-          ['step one', 'step two']);
+      expect(
+        [for (final item in agent.session.plan) item.text],
+        ['step one', 'step two'],
+      );
     });
 
-    test('records a timing for each response, tool call, and the run total',
-        () async {
-      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
-      addTearDown(() => temp.deleteSync(recursive: true));
-      File('${temp.path}/README.md').writeAsStringSync('hello\n');
-      final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
-      final provider = ScriptedProvider.fromJson({
-        'steps': [
-          {
-            'complete': {
-              'text': 'reading',
-              'tool_calls': [
-                {
-                  'type': 'tool_call',
-                  'name': 'read',
-                  'arguments': {'path': 'README.md'},
-                }
-              ],
-            }
-          },
-          {'complete': {'text': 'hello'}},
-        ]
-      });
-      final observer = _RecordingObserver();
-      final agent = PropAgent.assemble(config: config, provider: provider);
-      final result =
-          await agent.run(const RunRequest('read it'), observer: observer);
+    test(
+      'records a timing for each response, tool call, and the run total',
+      () async {
+        final temp = Directory.systemTemp.createTempSync('sudoer-test-');
+        addTearDown(() => temp.deleteSync(recursive: true));
+        File('${temp.path}/README.md').writeAsStringSync('hello\n');
+        final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
+        final provider = ScriptedProvider.fromJson({
+          'steps': [
+            {
+              'complete': {
+                'text': 'reading',
+                'tool_calls': [
+                  {
+                    'type': 'tool_call',
+                    'name': 'read',
+                    'arguments': {'path': 'README.md'},
+                  },
+                ],
+              },
+            },
+            {
+              'complete': {'text': 'hello'},
+            },
+          ],
+        });
+        final observer = _RecordingObserver();
+        final agent = PropAgent.assemble(config: config, provider: provider);
+        final result = await agent.run(
+          const RunRequest('read it'),
+          observer: observer,
+        );
 
-      final labels = [for (final timing in result.timings) timing.label];
-      expect(labels.where((label) => label == 'response').length, 2);
-      expect(labels, contains('read'));
-      expect(labels.last, 'run');
-      expect(result.timings.every((t) => !t.duration.isNegative), isTrue);
-      expect(observer.responses.length, 2);
-      expect(observer.observations.single, isNotNull);
-    });
+        final labels = [for (final timing in result.timings) timing.label];
+        expect(labels.where((label) => label == 'response').length, 2);
+        expect(labels, contains('read'));
+        expect(labels.last, 'run');
+        expect(result.timings.every((t) => !t.duration.isNegative), isTrue);
+        expect(observer.responses.length, 2);
+        expect(observer.observations.single, isNotNull);
+      },
+    );
 
     test('automation records timings without a human observer', () async {
       final temp = Directory.systemTemp.createTempSync('sudoer-test-');
@@ -930,71 +1040,101 @@ void main() {
                   'type': 'tool_call',
                   'name': 'read',
                   'arguments': {'path': 'README.md'},
-                }
+                },
               ],
-            }
+            },
           },
-          {'complete': {'text': 'hello'}},
-        ]
+          {
+            'complete': {'text': 'hello'},
+          },
+        ],
       });
-      final result = await PropAgent.assemble(config: config, provider: provider)
-          .run(const RunRequest('read it'));
+      final result = await PropAgent.assemble(
+        config: config,
+        provider: provider,
+      ).run(const RunRequest('read it'));
       final labels = [for (final timing in result.timings) timing.label];
       expect(labels, containsAll(['response', 'read', 'run']));
     });
 
-    test('a warranted fold calls the model for a brief, tools withheld',
-        () async {
-      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
-      addTearDown(() => temp.deleteSync(recursive: true));
-      final config = _config(
-          window: 2000, workspaceRoot: temp.path, sessionDir: temp.path);
-      final session = Session.create(workspaceRoot: temp.path);
-      session.transcript.add(const UserEntry('earlier goal'));
-      for (var i = 0; i < 12; i++) {
-        session.transcript
-            .add(ObservationEntry(text: 'x' * 400, outcome: Outcome.ok));
-      }
-      final provider = ScriptedProvider.fromJson({
-        'steps': [
-          {'complete': {'text': 'BRIEF: worked on lib/a.dart'}},
-          {'complete': {'text': 'final answer'}},
-        ]
-      });
-      final observer = _RecordingObserver();
-      final agent = PropAgent.assemble(
-          config: config, provider: provider, session: session);
-      final result =
-          await agent.run(const RunRequest('new goal'), observer: observer);
+    test(
+      'a warranted fold calls the model for a brief, tools withheld',
+      () async {
+        final temp = Directory.systemTemp.createTempSync('sudoer-test-');
+        addTearDown(() => temp.deleteSync(recursive: true));
+        final config = _config(
+          window: 2000,
+          workspaceRoot: temp.path,
+          sessionDir: temp.path,
+        );
+        final session = Session.create(workspaceRoot: temp.path);
+        session.transcript.add(const UserEntry('earlier goal'));
+        for (var i = 0; i < 12; i++) {
+          session.transcript.add(
+            ObservationEntry(text: 'x' * 400, outcome: Outcome.ok),
+          );
+        }
+        final provider = ScriptedProvider.fromJson({
+          'steps': [
+            {
+              'complete': {'text': 'BRIEF: worked on lib/a.dart'},
+            },
+            {
+              'complete': {'text': 'final answer'},
+            },
+          ],
+        });
+        final observer = _RecordingObserver();
+        final agent = PropAgent.assemble(
+          config: config,
+          provider: provider,
+          session: session,
+        );
+        final result = await agent.run(
+          const RunRequest('new goal'),
+          observer: observer,
+        );
 
-      expect(result.status, RunStatus.complete);
-      expect(result.answer, 'final answer');
-      expect(provider.calls, 2); // one brief call, one real step
-      expect(observer.compactions, isNotEmpty);
-    });
+        expect(result.status, RunStatus.complete);
+        expect(result.answer, 'final answer');
+        expect(provider.calls, 2); // one brief call, one real step
+        expect(observer.compactions, isNotEmpty);
+      },
+    );
 
     test('a failed brief call falls back to the local digest', () async {
       final temp = Directory.systemTemp.createTempSync('sudoer-test-');
       addTearDown(() => temp.deleteSync(recursive: true));
       final config = _config(
-          window: 2000, workspaceRoot: temp.path, sessionDir: temp.path);
+        window: 2000,
+        workspaceRoot: temp.path,
+        sessionDir: temp.path,
+      );
       final session = Session.create(workspaceRoot: temp.path);
       session.transcript.add(const UserEntry('earlier goal'));
       for (var i = 0; i < 12; i++) {
-        session.transcript
-            .add(ObservationEntry(text: 'x' * 400, outcome: Outcome.ok));
+        session.transcript.add(
+          ObservationEntry(text: 'x' * 400, outcome: Outcome.ok),
+        );
       }
       final provider = ScriptedProvider.fromJson({
         'steps': [
           {'error': 'unrecoverable'},
-          {'complete': {'text': 'final answer'}},
-        ]
+          {
+            'complete': {'text': 'final answer'},
+          },
+        ],
       });
       final observer = _RecordingObserver();
       final agent = PropAgent.assemble(
-          config: config, provider: provider, session: session);
-      final result =
-          await agent.run(const RunRequest('new goal'), observer: observer);
+        config: config,
+        provider: provider,
+        session: session,
+      );
+      final result = await agent.run(
+        const RunRequest('new goal'),
+        observer: observer,
+      );
 
       expect(result.status, RunStatus.complete);
       expect(result.answer, 'final answer');
@@ -1004,8 +1144,10 @@ void main() {
 
   group('context (C4)', () {
     test('keeps earlier turns while the prompt fits the window', () {
-      final assembler =
-          ContextAssembler(contextWindow: 100000, systemPrompt: 'sys');
+      final assembler = ContextAssembler(
+        contextWindow: 100000,
+        systemPrompt: 'sys',
+      );
       final transcript = <Entry>[
         const UserEntry('old goal'),
         const AssistantEntry(thought: 'thinking', action: Finish('old answer')),
@@ -1022,29 +1164,36 @@ void main() {
         containsAll(['old goal', 'current goal']),
       );
       expect(
-        request.messages
-            .whereType<ObservationEntry>()
-            .any((o) => o.text.startsWith('Earlier session summary')),
+        request.messages.whereType<ObservationEntry>().any(
+          (o) => o.text.startsWith('Earlier session summary'),
+        ),
         isFalse,
       );
     });
 
     test('clips an oversized observation, even in the recent tail', () {
-      final assembler =
-          ContextAssembler(contextWindow: 100000, systemPrompt: 'sys');
+      final assembler = ContextAssembler(
+        contextWindow: 100000,
+        systemPrompt: 'sys',
+      );
       // Head and tail are wider than the clip keeps, so both survive intact
       // while the middle is elided (C4).
       final text = 'H' * 10000 + 'M' * 4000 + 'T' * 7000;
       final transcript = <Entry>[
         const UserEntry('goal'),
         AssistantEntry(
-            thought: '',
-            action: ToolBatch(
-                [ToolCall(name: 'run_command', arguments: {'command': 'make'})])),
+          thought: '',
+          action: ToolBatch([
+            ToolCall(name: 'run_command', arguments: {'command': 'make'}),
+          ]),
+        ),
         ObservationEntry(text: text, outcome: Outcome.ok, toolCallId: 'c1'),
       ];
       final request = assembler.assemble(
-          model: 'm', tools: const [], transcript: transcript);
+        model: 'm',
+        tools: const [],
+        transcript: transcript,
+      );
       final shown = request.messages.whereType<ObservationEntry>().single.text;
       expect(shown, contains('HHHH'));
       expect(shown, contains('TTTT'));
@@ -1056,30 +1205,55 @@ void main() {
     });
 
     test('clears stale re-fetchable results outside the verbatim tail', () {
-      final assembler =
-          ContextAssembler(contextWindow: 600, systemPrompt: 'sys');
+      final assembler = ContextAssembler(
+        contextWindow: 600,
+        systemPrompt: 'sys',
+      );
       final transcript = <Entry>[
         const UserEntry('goal'),
         AssistantEntry(
-            thought: '',
-            action: ToolBatch([ToolCall(name: 'read', arguments: {'path': 'lib/a.dart'})])),
-        ObservationEntry(text: 'a' * 800, outcome: Outcome.ok, toolCallId: 'c0'),
-        AssistantEntry(
-            thought: '',
-            action: ToolBatch(
-                [ToolCall(name: 'read', arguments: {'path': 'lib/missing.dart'})])),
+          thought: '',
+          action: ToolBatch([
+            ToolCall(name: 'read', arguments: {'path': 'lib/a.dart'}),
+          ]),
+        ),
         ObservationEntry(
-            text: 'E' * 800, outcome: Outcome.error, toolCallId: 'c1'),
+          text: 'a' * 800,
+          outcome: Outcome.ok,
+          toolCallId: 'c0',
+        ),
         AssistantEntry(
-            thought: '',
-            action: ToolBatch([ToolCall(name: 'read', arguments: {'path': 'lib/c.dart'})])),
-        ObservationEntry(text: 'c' * 800, outcome: Outcome.ok, toolCallId: 'c2'),
+          thought: '',
+          action: ToolBatch([
+            ToolCall(name: 'read', arguments: {'path': 'lib/missing.dart'}),
+          ]),
+        ),
+        ObservationEntry(
+          text: 'E' * 800,
+          outcome: Outcome.error,
+          toolCallId: 'c1',
+        ),
+        AssistantEntry(
+          thought: '',
+          action: ToolBatch([
+            ToolCall(name: 'read', arguments: {'path': 'lib/c.dart'}),
+          ]),
+        ),
+        ObservationEntry(
+          text: 'c' * 800,
+          outcome: Outcome.ok,
+          toolCallId: 'c2',
+        ),
         const UserEntry('current goal'),
       ];
       final request = assembler.assemble(
-          model: 'm', tools: const [], transcript: transcript);
-      final texts =
-          request.messages.whereType<ObservationEntry>().map((o) => o.text);
+        model: 'm',
+        tools: const [],
+        transcript: transcript,
+      );
+      final texts = request.messages.whereType<ObservationEntry>().map(
+        (o) => o.text,
+      );
       // The middle read is a one-line, re-runnable placeholder...
       expect(texts.first, contains('[cleared: read lib/a.dart'));
       expect(texts.first, contains('re-run to recover the output'));
@@ -1090,25 +1264,32 @@ void main() {
       expect(assembler.lastCompaction, isNull);
       // The clearing is queryable so the loop can credit a re-fetch of
       // cleared content as progress rather than a repeat stall (C8).
-      expect(assembler.clearedInLastView('read', {'path': 'lib/a.dart'}),
-          isTrue);
-      expect(assembler.clearedInLastView('read', {'path': 'lib/c.dart'}),
-          isFalse);
+      expect(
+        assembler.clearedInLastView('read', {'path': 'lib/a.dart'}),
+        isTrue,
+      );
+      expect(
+        assembler.clearedInLastView('read', {'path': 'lib/c.dart'}),
+        isFalse,
+      );
       // The exchange stays paired and the stored transcript is unchanged.
       expect(
-          request.messages.whereType<AssistantEntry>().map((a) => a.action),
-          everyElement(isA<ToolBatch>()));
+        request.messages.whereType<AssistantEntry>().map((a) => a.action),
+        everyElement(isA<ToolBatch>()),
+      );
       expect((transcript[2] as ObservationEntry).text, 'a' * 800);
     });
 
     test('compacts at a goal boundary past the watermark, not mid-run', () {
       List<Entry> history(int n) => [
-            const UserEntry('old goal'),
-            for (var i = 0; i < n; i++)
-              ObservationEntry(text: 'x' * 400, outcome: Outcome.ok),
-          ];
-      final assembler =
-          ContextAssembler(contextWindow: 1000, systemPrompt: 'sys');
+        const UserEntry('old goal'),
+        for (var i = 0; i < n; i++)
+          ObservationEntry(text: 'x' * 400, outcome: Outcome.ok),
+      ];
+      final assembler = ContextAssembler(
+        contextWindow: 1000,
+        systemPrompt: 'sys',
+      );
       // ~80% used and the last entry is a fresh goal: a compactable boundary.
       assembler.assemble(
         model: 'm',
@@ -1131,8 +1312,10 @@ void main() {
     });
 
     test('forces compaction mid-run only at the high-water mark', () {
-      final assembler =
-          ContextAssembler(contextWindow: 1000, systemPrompt: 'sys');
+      final assembler = ContextAssembler(
+        contextWindow: 1000,
+        systemPrompt: 'sys',
+      );
       assembler.assemble(
         model: 'm',
         tools: const [],
@@ -1148,8 +1331,10 @@ void main() {
     });
 
     test('pins the goal and compacts older history', () {
-      final assembler =
-          ContextAssembler(contextWindow: 200, systemPrompt: 'sys');
+      final assembler = ContextAssembler(
+        contextWindow: 200,
+        systemPrompt: 'sys',
+      );
       final transcript = <Entry>[
         const UserEntry('old goal'),
         for (var i = 0; i < 20; i++)
@@ -1168,25 +1353,41 @@ void main() {
     });
 
     test('folding keeps a structured working set, goals, and errors', () {
-      final assembler =
-          ContextAssembler(contextWindow: 200, systemPrompt: 'sys');
+      final assembler = ContextAssembler(
+        contextWindow: 200,
+        systemPrompt: 'sys',
+      );
       final transcript = <Entry>[
         const UserEntry('old goal'),
         AssistantEntry(
-            thought: '',
-            action: ToolBatch([ToolCall(
-                name: 'read', arguments: {'path': 'lib/a.dart'})])),
-        ObservationEntry(text: 'x' * 400, outcome: Outcome.ok, toolCallId: 'c1'),
-        AssistantEntry(
-            thought: '',
-            action: ToolBatch([ToolCall(
-                name: 'edit', arguments: {'path': 'lib/a.dart'})])),
+          thought: '',
+          action: ToolBatch([
+            ToolCall(name: 'read', arguments: {'path': 'lib/a.dart'}),
+          ]),
+        ),
         ObservationEntry(
-            text: 'x' * 800, outcome: Outcome.error, toolCallId: 'c2'),
+          text: 'x' * 400,
+          outcome: Outcome.ok,
+          toolCallId: 'c1',
+        ),
+        AssistantEntry(
+          thought: '',
+          action: ToolBatch([
+            ToolCall(name: 'edit', arguments: {'path': 'lib/a.dart'}),
+          ]),
+        ),
+        ObservationEntry(
+          text: 'x' * 800,
+          outcome: Outcome.error,
+          toolCallId: 'c2',
+        ),
         const UserEntry('current goal'),
       ];
-      final request = assembler
-          .assemble(model: 'm', tools: const [], transcript: transcript);
+      final request = assembler.assemble(
+        model: 'm',
+        tools: const [],
+        transcript: transcript,
+      );
       final digest = request.messages.whereType<ObservationEntry>().first;
       expect(digest.text, contains('Goals: old goal'));
       expect(digest.text, contains('lib/a.dart'));
@@ -1196,24 +1397,36 @@ void main() {
     });
 
     test('folding never splits a tool call from its observation', () {
-      final assembler =
-          ContextAssembler(contextWindow: 500, systemPrompt: 'sys');
+      final assembler = ContextAssembler(
+        contextWindow: 500,
+        systemPrompt: 'sys',
+      );
       final transcript = <Entry>[
         const UserEntry('goal'),
         for (var i = 0; i < 6; i++) ...[
           AssistantEntry(
-              thought: '',
-              action: ToolBatch([ToolCall(
-                  id: 'c$i',
-                  name: 'run_command',
-                  arguments: {'command': 'cmd $i'})])),
+            thought: '',
+            action: ToolBatch([
+              ToolCall(
+                id: 'c$i',
+                name: 'run_command',
+                arguments: {'command': 'cmd $i'},
+              ),
+            ]),
+          ),
           ObservationEntry(
-              text: 'x' * 400, outcome: Outcome.ok, toolCallId: 'c$i'),
+            text: 'x' * 400,
+            outcome: Outcome.ok,
+            toolCallId: 'c$i',
+          ),
         ],
         const UserEntry('current goal'),
       ];
-      final request = assembler
-          .assemble(model: 'm', tools: const [], transcript: transcript);
+      final request = assembler.assemble(
+        model: 'm',
+        tools: const [],
+        transcript: transcript,
+      );
       final ids = <String>{};
       for (final entry in request.messages) {
         if (entry is AssistantEntry && entry.action is ToolBatch) {
@@ -1222,20 +1435,25 @@ void main() {
             if (id != null) ids.add(id);
           }
         } else if (entry is ObservationEntry && entry.toolCallId != null) {
-          expect(ids, contains(entry.toolCallId),
-              reason: 'observation ${entry.toolCallId} lost its tool call');
+          expect(
+            ids,
+            contains(entry.toolCallId),
+            reason: 'observation ${entry.toolCallId} lost its tool call',
+          );
         }
       }
     });
 
     test('folding is sticky across later steps', () {
       List<Entry> history(int n) => [
-            const UserEntry('old goal'),
-            for (var i = 0; i < n; i++)
-              ObservationEntry(text: 'x' * 400, outcome: Outcome.ok),
-          ];
-      final assembler =
-          ContextAssembler(contextWindow: 1000, systemPrompt: 'sys');
+        const UserEntry('old goal'),
+        for (var i = 0; i < n; i++)
+          ObservationEntry(text: 'x' * 400, outcome: Outcome.ok),
+      ];
+      final assembler = ContextAssembler(
+        contextWindow: 1000,
+        systemPrompt: 'sys',
+      );
       assembler.assemble(
         model: 'm',
         tools: const [],
@@ -1256,28 +1474,33 @@ void main() {
       // than re-expanding the raw history.
       expect(assembler.lastCompaction, isNull);
       expect(
-        second.messages
-            .whereType<ObservationEntry>()
-            .any((o) => o.text.startsWith('Earlier session summary')),
+        second.messages.whereType<ObservationEntry>().any(
+          (o) => o.text.startsWith('Earlier session summary'),
+        ),
         isTrue,
       );
     });
 
     test('a long single goal folds its own run too', () {
-      final assembler =
-          ContextAssembler(contextWindow: 1000, systemPrompt: 'sys');
+      final assembler = ContextAssembler(
+        contextWindow: 1000,
+        systemPrompt: 'sys',
+      );
       final transcript = <Entry>[
         const UserEntry('only goal'),
         for (var i = 0; i < 12; i++)
           ObservationEntry(text: 'x' * 400, outcome: Outcome.ok),
       ];
-      final request = assembler
-          .assemble(model: 'm', tools: const [], transcript: transcript);
+      final request = assembler.assemble(
+        model: 'm',
+        tools: const [],
+        transcript: transcript,
+      );
       expect(assembler.lastCompaction, isNotNull);
       expect(
-        request.messages
-            .whereType<ObservationEntry>()
-            .any((o) => o.text.startsWith('Earlier session summary')),
+        request.messages.whereType<ObservationEntry>().any(
+          (o) => o.text.startsWith('Earlier session summary'),
+        ),
         isTrue,
       );
       // The goal is pinned even though the fold boundary moved past it.
@@ -1288,8 +1511,10 @@ void main() {
     });
 
     test('planCompaction returns a tools-withheld model task', () {
-      final assembler =
-          ContextAssembler(contextWindow: 200, systemPrompt: 'sys');
+      final assembler = ContextAssembler(
+        contextWindow: 200,
+        systemPrompt: 'sys',
+      );
       final transcript = <Entry>[
         const UserEntry('old goal'),
         for (var i = 0; i < 10; i++)
@@ -1297,7 +1522,10 @@ void main() {
         const UserEntry('current goal'),
       ];
       final task = assembler.planCompaction(
-          model: 'm', tools: const [], transcript: transcript);
+        model: 'm',
+        tools: const [],
+        transcript: transcript,
+      );
       expect(task, isNotNull);
       expect(task!.prompt.tools, isEmpty);
       expect(task.prompt.system, contains('brief'));
@@ -1306,8 +1534,10 @@ void main() {
     });
 
     test('a model brief is used verbatim and not re-folded', () {
-      final assembler =
-          ContextAssembler(contextWindow: 200, systemPrompt: 'sys');
+      final assembler = ContextAssembler(
+        contextWindow: 200,
+        systemPrompt: 'sys',
+      );
       final transcript = <Entry>[
         const UserEntry('old goal'),
         for (var i = 0; i < 10; i++)
@@ -1315,11 +1545,20 @@ void main() {
         const UserEntry('current goal'),
       ];
       final task = assembler.planCompaction(
-          model: 'm', tools: const [], transcript: transcript)!;
+        model: 'm',
+        tools: const [],
+        transcript: transcript,
+      )!;
       assembler.applyCompaction(
-          transcript, task.through, 'BRIEF: edited lib/a.dart');
-      final request = assembler
-          .assemble(model: 'm', tools: const [], transcript: transcript);
+        transcript,
+        task.through,
+        'BRIEF: edited lib/a.dart',
+      );
+      final request = assembler.assemble(
+        model: 'm',
+        tools: const [],
+        transcript: transcript,
+      );
       final digest = request.messages.whereType<ObservationEntry>().first;
       expect(digest.text, 'BRIEF: edited lib/a.dart');
       // The loop already reported it; assemble does not fold again.
@@ -1327,56 +1566,90 @@ void main() {
     });
 
     test('an empty brief falls back to the deterministic digest', () {
-      final assembler =
-          ContextAssembler(contextWindow: 200, systemPrompt: 'sys');
+      final assembler = ContextAssembler(
+        contextWindow: 200,
+        systemPrompt: 'sys',
+      );
       final transcript = <Entry>[
         const UserEntry('old goal'),
         AssistantEntry(
-            thought: '',
-            action: ToolBatch([ToolCall(name: 'edit', arguments: {'path': 'lib/a.dart'})])),
-        ObservationEntry(text: 'x' * 400, outcome: Outcome.ok, toolCallId: 'c1'),
+          thought: '',
+          action: ToolBatch([
+            ToolCall(name: 'edit', arguments: {'path': 'lib/a.dart'}),
+          ]),
+        ),
+        ObservationEntry(
+          text: 'x' * 400,
+          outcome: Outcome.ok,
+          toolCallId: 'c1',
+        ),
         for (var i = 0; i < 10; i++)
           ObservationEntry(text: 'x' * 400, outcome: Outcome.ok),
         const UserEntry('current goal'),
       ];
       final task = assembler.planCompaction(
-          model: 'm', tools: const [], transcript: transcript)!;
+        model: 'm',
+        tools: const [],
+        transcript: transcript,
+      )!;
       assembler.applyCompaction(transcript, task.through, '   ');
-      final request = assembler
-          .assemble(model: 'm', tools: const [], transcript: transcript);
+      final request = assembler.assemble(
+        model: 'm',
+        tools: const [],
+        transcript: transcript,
+      );
       final digest = request.messages.whereType<ObservationEntry>().first;
       expect(digest.text, startsWith('Earlier session summary'));
     });
 
     test('the compaction prompt carries tool paths and commands', () {
-      final assembler =
-          ContextAssembler(contextWindow: 400, systemPrompt: 'sys');
+      final assembler = ContextAssembler(
+        contextWindow: 400,
+        systemPrompt: 'sys',
+      );
       final transcript = <Entry>[
         const UserEntry('old goal'),
         AssistantEntry(
-            thought: '',
-            action: ToolBatch([ToolCall(
-                name: 'edit', arguments: {'path': 'lib/a.dart'})])),
-        ObservationEntry(text: 'x' * 400, outcome: Outcome.ok, toolCallId: 'c1'),
+          thought: '',
+          action: ToolBatch([
+            ToolCall(name: 'edit', arguments: {'path': 'lib/a.dart'}),
+          ]),
+        ),
+        ObservationEntry(
+          text: 'x' * 400,
+          outcome: Outcome.ok,
+          toolCallId: 'c1',
+        ),
         AssistantEntry(
-            thought: '',
-            action: ToolBatch([ToolCall(
-                name: 'run_command', arguments: {'command': 'dart test'})])),
-        ObservationEntry(text: 'x' * 400, outcome: Outcome.ok, toolCallId: 'c2'),
+          thought: '',
+          action: ToolBatch([
+            ToolCall(name: 'run_command', arguments: {'command': 'dart test'}),
+          ]),
+        ),
+        ObservationEntry(
+          text: 'x' * 400,
+          outcome: Outcome.ok,
+          toolCallId: 'c2',
+        ),
         for (var i = 0; i < 4; i++)
           ObservationEntry(text: 'x' * 400, outcome: Outcome.ok),
         const UserEntry('current goal'),
       ];
       final task = assembler.planCompaction(
-          model: 'm', tools: const [], transcript: transcript)!;
+        model: 'm',
+        tools: const [],
+        transcript: transcript,
+      )!;
       final body = (task.prompt.messages.single as UserEntry).text;
       expect(body, contains('lib/a.dart'));
       expect(body, contains('dart test'));
     });
 
     test('a later fold folds new work into the existing brief', () {
-      final assembler =
-          ContextAssembler(contextWindow: 200, systemPrompt: 'sys');
+      final assembler = ContextAssembler(
+        contextWindow: 200,
+        systemPrompt: 'sys',
+      );
       final transcript = <Entry>[
         const UserEntry('old goal'),
         for (var i = 0; i < 10; i++)
@@ -1384,7 +1657,10 @@ void main() {
         const UserEntry('current goal'),
       ];
       final task = assembler.planCompaction(
-          model: 'm', tools: const [], transcript: transcript)!;
+        model: 'm',
+        tools: const [],
+        transcript: transcript,
+      )!;
       assembler.applyCompaction(transcript, task.through, 'BRIEF: first');
 
       final grown = <Entry>[
@@ -1394,10 +1670,11 @@ void main() {
         const UserEntry('next goal'),
       ];
       final forced = assembler.planCompaction(
-          model: 'm',
-          tools: const [],
-          transcript: grown,
-          force: true)!;
+        model: 'm',
+        tools: const [],
+        transcript: grown,
+        force: true,
+      )!;
       final body = (forced.prompt.messages.single as UserEntry).text;
       expect(body, contains('Existing brief:'));
       expect(body, contains('BRIEF: first'));
@@ -1422,14 +1699,17 @@ void main() {
           for (var i = 0; i < 40; i++)
             ObservationEntry(text: 'x' * 200, outcome: Outcome.ok),
         ]);
-      final config =
-          _config(window: 1000, workspaceRoot: temp.path, sessionDir: temp.path);
+      final config = _config(
+        window: 1000,
+        workspaceRoot: temp.path,
+        sessionDir: temp.path,
+      );
       final provider = ScriptedProvider.fromJson({
         'steps': [
           {
-            'complete': {'text': 'done'}
-          }
-        ]
+            'complete': {'text': 'done'},
+          },
+        ],
       });
       final out = StringBuffer();
       await runRepl(
@@ -1471,17 +1751,23 @@ void main() {
       final temp = Directory.systemTemp.createTempSync('sudoer-test-');
       addTearDown(() => temp.deleteSync(recursive: true));
       final config = _config(
-          window: 2000, workspaceRoot: temp.path, sessionDir: temp.path);
+        window: 2000,
+        workspaceRoot: temp.path,
+        sessionDir: temp.path,
+      );
       final session = Session.create(workspaceRoot: temp.path);
       session.transcript.add(const UserEntry('earlier goal'));
       for (var i = 0; i < 12; i++) {
-        session.transcript
-            .add(ObservationEntry(text: 'x' * 400, outcome: Outcome.ok));
+        session.transcript.add(
+          ObservationEntry(text: 'x' * 400, outcome: Outcome.ok),
+        );
       }
       final provider = ScriptedProvider.fromJson({
         'steps': [
-          {'complete': {'text': 'BRIEF: worked on lib/a.dart'}},
-        ]
+          {
+            'complete': {'text': 'BRIEF: worked on lib/a.dart'},
+          },
+        ],
       });
       final out = StringBuffer();
       await runRepl(
@@ -1528,20 +1814,25 @@ void main() {
                   'type': 'tool_call',
                   'name': 'read',
                   'arguments': {'path': 'note.txt'},
-                }
+                },
               ],
-            }
+            },
           },
-          {'complete': {'text': 'done'}},
-        ]
+          {
+            'complete': {'text': 'done'},
+          },
+        ],
       });
       final out = StringBuffer();
       final err = StringBuffer();
 
       await runRepl(
         config: config,
-        input: Stream.fromIterable(
-            ['/workspace ${other.path}', 'read note.txt', '/exit']),
+        input: Stream.fromIterable([
+          '/workspace ${other.path}',
+          'read note.txt',
+          '/exit',
+        ]),
         out: out,
         err: err,
         providerFactory: (_) => provider,
@@ -1566,12 +1857,14 @@ void main() {
                   'type': 'tool_call',
                   'name': 'read',
                   'arguments': {'path': 'README.md'},
-                }
+                },
               ],
-            }
+            },
           },
-          {'complete': {'text': 'hello'}},
-        ]
+          {
+            'complete': {'text': 'hello'},
+          },
+        ],
       });
       final out = StringBuffer();
       final err = StringBuffer();
@@ -1614,6 +1907,220 @@ void main() {
       expect(console.statusText, 'complete #1');
       expect(console.statusKind, 'complete');
       expect(changes, greaterThan(0));
+    });
+
+    test('the header plan panel marks done, active, and pending items', () {
+      const plan = [
+        PlanItem(text: 'set up auth', done: true),
+        PlanItem(text: 'parse config'),
+        PlanItem(text: 'render output'),
+      ];
+      final lines = planPanel(plan, width: 40);
+      // Top border, one row per item, bottom border.
+      expect(lines, hasLength(5));
+      final text = stripAnsi(lines.join('\n'));
+      expect(text, contains('╭─ plan '));
+      expect(text, contains('✓ set up auth'));
+      expect(text, contains('❯ parse config'));
+      expect(text, contains('○ render output'));
+      expect(text, contains('╰'));
+      // The done marker is green, the active one mauve: the styling carries
+      // the progress, not just the glyphs. Every row is exactly `width`
+      // visible cells so the right edge lines up.
+      expect(lines[1], contains('\x1b[38;2;166;227;161m'));
+      expect(lines[2], contains('\x1b[38;2;203;166;247m'));
+      expect(lines[2], contains('\x1b[1m'));
+      for (final line in lines) {
+        expect(stripAnsi(line).length, 40);
+      }
+    });
+
+    test('an empty plan renders no panel rows', () {
+      expect(planPanel(const []), isEmpty);
+    });
+
+    test('touch nudges a redraw without touching the transcript', () {
+      final console = TuiConsole(width: 60);
+      console.user('hello');
+      var changes = 0;
+      console.onChange = () => changes++;
+      final before = console.transcript.length;
+      console.touch();
+      console.touch();
+      expect(changes, 2);
+      expect(console.transcript.length, before);
+    });
+
+    test('the queue panel lists queued messages above the editor', () {
+      final lines = queuePanel(['fix the tests', 'update the docs'], width: 30);
+      expect(lines, hasLength(4));
+      final text = stripAnsi(lines.join('\n'));
+      expect(text, contains('╭─ queued '));
+      expect(text, contains('fix the tests'));
+      expect(text, contains('update the docs'));
+      for (final line in lines) {
+        expect(stripAnsi(line).length, 30);
+      }
+    });
+
+    test('an empty queue renders no panel', () {
+      expect(queuePanel(const [], width: 30), isEmpty);
+    });
+
+    test('wrapAnsi breaks at spaces and keeps words whole', () {
+      final lines = wrapAnsi('the quick brown fox jumps over the lazy dog', 15);
+      expect(lines.first, 'the quick brown');
+      expect(lines[1], 'fox jumps over');
+      expect(lines.last, 'the lazy dog');
+      for (final line in lines) {
+        expect(visibleWidth(line), lessThanOrEqualTo(15));
+      }
+    });
+
+    test('wrapAnsi never splits an escape sequence', () {
+      final lines = wrapAnsi('\x1b[31mwordone wordtwo\x1b[0m', 7);
+      expect(stripAnsi(lines.join(' ')), 'wordone wordtwo');
+      for (final line in lines) {
+        // Exactly one whole escape per line: no partial sequence leaked.
+        expect(line.codeUnits.where((c) => c == 0x1b).length, 1);
+      }
+    });
+
+    test('wrapAnsi carries a dangling style onto the continuation line', () {
+      final lines = wrapAnsi('ab \x1b[1mloud\x1b[0m', 4);
+      expect(lines, ['ab', '\x1b[1mloud\x1b[0m']);
+    });
+
+    test('the frame pre-wraps the transcript so words stay whole', () {
+      final frame = TuiFrame(
+        width: 20,
+        height: 12,
+        header: const ['  h'],
+        transcript: const ['a very long line that must wrap somewhere sane'],
+        partial: '',
+        inputLines: const [''],
+        cursorRow: 0,
+        cursorColumn: 0,
+        status: '',
+        hint: '',
+        running: false,
+        scrollOffset: 0,
+        follow: true,
+      ).render();
+      // With the viewport's character wrap, "somewhere" landed split across
+      // rows; word-aware pre-wrapping keeps it whole.
+      expect(stripAnsi(frame.content), contains('somewhere'));
+    });
+
+    test('a styled reasoning line survives the frame without loss', () {
+      final console = TuiConsole(width: 60);
+      console.startThinking('thinking');
+      console.reasoning(
+        'The user is asking for a Himalaya climbing plan and I should think '
+        'about the variables before asking a clarifying question.',
+      );
+      console.endLine();
+      console.stopThinking();
+      final frame = TuiFrame(
+        width: 60,
+        height: 20,
+        header: const ['  h1', '  h2'],
+        transcript: console.transcript,
+        partial: console.partial,
+        inputLines: const [''],
+        cursorRow: 0,
+        cursorColumn: 0,
+        status: '  ready',
+        hint: '  hint',
+        running: false,
+        scrollOffset: 0,
+        follow: true,
+      ).render();
+      final text = stripAnsi(frame.content);
+      // Every word reaches the screen: the old viewport sliced styled rows
+      // by raw bytes, dropping text mid-sentence once the escape budget ran
+      // out ("Himalaya" landed as "Hi").
+      expect(text, contains('Himalaya climbing plan and I'));
+      expect(text, contains('should think about the variables'));
+      expect(text, contains('clarifying question'));
+    });
+
+    test('selection spans highlight and extract across rows', () {
+      final lines = ['plain row', '\x1b[31mstyled\x1b[0m row', 'third row'];
+      const selection = TuiSelection(
+        startRow: 0,
+        startCol: 6,
+        endRow: 2,
+        endCol: 3,
+      );
+      final highlighted = applySelectionSpans(lines, selection);
+      expect(highlighted[0], contains('\x1b[7m'));
+      expect(stripAnsi(highlighted[0]), 'plain row');
+      expect(stripAnsi(highlighted[1]), 'styled row');
+      expect(stripAnsi(highlighted[2]), 'third row');
+      expect(extractSelection(lines, selection), 'row\nstyled row\nthi');
+    });
+
+    test('a long queue folds with +N more and flattens newlines', () {
+      final lines = queuePanel(
+        ['one\ntwo', 'three', 'four', 'five'],
+        maxRows: 3,
+        width: 30,
+      );
+      expect(lines, hasLength(5));
+      final text = stripAnsi(lines.join('\n'));
+      expect(text, contains('one two'));
+      expect(text, contains('+2 more'));
+      expect(text, isNot(contains('five')));
+    });
+
+    test('the queued panel sits above the editor and shrinks the transcript',
+        () {
+      final frame = TuiFrame(
+        width: 40,
+        height: 16,
+        header: const ['  h1'],
+        transcript: List.generate(30, (i) => 'line $i'),
+        partial: '',
+        inputLines: const ['draft'],
+        cursorRow: 0,
+        cursorColumn: 0,
+        status: '  ready',
+        hint: '  hint',
+        running: false,
+        scrollOffset: 0,
+        follow: true,
+        queueLines: queuePanel(['queued msg'], width: 40),
+      ).render();
+      final text = stripAnsi(frame.content);
+      expect(text, contains('╭─ queued'));
+      expect(text, contains('queued msg'));
+      expect(text, contains('draft'));
+      // The panel is drawn above the editor's message box.
+      expect(text.indexOf('queued msg'), lessThan(text.indexOf('draft')));
+      expect(frame.content.split('\n'), hasLength(16));
+    });
+
+    test('a long plan folds into a bounded panel with +N more', () {
+      const plan = [
+        PlanItem(text: 'one', done: true),
+        PlanItem(text: 'two', done: true),
+        PlanItem(text: 'three', done: true),
+        PlanItem(text: 'four', done: true),
+        PlanItem(text: 'five', done: true),
+        PlanItem(text: 'six'),
+        PlanItem(text: 'seven'),
+      ];
+      final lines = planPanel(plan, maxRows: 5, width: 30);
+      // Top and bottom borders plus four item rows: one slot folds "six" in
+      // over a done item, so three items stay hidden and the fold line
+      // reports what is not drawn.
+      expect(lines, hasLength(7));
+      final text = stripAnsi(lines.join('\n'));
+      expect(text, contains('+3 more'));
+      // The active step stays visible even when it falls outside the cap.
+      expect(text, contains('❯ six'));
+      expect(stripAnsi(lines.last).length, 30);
     });
 
     test('replaying a session does not duplicate a finish as reasoning', () {
@@ -1707,6 +2214,377 @@ void main() {
     });
   });
 
+  group('TUI popups (C6)', () {
+    test(
+      'the provider popup marks the current preset and hides key values',
+      () {
+        final temp = Directory.systemTemp.createTempSync('sudoer-auth-');
+        addTearDown(() => temp.deleteSync(recursive: true));
+        final store = AuthStore(path: p.join(temp.path, 'auth.json'));
+        store.setKey('openai', 'sk-never-print');
+        final current = ProviderConfig.fromJson({
+          'preset': 'openai',
+          'model': 'gpt-6-astra',
+        });
+        final items = providerPopupItems(
+          current: current,
+          store: store,
+          env: (_) => null,
+        );
+        final openai = items.firstWhere((item) => item.value == 'openai');
+        expect(openai.active, isTrue);
+        expect(openai.detail, 'stored');
+        expect(items.where((item) => item.active), hasLength(1));
+        final rendered = items
+            .map((item) => '${item.label} ${item.detail ?? ''}')
+            .join('\n');
+        expect(rendered, isNot(contains('sk-never-print')));
+        expect(rendered, contains('ollama'));
+      },
+    );
+
+    test('the filter matches whitespace tokens in label and detail', () {
+      final popup = TuiPopup(
+        title: 'Provider',
+        items: const [
+          TuiPopupItem(
+            value: 'openai',
+            label: 'openai — OpenAI',
+            detail: 'stored',
+          ),
+          TuiPopupItem(
+            value: 'ollama',
+            label: 'ollama — Ollama',
+            detail: 'not required',
+          ),
+          TuiPopupItem(
+            value: 'zhipu',
+            label: 'zhipu — Zhipu GLM',
+            detail: 'missing',
+          ),
+        ],
+      );
+      popup.type('ollama');
+      expect(popup.visible.map((item) => item.value), ['ollama']);
+      expect(popup.confirm(), 'ollama');
+
+      final tokens = TuiPopup(
+        title: 'Provider',
+        items: const [
+          TuiPopupItem(
+            value: 'zhipu',
+            label: 'zhipu — Zhipu GLM',
+            detail: 'missing',
+          ),
+        ],
+      )..type('zhipu glm');
+      expect(tokens.visible, hasLength(1));
+
+      final none = TuiPopup(
+        title: 'Provider',
+        items: const [TuiPopupItem(value: 'openai', label: 'openai')],
+      )..type('nothing-matches');
+      expect(none.visible, isEmpty);
+      expect(none.confirm(), isNull);
+    });
+
+    test('a viewer popup never confirms a value', () {
+      final popup = TuiPopup(
+        title: 'Plan',
+        items: const [TuiPopupItem(value: 'x', label: '- [ ] do it')],
+        selectable: false,
+      )..move(1);
+      expect(popup.confirm(), isNull);
+      expect(popup.footerHint, contains('Enter or Esc close'));
+    });
+
+    test('movement scrolls the window and confirm picks the row', () {
+      final popup = TuiPopup(
+        title: 'Model',
+        items: [
+          for (var i = 0; i < 30; i++)
+            TuiPopupItem(value: 'item$i', label: 'item$i'),
+        ],
+      )..maxRows = 5;
+      for (var i = 0; i < 9; i++) {
+        popup.move(1);
+      }
+      expect(popup.cursor, 9);
+      expect(popup.scroll, 5);
+      expect(popup.confirm(), 'item9');
+      popup.toTop();
+      expect(popup.cursor, 0);
+      expect(popup.scroll, 0);
+      popup.toBottom();
+      expect(popup.cursor, 29);
+      expect(popup.scroll, 25);
+      popup.move(1);
+      expect(popup.cursor, 29, reason: 'the cursor clamps at the last row');
+    });
+
+    test('the popup overlays the frame and keeps its caret in the filter', () {
+      final long = List<String>.generate(100, (i) => 'line $i');
+      final frame = TuiFrame(
+        width: 60,
+        height: 24,
+        header: const ['  h1', '  h2'],
+        transcript: long,
+        partial: '',
+        inputLines: const [''],
+        cursorRow: 0,
+        cursorColumn: 0,
+        status: '',
+        hint: '',
+        running: false,
+        scrollOffset: 0,
+        follow: true,
+      ).render();
+      final popup = TuiPopup(
+        title: 'Model · glm',
+        items: const [
+          TuiPopupItem(value: 'glm-4.6', label: 'glm-4.6', detail: '200K'),
+          TuiPopupItem(
+            value: 'glm-4.5-air',
+            label: 'glm-4.5-air',
+            detail: '128K',
+          ),
+          TuiPopupItem(
+            value: 'glm-4-flash',
+            label: 'glm-4-flash',
+            detail: '128K',
+          ),
+        ],
+      )..maxRows = 5;
+      final overlaid = popup.overlay(frame.content, width: 60, height: 24);
+      final lines = overlaid.content.split('\n');
+      expect(lines, hasLength(24));
+      for (final line in lines) {
+        expect(stripAnsi(line).length, lessThanOrEqualTo(60));
+      }
+      final text = stripAnsi(overlaid.content);
+      expect(text, contains('Model · glm'));
+      expect(text, contains('glm-4.6'));
+      expect(text, contains('3/3'));
+      // Covered transcript rows are hidden; rows outside the box survive.
+      expect(text, isNot(contains('line 89')));
+      expect(text, contains('line 99'));
+      // The box is centered: top border, filter, rows, footer, bottom border.
+      expect(stripAnsi(lines[8]).startsWith('╭'), isTrue);
+      expect(stripAnsi(lines[9]).startsWith('│ ›'), isTrue);
+      expect(stripAnsi(lines[14]).startsWith('╰'), isTrue);
+      // The caret sits just after the (empty) filter query.
+      expect(overlaid.cursor.x, 4);
+      expect(overlaid.cursor.y, 9);
+    });
+
+    test('the TUI help describes the popup pickers', () {
+      final tui = helpLines(interactive: true, tui: true).join('\n');
+      expect(tui, contains('pick a saved session to resume'));
+      expect(tui, contains('pick or switch the LLM provider preset'));
+      expect(tui, contains('pick or switch the model'));
+      final inline = helpLines(interactive: true).join('\n');
+      expect(inline, contains('list saved sessions'));
+      expect(inline, isNot(contains('pick a saved session')));
+    });
+
+    test('the command catalog drives completions and the palette', () {
+      final tui = replCommandCatalog(interactive: true, tui: true);
+      expect(tui.map((entry) => entry.$1), containsAll(['/help', '/model']));
+      final provider = tui.firstWhere((entry) => entry.$1 == '/provider');
+      expect(provider.$2, contains('[id] pick or switch'));
+      expect(tui, isNot(contains('/cancel')));
+      final automate = replCommandCatalog(interactive: false);
+      expect(automate.map((entry) => entry.$1), contains('/cancel'));
+      final help = helpLines(interactive: true, tui: true).join('\n');
+      expect(help, contains('Ctrl+P commands'));
+      expect(help, contains('Ctrl+L models'));
+      expect(help, contains('type / for command completion'));
+    });
+
+    test('a prefix-matched menu only matches the label', () {
+      final menu = TuiPopup(
+        title: 'Commands',
+        matchLabelPrefix: true,
+        items: const [
+          TuiPopupItem(value: '/help', label: '/help', detail: 'show help'),
+          TuiPopupItem(
+            value: '/provider',
+            label: '/provider',
+            detail: 'pick preset',
+          ),
+        ],
+      )..type('/p');
+      expect(menu.visible.map((item) => item.value), ['/provider']);
+      expect(menu.confirm(), '/provider');
+      // Substring matches inside descriptions never qualify.
+      menu.type('reset'); // 'preset' appears in a description, not a label
+      expect(menu.visible, isEmpty);
+      expect(menu.confirm(), isNull);
+    });
+
+    test('the anchored completion menu sits above the editor', () {
+      final frame = List<String>.generate(
+        24,
+        (i) => 'frame row $i'.padRight(60),
+      );
+      final menu = TuiPopup(
+        title: 'Commands',
+        matchLabelPrefix: true,
+        items: const [
+          TuiPopupItem(value: '/help', label: '/help', detail: 'show help'),
+          TuiPopupItem(value: '/model', label: '/model', detail: 'pick model'),
+          TuiPopupItem(
+            value: '/provider',
+            label: '/provider',
+            detail: 'pick preset',
+          ),
+        ],
+      )..query = '/';
+      final content = menu.overlayAnchored(
+        frame.join('\n'),
+        width: 60,
+        height: 24,
+        bottomRow: 10,
+      );
+      final lines = content.split('\n');
+      expect(lines, hasLength(24));
+      // The box bottom border lands on bottomRow; rows above hold the items.
+      expect(stripAnsi(lines[10]).trimLeft().startsWith('╰'), isTrue);
+      expect(stripAnsi(lines[9]), contains('/provider'));
+      expect(stripAnsi(lines[8]), contains('/model'));
+      expect(stripAnsi(lines[7]), contains('/help'));
+      expect(stripAnsi(lines[6]).trimLeft().startsWith('╭'), isTrue);
+      // The first item is highlighted; rows outside the box are untouched.
+      expect(stripAnsi(lines[7]), contains('❯'));
+      expect(stripAnsi(lines[0]), 'frame row 0'.padRight(60));
+      expect(stripAnsi(lines[20]), 'frame row 20'.padRight(60));
+      for (final line in lines) {
+        expect(stripAnsi(line).length, lessThanOrEqualTo(60));
+      }
+      // No room above the row: nothing is drawn.
+      final cramped = menu.overlayAnchored(
+        frame.join('\n'),
+        width: 60,
+        height: 24,
+        bottomRow: 3,
+      );
+      expect(cramped, frame.join('\n'));
+    });
+
+    test('a provider switch prompts for a key only when one is needed', () {
+      final temp = Directory.systemTemp.createTempSync('sudoer-key-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final store = AuthStore(path: p.join(temp.path, 'auth.json'));
+      String? noKey(String name) => null;
+      final current = ProviderConfig.fromJson({
+        'preset': 'ollama',
+        'model': 'llama3',
+      });
+      final openai = providerPreset('openai')!;
+      final ollama = providerPreset('ollama')!;
+      final custom = providerPreset('custom')!;
+
+      // A key-requiring preset with no resolvable key prompts.
+      expect(
+        shouldPromptForKey(openai, current: current, store: store, env: noKey),
+        isTrue,
+      );
+      // A stored usable key answers the need.
+      store.setKey('openai', 'sk-store-this-000000000000000');
+      expect(
+        shouldPromptForKey(openai, current: current, store: store, env: noKey),
+        isFalse,
+      );
+      // A stored but unusable key prompts again (offer to replace); it also
+      // shadows a good env key in resolveApiKey's precedence.
+      store.setKey('openai', 'has space');
+      expect(
+        shouldPromptForKey(openai, current: current, store: store, env: noKey),
+        isTrue,
+      );
+      expect(
+        shouldPromptForKey(
+          openai,
+          current: current,
+          store: store,
+          env: (name) => 'sk-env-ok',
+        ),
+        isTrue,
+      );
+      // An environment key answers the need once the bad entry is gone.
+      store.remove('openai');
+      expect(
+        shouldPromptForKey(
+          openai,
+          current: current,
+          store: store,
+          env: (name) => 'sk-env-ok',
+        ),
+        isFalse,
+      );
+      // Local endpoints and presets without a base URL never prompt.
+      expect(
+        shouldPromptForKey(ollama, current: current, store: store, env: noKey),
+        isFalse,
+      );
+      expect(
+        shouldPromptForKey(custom, current: current, store: store, env: noKey),
+        isFalse,
+      );
+      // The preset already in effect never prompts.
+      final onOpenai = ProviderConfig.fromJson({
+        'preset': 'openai',
+        'model': 'gpt-6-astra',
+        'api_key': '',
+      });
+      expect(
+        shouldPromptForKey(openai, current: onOpenai, store: store, env: noKey),
+        isFalse,
+      );
+    });
+
+    test('the key prompt masks the value and keeps it out of the frame', () {
+      final frame = List<String>.generate(
+        24,
+        (i) => 'frame row $i'.padRight(70),
+      );
+      final prompt = TuiPrompt(
+        title: 'API key for OpenAI',
+        note: 'stored in the auth store; never echoed',
+      );
+      expect(prompt.footerHint, contains('Enter confirm'));
+      prompt.type('sk-secret-never-print');
+      prompt.type('ed');
+      prompt.backspace();
+      prompt.backspace();
+      expect(prompt.value, 'sk-secret-never-print');
+      final overlaid = prompt.overlay(frame.join('\n'), width: 70, height: 24);
+      final lines = overlaid.content.split('\n');
+      expect(lines, hasLength(24));
+      final text = stripAnsi(overlaid.content);
+      // The raw value never renders; only one bullet per character does.
+      expect(text, isNot(contains('sk-secret')));
+      expect(text, contains('•' * 'sk-secret-never-print'.length));
+      expect(text, contains('API key for OpenAI'));
+      expect(text, contains('never echoed'));
+      expect(text, contains('Enter confirm · Esc skip'));
+      for (final line in lines) {
+        expect(stripAnsi(line).length, lessThanOrEqualTo(70));
+      }
+      // The caret sits just after the masked run on the input row.
+      final boxTop = lines.indexWhere(
+        (line) => stripAnsi(line).contains('API key for OpenAI'),
+      );
+      expect(overlaid.cursor.y, boxTop + 1);
+      final boxLeft = stripAnsi(lines[boxTop]).indexOf('╭');
+      expect(
+        overlaid.cursor.x,
+        boxLeft + 4 + 'sk-secret-never-print'.length,
+        reason: 'left margin + border/prompt + masked width',
+      );
+    });
+  });
+
   group('goal attachments (C7)', () {
     test('strips @path tokens and loads image bytes', () {
       final temp = Directory.systemTemp.createTempSync('sudoer-test-');
@@ -1724,10 +2602,14 @@ void main() {
       final temp = Directory.systemTemp.createTempSync('sudoer-test-');
       addTearDown(() => temp.deleteSync(recursive: true));
       File(p.join(temp.path, 'notes.txt')).writeAsStringSync('x');
-      expect(() => parseGoal('look @${temp.path}/nope.png'),
-          throwsA(isA<FormatException>()));
-      expect(() => parseGoal('look @${temp.path}/notes.txt'),
-          throwsA(isA<FormatException>()));
+      expect(
+        () => parseGoal('look @${temp.path}/nope.png'),
+        throwsA(isA<FormatException>()),
+      );
+      expect(
+        () => parseGoal('look @${temp.path}/notes.txt'),
+        throwsA(isA<FormatException>()),
+      );
     });
 
     test('leaves a bare @ and non-leading tokens alone', () {
@@ -1746,12 +2628,20 @@ void main() {
         config: config,
         provider: ScriptedProvider.fromJson({
           'steps': [
-            {'complete': {'text': 'seen'}}
-          ]
+            {
+              'complete': {'text': 'seen'},
+            },
+          ],
         }),
       );
-      await agent.run(RunRequest('look',
-          images: [ImageAttachment(path: image.path, bytes: [1, 2, 3])]));
+      await agent.run(
+        RunRequest(
+          'look',
+          images: [
+            ImageAttachment(path: image.path, bytes: [1, 2, 3]),
+          ],
+        ),
+      );
       final goal = agent.session.transcript.first;
       expect(goal, isA<UserEntry>());
       expect((goal as UserEntry).images, [image.path]);
@@ -1770,56 +2660,61 @@ void main() {
           UserEntry('go'),
           AssistantEntry(
             thought: 't',
-            action: ToolBatch([ToolCall(id: 'abc', name: 'read', arguments: {'path': 'a'})]),
+            action: ToolBatch([
+              ToolCall(id: 'abc', name: 'read', arguments: {'path': 'a'}),
+            ]),
           ),
-          ObservationEntry(
-              text: 'ok', outcome: Outcome.ok, toolCallId: 'abc'),
+          ObservationEntry(text: 'ok', outcome: Outcome.ok, toolCallId: 'abc'),
           AssistantEntry(thought: 'done', action: Finish('done')),
           UserEntry('again'),
           ObservationEntry(
-              text: 'provider error: timeout', outcome: Outcome.error),
+            text: 'provider error: timeout',
+            outcome: Outcome.error,
+          ),
         ],
         tools: [],
       );
       final messages = openAiMessages(request);
-      final toolMessages =
-          messages.where((m) => m['role'] == 'tool').toList();
+      final toolMessages = messages.where((m) => m['role'] == 'tool').toList();
       expect(toolMessages, hasLength(1));
       expect(toolMessages.single['tool_call_id'], 'abc');
       expect(messages.last['role'], 'user');
       expect(messages.last['content'] as String, contains('observation:'));
     });
 
-    test('replays a nameless tool call as text, never a dangling tool call',
-        () {
-      const request = ProviderRequest(
-        model: 'm',
-        system: 'sys',
-        messages: [
-          UserEntry('go'),
-          AssistantEntry(
-            thought: 'let me look',
-            action: ToolBatch([ToolCall(id: 'ghost', name: '', arguments: {'command': 'ls'})]),
-          ),
-          ObservationEntry(
-            text: 'tool call is missing a name',
-            outcome: Outcome.error,
-            toolCallId: 'ghost',
-          ),
-        ],
-        tools: [],
-      );
-      final messages = openAiMessages(request);
-      final assistant = messages.firstWhere((m) => m['role'] == 'assistant');
-      expect(assistant.containsKey('tool_calls'), isFalse);
-      expect(assistant['content'], 'let me look');
-      expect(messages.any((m) => m['role'] == 'tool'), isFalse);
-      expect(messages.last['role'], 'user');
-      expect(messages.any((m) => m['tool_call_id'] == 'ghost'), isFalse);
-    });
+    test(
+      'replays a nameless tool call as text, never a dangling tool call',
+      () {
+        const request = ProviderRequest(
+          model: 'm',
+          system: 'sys',
+          messages: [
+            UserEntry('go'),
+            AssistantEntry(
+              thought: 'let me look',
+              action: ToolBatch([
+                ToolCall(id: 'ghost', name: '', arguments: {'command': 'ls'}),
+              ]),
+            ),
+            ObservationEntry(
+              text: 'tool call is missing a name',
+              outcome: Outcome.error,
+              toolCallId: 'ghost',
+            ),
+          ],
+          tools: [],
+        );
+        final messages = openAiMessages(request);
+        final assistant = messages.firstWhere((m) => m['role'] == 'assistant');
+        expect(assistant.containsKey('tool_calls'), isFalse);
+        expect(assistant['content'], 'let me look');
+        expect(messages.any((m) => m['role'] == 'tool'), isFalse);
+        expect(messages.last['role'], 'user');
+        expect(messages.any((m) => m['tool_call_id'] == 'ghost'), isFalse);
+      },
+    );
 
-    test('attach goal images to the last user message (openai-compatible)',
-        () {
+    test('attach goal images to the last user message (openai-compatible)', () {
       const request = ProviderRequest(
         model: 'm',
         system: 'sys',
@@ -1840,8 +2735,10 @@ void main() {
       expect(content.first, {'type': 'text', 'text': 'look'});
       final part = content.last as Map<String, dynamic>;
       expect(part['type'], 'image_url');
-      expect((part['image_url'] as Map)['url'],
-          startsWith('data:image/png;base64,'));
+      expect(
+        (part['image_url'] as Map)['url'],
+        startsWith('data:image/png;base64,'),
+      );
       // Earlier user entries keep plain text.
       expect(messages[1]['content'], 'first');
     });
@@ -1861,7 +2758,9 @@ void main() {
         ],
       );
       final messages = ollamaMessages(request);
-      expect(messages.last['images'], [base64Encode([1, 2, 3])]);
+      expect(messages.last['images'], [
+        base64Encode([1, 2, 3]),
+      ]);
       expect(messages[1].containsKey('images'), isFalse);
     });
 
@@ -1869,13 +2768,15 @@ void main() {
       final temp = Directory.systemTemp.createTempSync('sudoer-test-');
       addTearDown(() => temp.deleteSync(recursive: true));
       final registry = ToolRegistry(workspaceRoot: temp.path);
-      final missing =
-          await registry.dispatch(const ToolCall(name: '', arguments: {}));
+      final missing = await registry.dispatch(
+        const ToolCall(name: '', arguments: {}),
+      );
       expect(missing.outcome, Outcome.error);
       expect(missing.text, contains('missing a name'));
       expect(missing.text, contains('run_command'));
-      final unknown =
-          await registry.dispatch(const ToolCall(name: 'nope', arguments: {}));
+      final unknown = await registry.dispatch(
+        const ToolCall(name: 'nope', arguments: {}),
+      );
       expect(unknown.text, contains('unknown tool: nope'));
     });
 
@@ -1894,21 +2795,25 @@ void main() {
                   'type': 'tool_call',
                   'name': 'read',
                   'arguments': {'path': 'a.txt'},
-                }
+                },
               ],
-            }
+            },
           },
-          {'complete': {'text': 'done'}},
-        ]
+          {
+            'complete': {'text': 'done'},
+          },
+        ],
       });
       final agent = PropAgent.assemble(config: config, provider: provider);
       await agent.run(const RunRequest('read'));
-      final assistant =
-          agent.session.transcript.whereType<AssistantEntry>().first;
+      final assistant = agent.session.transcript
+          .whereType<AssistantEntry>()
+          .first;
       final call = (assistant.action as ToolBatch).calls.single;
       expect(call.id, isNotNull);
-      final observation =
-          agent.session.transcript.whereType<ObservationEntry>().first;
+      final observation = agent.session.transcript
+          .whereType<ObservationEntry>()
+          .first;
       expect(observation.toolCallId, call.id);
     });
   });
@@ -1916,7 +2821,8 @@ void main() {
   group('plan convention (C2)', () {
     test('extracts a fenced plan block and strips it from the text', () {
       final parsed = parsePlanBlock(
-          'planning\n```plan\n- [ ] read a.txt\n- [x] answer\n```\n');
+        'planning\n```plan\n- [ ] read a.txt\n- [x] answer\n```\n',
+      );
       expect(parsed.text, 'planning');
       expect(
         [for (final item in parsed.plan!) '${item.text}:${item.done}'],
@@ -1945,24 +2851,32 @@ void main() {
 
     test('the openai adapter parses and strips a plan block', () async {
       final config = _config(
-          kind: 'openai-compatible', extra: {'base_url': 'http://x'});
+        kind: 'openai-compatible',
+        extra: {'base_url': 'http://x'},
+      );
       // The adapter always streams on the wire (C8: inactivity-bounded),
       // so the mock serves SSE even for a callback-less one-shot call.
-      final body = 'data: ${jsonEncode({
+      final body =
+          'data: ${jsonEncode({
             'choices': [
               {
-                'delta': {
-                  'role': 'assistant',
-                  'content': 'planning\n```plan\n- [ ] a\n- [x] b\n```',
-                }
-              }
-            ]
+                'delta': {'role': 'assistant', 'content': 'planning\n```plan\n- [ ] a\n- [x] b\n```'},
+              },
+            ],
           })}\n\ndata: [DONE]\n\n';
       final client = MockClient((_) async => http.Response(body, 200));
-      final provider =
-          OpenAiCompatibleProvider(config.provider, client: client);
-      final response = await provider.complete(const ProviderRequest(
-          model: 'm', system: 's', messages: [UserEntry('go')], tools: []));
+      final provider = OpenAiCompatibleProvider(
+        config.provider,
+        client: client,
+      );
+      final response = await provider.complete(
+        const ProviderRequest(
+          model: 'm',
+          system: 's',
+          messages: [UserEntry('go')],
+          tools: [],
+        ),
+      );
       expect(response.thought, 'planning');
       expect(
         [for (final item in response.plan!) '${item.text}:${item.done}'],
@@ -1972,18 +2886,26 @@ void main() {
 
     test('the ollama adapter parses and strips a plan block', () async {
       final config = _config();
-      final client = MockClient((_) async => http.Response(
-            jsonEncode({
-              'message': {
-                'role': 'assistant',
-                'content': 'planning\n```plan\n- [ ] a\n- [x] b\n```',
-              }
-            }),
-            200,
-          ));
+      final client = MockClient(
+        (_) async => http.Response(
+          jsonEncode({
+            'message': {
+              'role': 'assistant',
+              'content': 'planning\n```plan\n- [ ] a\n- [x] b\n```',
+            },
+          }),
+          200,
+        ),
+      );
       final provider = OllamaProvider(config.provider, client: client);
-      final response = await provider.complete(const ProviderRequest(
-          model: 'm', system: 's', messages: [UserEntry('go')], tools: []));
+      final response = await provider.complete(
+        const ProviderRequest(
+          model: 'm',
+          system: 's',
+          messages: [UserEntry('go')],
+          tools: [],
+        ),
+      );
       expect(response.thought, 'planning');
       expect(
         [for (final item in response.plan!) '${item.text}:${item.done}'],
@@ -1991,24 +2913,37 @@ void main() {
       );
     });
 
-    test('an invalid key fails as a StepFailure before it reaches HTTP',
-        () async {
-      final config = ProviderConfig.fromJson({
-        'preset': 'openai',
-        'model': 'gpt-test',
-        'api_key': 'pasted ┃ transcript',
-      });
-      final client = MockClient((_) async {
-        fail('the client must not be called with an invalid header');
-      });
-      final provider = OpenAiCompatibleProvider(config, client: client);
-      await expectLater(
-        provider.complete(const ProviderRequest(
-            model: 'm', system: 's', messages: [UserEntry('go')], tools: [])),
-        throwsA(isA<StepFailure>()
-            .having((e) => e.message, 'message', contains('invalid'))),
-      );
-    });
+    test(
+      'an invalid key fails as a StepFailure before it reaches HTTP',
+      () async {
+        final config = ProviderConfig.fromJson({
+          'preset': 'openai',
+          'model': 'gpt-test',
+          'api_key': 'pasted ┃ transcript',
+        });
+        final client = MockClient((_) async {
+          fail('the client must not be called with an invalid header');
+        });
+        final provider = OpenAiCompatibleProvider(config, client: client);
+        await expectLater(
+          provider.complete(
+            const ProviderRequest(
+              model: 'm',
+              system: 's',
+              messages: [UserEntry('go')],
+              tools: [],
+            ),
+          ),
+          throwsA(
+            isA<StepFailure>().having(
+              (e) => e.message,
+              'message',
+              contains('invalid'),
+            ),
+          ),
+        );
+      },
+    );
 
     test('a MiniMax 401 explains the region mismatch', () async {
       final config = ProviderConfig.fromJson({
@@ -2016,33 +2951,45 @@ void main() {
         'model': 'MiniMax-M3',
         'api_key': 'sk-test',
       });
-      final client = MockClient((_) async => http.Response(
-            '{"type":"error","error":{"type":"authorized_error",'
-            '"message":"invalid api key (2049)","http_code":"401"}}',
-            401,
-          ));
+      final client = MockClient(
+        (_) async => http.Response(
+          '{"type":"error","error":{"type":"authorized_error",'
+          '"message":"invalid api key (2049)","http_code":"401"}}',
+          401,
+        ),
+      );
       final provider = OpenAiCompatibleProvider(config, client: client);
       await expectLater(
-        provider.complete(const ProviderRequest(
-            model: 'm', system: 's', messages: [UserEntry('go')], tools: [])),
-        throwsA(isA<StepFailure>()
-            .having((e) => e.message, 'message', contains('region-specific'))
-            .having((e) => e.message, 'message', contains('minimax-cn'))),
+        provider.complete(
+          const ProviderRequest(
+            model: 'm',
+            system: 's',
+            messages: [UserEntry('go')],
+            tools: [],
+          ),
+        ),
+        throwsA(
+          isA<StepFailure>()
+              .having((e) => e.message, 'message', contains('region-specific'))
+              .having((e) => e.message, 'message', contains('minimax-cn')),
+        ),
       );
     });
   });
 
   group('diagnostics (C6)', () {
-    test('a disabled sink drops events; enabled forwards with the component id',
-        () {
-      final lines = <String>[];
-      final diagnostics = Diagnostics(sink: lines.add);
-      diagnostics.event('C1 loop', 'ignored');
-      expect(lines, isEmpty);
-      diagnostics.enabled = true;
-      diagnostics.event('C1 loop', 'step 1/8');
-      expect(lines.single, '[C1 loop] step 1/8');
-    });
+    test(
+      'a disabled sink drops events; enabled forwards with the component id',
+      () {
+        final lines = <String>[];
+        final diagnostics = Diagnostics(sink: lines.add);
+        diagnostics.event('C1 loop', 'ignored');
+        expect(lines, isEmpty);
+        diagnostics.enabled = true;
+        diagnostics.event('C1 loop', 'step 1/8');
+        expect(lines.single, '[C1 loop] step 1/8');
+      },
+    );
 
     test('off by default; /verbose on emits routing and results', () async {
       final temp = Directory.systemTemp.createTempSync('sudoer-test-');
@@ -2050,22 +2997,24 @@ void main() {
       File('${temp.path}/a.txt').writeAsStringSync('x');
       final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
       Provider scripted() => ScriptedProvider.fromJson({
-            'steps': [
-              {
-                'complete': {
-                  'text': 'reading',
-                  'tool_calls': [
-                    {
-                      'type': 'tool_call',
-                      'name': 'read',
-                      'arguments': {'path': 'a.txt'},
-                    }
-                  ],
-                }
-              },
-              {'complete': {'text': 'done'}},
-            ]
-          });
+        'steps': [
+          {
+            'complete': {
+              'text': 'reading',
+              'tool_calls': [
+                {
+                  'type': 'tool_call',
+                  'name': 'read',
+                  'arguments': {'path': 'a.txt'},
+                },
+              ],
+            },
+          },
+          {
+            'complete': {'text': 'done'},
+          },
+        ],
+      });
 
       final quietErr = StringBuffer();
       await runRepl(
@@ -2093,53 +3042,60 @@ void main() {
       expect(loudErr.toString(), contains('[C5 session]'));
     });
 
-    test('the result diagnostic prints the block reason, not the object',
-        () async {
-      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
-      addTearDown(() => temp.deleteSync(recursive: true));
-      final config = Config.fromJson({
-        'provider': {
-          'kind': 'ollama',
-          'model': 'scripted',
-          'context_window': 8192,
-        },
-        'workspace_root': temp.path,
-        'session_dir': temp.path,
-        'web': {
-          'enabled': true,
-          'deny_hosts': ['evil.example'],
-        },
-      });
-      final provider = ScriptedProvider.fromJson({
-        'steps': [
-          {
-            'complete': {
-              'text': 'fetching',
-              'tool_calls': [
-                {
-                  'type': 'tool_call',
-                  'name': 'web_fetch',
-                  'arguments': {'url': 'http://evil.example/notes'},
-                }
-              ],
-            }
-          }
-        ]
-      });
-      final err = StringBuffer();
-      await runRepl(
-        config: config,
-        input: Stream.fromIterable(
-            ['/verbose on', 'fetch http://evil.example/notes', '/exit']),
-        out: StringBuffer(),
-        err: err,
-        providerFactory: (_) => provider,
-      );
-      final text = err.toString();
-      expect(text, contains(
-          '[C6 interface] result blocked (web egress to evil.example'));
-      expect(text, isNot(contains('Instance of')));
-    });
+    test(
+      'the result diagnostic prints the block reason, not the object',
+      () async {
+        final temp = Directory.systemTemp.createTempSync('sudoer-test-');
+        addTearDown(() => temp.deleteSync(recursive: true));
+        final config = Config.fromJson({
+          'provider': {
+            'kind': 'ollama',
+            'model': 'scripted',
+            'context_window': 8192,
+          },
+          'workspace_root': temp.path,
+          'session_dir': temp.path,
+          'web': {
+            'enabled': true,
+            'deny_hosts': ['evil.example'],
+          },
+        });
+        final provider = ScriptedProvider.fromJson({
+          'steps': [
+            {
+              'complete': {
+                'text': 'fetching',
+                'tool_calls': [
+                  {
+                    'type': 'tool_call',
+                    'name': 'web_fetch',
+                    'arguments': {'url': 'http://evil.example/notes'},
+                  },
+                ],
+              },
+            },
+          ],
+        });
+        final err = StringBuffer();
+        await runRepl(
+          config: config,
+          input: Stream.fromIterable([
+            '/verbose on',
+            'fetch http://evil.example/notes',
+            '/exit',
+          ]),
+          out: StringBuffer(),
+          err: err,
+          providerFactory: (_) => provider,
+        );
+        final text = err.toString();
+        expect(
+          text,
+          contains('[C6 interface] result blocked (web egress to evil.example'),
+        );
+        expect(text, isNot(contains('Instance of')));
+      },
+    );
   });
 
   group('automate log format (C6)', () {
@@ -2179,76 +3135,85 @@ void main() {
       );
     });
 
-    test('verbose automate stderr is timestamped and traces LLM traffic',
-        () async {
-      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
-      addTearDown(() => temp.deleteSync(recursive: true));
-      File('${temp.path}/a.txt').writeAsStringSync('x');
-      final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
-      final provider = ScriptedProvider.fromJson({
-        'steps': [
-          {
-            'complete': {
-              'text': 'reading',
-              'tool_calls': [
-                {
-                  'type': 'tool_call',
-                  'name': 'read',
-                  'arguments': {'path': 'a.txt'},
-                }
-              ],
-            }
-          },
-          {'complete': {'text': 'done text'}},
-        ]
-      });
-      final out = StringBuffer();
-      final err = StringBuffer();
-      await runCli(
-        config: config,
-        goal: 'read a.txt',
-        out: out,
-        err: err,
-        providerFactory: (_) => provider,
-        verbose: true,
-      );
-      // stdout stays the clean answer surface.
-      expect(out.toString(), 'done text\n');
-      final text = err.toString();
-      // Every non-blank stderr line carries a timestamp prefix.
-      for (final line in text.split('\n').where((l) => l.isNotEmpty)) {
-        expect(line, matches(stamp));
-      }
-      // The request/response traffic is on the record, with context.
-      expect(text, contains('── request step 1 ──'));
-      expect(text, contains('── request step 2 ──'));
-      expect(text, contains('ctx ~'));
-      expect(text, contains('messages=1 new=1'));
-      expect(text, contains('── system'));
-      expect(text, contains('[C2 provider]   You are Sudoer'));
-      expect(text, contains('── user'));
-      expect(text, contains('[C2 provider]   read a.txt'));
-      expect(text, contains('── tool_calls ──'));
-      expect(text, contains('── observation ok for '));
-      expect(text, contains('── finish'));
-      expect(text, contains('[C2 provider]   done text'));
-      // The second request diffs instead of re-dumping: the goal is not
-      // reprinted and the new tail is announced.
-      expect('── system'.allMatches(text).length, 1);
-      expect(text, contains('earlier message unchanged'));
-      expect(text, contains('── assistant'));
-      // Timings ride inline with the response and each tool result.
-      expect(text, contains('timing: response '));
-      expect(text, contains('timing: read '));
-      expect(text, contains(RegExp(r'Z \[C2 provider\] timing: response ')));
-    });
+    test(
+      'verbose automate stderr is timestamped and traces LLM traffic',
+      () async {
+        final temp = Directory.systemTemp.createTempSync('sudoer-test-');
+        addTearDown(() => temp.deleteSync(recursive: true));
+        File('${temp.path}/a.txt').writeAsStringSync('x');
+        final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
+        final provider = ScriptedProvider.fromJson({
+          'steps': [
+            {
+              'complete': {
+                'text': 'reading',
+                'tool_calls': [
+                  {
+                    'type': 'tool_call',
+                    'name': 'read',
+                    'arguments': {'path': 'a.txt'},
+                  },
+                ],
+              },
+            },
+            {
+              'complete': {'text': 'done text'},
+            },
+          ],
+        });
+        final out = StringBuffer();
+        final err = StringBuffer();
+        await runCli(
+          config: config,
+          goal: 'read a.txt',
+          out: out,
+          err: err,
+          providerFactory: (_) => provider,
+          verbose: true,
+        );
+        // stdout stays the clean answer surface.
+        expect(out.toString(), 'done text\n');
+        final text = err.toString();
+        // Every non-blank stderr line carries a timestamp prefix.
+        for (final line in text.split('\n').where((l) => l.isNotEmpty)) {
+          expect(line, matches(stamp));
+        }
+        // The request/response traffic is on the record, with context.
+        expect(text, contains('── request step 1 ──'));
+        expect(text, contains('── request step 2 ──'));
+        expect(text, contains('ctx ~'));
+        expect(text, contains('messages=1 new=1'));
+        expect(text, contains('── system'));
+        expect(text, contains('[C2 provider]   You are Sudoer'));
+        expect(text, contains('── user'));
+        expect(text, contains('[C2 provider]   read a.txt'));
+        expect(text, contains('── tool_calls ──'));
+        expect(text, contains('── observation ok for '));
+        expect(text, contains('── finish'));
+        expect(text, contains('[C2 provider]   done text'));
+        // The second request diffs instead of re-dumping: the goal is not
+        // reprinted and the new tail is announced.
+        expect('── system'.allMatches(text).length, 1);
+        expect(text, contains('earlier message unchanged'));
+        expect(text, contains('── assistant'));
+        // Timings ride inline with the response and each tool result.
+        expect(text, contains('timing: response '));
+        expect(text, contains('timing: read '));
+        expect(text, contains(RegExp(r'Z \[C2 provider\] timing: response ')));
+      },
+    );
 
     test('the human surface is never stamped nor traced', () async {
       final temp = Directory.systemTemp.createTempSync('sudoer-test-');
       addTearDown(() => temp.deleteSync(recursive: true));
       final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
-      final provider =
-          ScriptedProvider.fromJson({'steps': [{'complete': {'text': 'ok'}}]});
+      final provider = ScriptedProvider.fromJson({
+        'steps': [
+          {
+            'complete': {'text': 'ok'},
+          },
+        ],
+      });
       final err = StringBuffer();
       await runCli(
         config: config,
@@ -2282,14 +3247,21 @@ void main() {
         out: out,
         err: err,
         session: session,
-        providerFactory: (_) =>
-            ScriptedProvider.fromJson({'steps': [{'complete': {'text': 'ok'}}]}),
+        providerFactory: (_) => ScriptedProvider.fromJson({
+          'steps': [
+            {
+              'complete': {'text': 'ok'},
+            },
+          ],
+        }),
       );
       expect(code, 0);
       // The answer surface stays clean; the resume hint lands on the log.
       expect(out.toString(), 'ok\n');
-      expect(err.toString(),
-          contains('session fixed-id (resume: --session fixed-id)'));
+      expect(
+        err.toString(),
+        contains('session fixed-id (resume: --session fixed-id)'),
+      );
     });
   });
 
@@ -2330,8 +3302,9 @@ void main() {
 
   group('think convention (C2)', () {
     test('extracts a think block and strips it from the text', () {
-      final parsed =
-          parseThinkBlock('answer\n<think>\nhidden\nreason\n</think>\ntail');
+      final parsed = parseThinkBlock(
+        'answer\n<think>\nhidden\nreason\n</think>\ntail',
+      );
       expect(parsed.text, 'answer\n\ntail');
       expect(parsed.reasoning, '\nhidden\nreason\n');
     });
@@ -2345,30 +3318,40 @@ void main() {
     test('is case-insensitive and strips an unclosed block', () {
       expect(parseThinkBlock('<THINK>hush</THINK>ok').text, 'ok');
       expect(parseThinkBlock('ok\n<think>still going').text, 'ok');
-      expect(parseThinkBlock('ok\n<think>still going').reasoning,
-          'still going');
+      expect(
+        parseThinkBlock('ok\n<think>still going').reasoning,
+        'still going',
+      );
     });
 
     test('the openai adapter strips a think block one-shot', () async {
       final config = _config(
-          kind: 'openai-compatible', extra: {'base_url': 'http://x'});
+        kind: 'openai-compatible',
+        extra: {'base_url': 'http://x'},
+      );
       // The adapter always streams on the wire (C8: inactivity-bounded),
       // so the mock serves SSE even for a callback-less one-shot call.
-      final body = 'data: ${jsonEncode({
+      final body =
+          'data: ${jsonEncode({
             'choices': [
               {
-                'delta': {
-                  'role': 'assistant',
-                  'content': '<think>deliberating</think>answer',
-                }
-              }
-            ]
+                'delta': {'role': 'assistant', 'content': '<think>deliberating</think>answer'},
+              },
+            ],
           })}\n\ndata: [DONE]\n\n';
       final client = MockClient((_) async => http.Response(body, 200));
-      final provider =
-          OpenAiCompatibleProvider(config.provider, client: client);
-      final response = await provider.complete(const ProviderRequest(
-          model: 'm', system: 's', messages: [UserEntry('go')], tools: []));
+      final provider = OpenAiCompatibleProvider(
+        config.provider,
+        client: client,
+      );
+      final response = await provider.complete(
+        const ProviderRequest(
+          model: 'm',
+          system: 's',
+          messages: [UserEntry('go')],
+          tools: [],
+        ),
+      );
       expect(response.thought, 'answer');
       expect(response.reasoning, 'deliberating');
     });
@@ -2406,41 +3389,96 @@ void main() {
   group('streaming adapters (C2)', () {
     test('openai streams content and hides the plan block', () async {
       final config = _config(
-          kind: 'openai-compatible', extra: {'base_url': 'http://x'});
+        kind: 'openai-compatible',
+        extra: {'base_url': 'http://x'},
+      );
       final client = _StreamClient([
         'data: {"choices":[{"delta":{"content":"planning"}}]}\n\n',
         'data: {"choices":[{"delta":{"content":"\\n```plan\\n- [ ] a\\n"}}]}\n\n',
         'data: {"choices":[{"delta":{"content":"- [x] b\\n```"}}]}\n\n',
         'data: [DONE]\n\n',
       ]);
-      final provider =
-          OpenAiCompatibleProvider(config.provider, client: client);
+      final provider = OpenAiCompatibleProvider(
+        config.provider,
+        client: client,
+      );
       final deltas = <String>[];
       final response = await provider.complete(
         const ProviderRequest(
-            model: 'm', system: 's', messages: [UserEntry('go')], tools: []),
+          model: 'm',
+          system: 's',
+          messages: [UserEntry('go')],
+          tools: [],
+        ),
         onDelta: deltas.add,
       );
       expect(response.thought, 'planning');
-      expect([for (final i in response.plan!) '${i.text}:${i.done}'],
-          ['a:false', 'b:true']);
+      expect(
+        [for (final i in response.plan!) '${i.text}:${i.done}'],
+        ['a:false', 'b:true'],
+      );
       expect(deltas.join(), isNot(contains('```')));
       expect(deltas.join().trim(), 'planning');
     });
 
+    test('openai pushes the live plan while the block still streams', () async {
+      final config = _config(
+        kind: 'openai-compatible',
+        extra: {'base_url': 'http://x'},
+      );
+      final client = _StreamClient([
+        'data: {"choices":[{"delta":{"content":"\\n```plan\\n"}}]}\n\n',
+        'data: {"choices":[{"delta":{"content":"- [ ] a\\n"}}]}\n\n',
+        'data: {"choices":[{"delta":{"content":"- [x] b\\n"}}]}\n\n',
+        'data: {"choices":[{"delta":{"content":"```"}}]}\n\n',
+        'data: [DONE]\n\n',
+      ]);
+      final provider = OpenAiCompatibleProvider(
+        config.provider,
+        client: client,
+      );
+      final live = <List<PlanItem>>[];
+      await provider.complete(
+        const ProviderRequest(
+          model: 'm',
+          system: 's',
+          messages: [UserEntry('go')],
+          tools: [],
+        ),
+        onDelta: (_) {},
+        onPlan: live.add,
+      );
+      // The panel advances as the block arrives: the first item lands while
+      // the block is still open, and the last push matches the full plan.
+      expect(live, isNotEmpty);
+      expect(live.first.map((i) => i.text), ['a']);
+      expect(live.last.map((i) => '${i.text}:${i.done}'), [
+        'a:false',
+        'b:true',
+      ]);
+    });
+
     test('openai reassembles streamed tool calls', () async {
       final config = _config(
-          kind: 'openai-compatible', extra: {'base_url': 'http://x'});
+        kind: 'openai-compatible',
+        extra: {'base_url': 'http://x'},
+      );
       final client = _StreamClient([
         'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_x","function":{"name":"read","arguments":"{\\"pa"}}]}}]}\n\n',
         'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"th\\":\\"a.txt\\"}"}}]}}]}\n\n',
         'data: [DONE]\n\n',
       ]);
-      final provider =
-          OpenAiCompatibleProvider(config.provider, client: client);
+      final provider = OpenAiCompatibleProvider(
+        config.provider,
+        client: client,
+      );
       final response = await provider.complete(
         const ProviderRequest(
-            model: 'm', system: 's', messages: [UserEntry('go')], tools: []),
+          model: 'm',
+          system: 's',
+          messages: [UserEntry('go')],
+          tools: [],
+        ),
         onDelta: (_) {},
       );
       final call = (response.action as ToolBatch).calls.single;
@@ -2451,7 +3489,9 @@ void main() {
 
     test('openai keeps name/id when later chunks repeat them empty', () async {
       final config = _config(
-          kind: 'openai-compatible', extra: {'base_url': 'http://x'});
+        kind: 'openai-compatible',
+        extra: {'base_url': 'http://x'},
+      );
       // MiniMax sends the name on the first chunk, then repeats the call on
       // the arguments chunk with empty strings for id and function.name.
       final client = _StreamClient([
@@ -2459,11 +3499,17 @@ void main() {
         'data: {"choices":[{"delta":{"tool_calls":[{"id":"","type":"","function":{"name":"","arguments":"{\\"command\\":\\"ls\\"}"},"index":0}]}}]}\n\n',
         'data: [DONE]\n\n',
       ]);
-      final provider =
-          OpenAiCompatibleProvider(config.provider, client: client);
+      final provider = OpenAiCompatibleProvider(
+        config.provider,
+        client: client,
+      );
       final response = await provider.complete(
         const ProviderRequest(
-            model: 'm', system: 's', messages: [UserEntry('go')], tools: []),
+          model: 'm',
+          system: 's',
+          messages: [UserEntry('go')],
+          tools: [],
+        ),
         onDelta: (_) {},
       );
       final call = (response.action as ToolBatch).calls.single;
@@ -2472,52 +3518,68 @@ void main() {
       expect(call.arguments, {'command': 'ls'});
     });
 
-    test('openai streams reasoning separately and hides it from the answer',
-        () async {
-      final config = _config(
-          kind: 'openai-compatible', extra: {'base_url': 'http://x'});
-      final client = _StreamClient([
-        'data: {"choices":[{"delta":{"content":"<thi"}}]}\n\n',
-        'data: {"choices":[{"delta":{"content":"nk>planning</think>hello"}}]}\n\n',
-        'data: [DONE]\n\n',
-      ]);
-      final provider =
-          OpenAiCompatibleProvider(config.provider, client: client);
-      final deltas = <String>[];
-      final reasoning = <String>[];
-      final response = await provider.complete(
-        const ProviderRequest(
-            model: 'm', system: 's', messages: [UserEntry('go')], tools: []),
-        onDelta: deltas.add,
-        onReasoning: reasoning.add,
-      );
-      expect(reasoning.join(), 'planning');
-      expect(deltas.join(), 'hello');
-      expect(response.thought, 'hello');
-      expect(response.reasoning, 'planning');
-    });
+    test(
+      'openai streams reasoning separately and hides it from the answer',
+      () async {
+        final config = _config(
+          kind: 'openai-compatible',
+          extra: {'base_url': 'http://x'},
+        );
+        final client = _StreamClient([
+          'data: {"choices":[{"delta":{"content":"<thi"}}]}\n\n',
+          'data: {"choices":[{"delta":{"content":"nk>planning</think>hello"}}]}\n\n',
+          'data: [DONE]\n\n',
+        ]);
+        final provider = OpenAiCompatibleProvider(
+          config.provider,
+          client: client,
+        );
+        final deltas = <String>[];
+        final reasoning = <String>[];
+        final response = await provider.complete(
+          const ProviderRequest(
+            model: 'm',
+            system: 's',
+            messages: [UserEntry('go')],
+            tools: [],
+          ),
+          onDelta: deltas.add,
+          onReasoning: reasoning.add,
+        );
+        expect(reasoning.join(), 'planning');
+        expect(deltas.join(), 'hello');
+        expect(response.thought, 'hello');
+        expect(response.reasoning, 'planning');
+      },
+    );
 
-    test('ollama streams reasoning separately and hides it from the answer',
-        () async {
-      final config = _config();
-      final client = _StreamClient([
-        '{"message":{"role":"assistant","content":"<think>why</think>answer"},"done":false}\n',
-        '{"message":{"role":"assistant","content":""},"done":true}\n',
-      ]);
-      final provider = OllamaProvider(config.provider, client: client);
-      final deltas = <String>[];
-      final reasoning = <String>[];
-      final response = await provider.complete(
-        const ProviderRequest(
-            model: 'm', system: 's', messages: [UserEntry('go')], tools: []),
-        onDelta: deltas.add,
-        onReasoning: reasoning.add,
-      );
-      expect(reasoning.join(), 'why');
-      expect(deltas.join(), 'answer');
-      expect(response.thought, 'answer');
-      expect(response.reasoning, 'why');
-    });
+    test(
+      'ollama streams reasoning separately and hides it from the answer',
+      () async {
+        final config = _config();
+        final client = _StreamClient([
+          '{"message":{"role":"assistant","content":"<think>why</think>answer"},"done":false}\n',
+          '{"message":{"role":"assistant","content":""},"done":true}\n',
+        ]);
+        final provider = OllamaProvider(config.provider, client: client);
+        final deltas = <String>[];
+        final reasoning = <String>[];
+        final response = await provider.complete(
+          const ProviderRequest(
+            model: 'm',
+            system: 's',
+            messages: [UserEntry('go')],
+            tools: [],
+          ),
+          onDelta: deltas.add,
+          onReasoning: reasoning.add,
+        );
+        expect(reasoning.join(), 'why');
+        expect(deltas.join(), 'answer');
+        expect(response.thought, 'answer');
+        expect(response.reasoning, 'why');
+      },
+    );
 
     test('ollama streams content and hides the plan block', () async {
       final config = _config();
@@ -2530,12 +3592,18 @@ void main() {
       final deltas = <String>[];
       final response = await provider.complete(
         const ProviderRequest(
-            model: 'm', system: 's', messages: [UserEntry('go')], tools: []),
+          model: 'm',
+          system: 's',
+          messages: [UserEntry('go')],
+          tools: [],
+        ),
         onDelta: deltas.add,
       );
       expect(response.thought, 'planning');
-      expect([for (final i in response.plan!) '${i.text}:${i.done}'],
-          ['a:false', 'b:true']);
+      expect(
+        [for (final i in response.plan!) '${i.text}:${i.done}'],
+        ['a:false', 'b:true'],
+      );
       expect(deltas.join(), isNot(contains('```')));
     });
   });
@@ -2543,17 +3611,21 @@ void main() {
   group('mode selection (C6)', () {
     test('automate wins, human forces, else terminal decides', () {
       expect(
-          chooseMode(automate: true, human: false, interactive: true),
-          UiMode.automate);
+        chooseMode(automate: true, human: false, interactive: true),
+        UiMode.automate,
+      );
       expect(
-          chooseMode(automate: false, human: true, interactive: false),
-          UiMode.human);
+        chooseMode(automate: false, human: true, interactive: false),
+        UiMode.human,
+      );
       expect(
-          chooseMode(automate: false, human: false, interactive: false),
-          UiMode.automate);
+        chooseMode(automate: false, human: false, interactive: false),
+        UiMode.automate,
+      );
       expect(
-          chooseMode(automate: false, human: false, interactive: true),
-          UiMode.human);
+        chooseMode(automate: false, human: false, interactive: true),
+        UiMode.human,
+      );
     });
   });
 
@@ -2577,13 +3649,14 @@ void main() {
         out: StringBuffer(),
         err: err,
         human: true,
-        providerFactory: (_) =>
-            ScriptedProvider.fromJson({'steps': const []}),
+        providerFactory: (_) => ScriptedProvider.fromJson({'steps': const []}),
       );
       final flat = stripAnsi(err.toString());
       expect(flat, contains('Sudoer $kBuildLabel'));
-      expect(flat.indexOf('Sudoer $kBuildLabel'),
-          lessThan(flat.indexOf(kRepoUrl)));
+      expect(
+        flat.indexOf('Sudoer $kBuildLabel'),
+        lessThan(flat.indexOf(kRepoUrl)),
+      );
       expect(flat, contains(kRepoUrl));
     });
   });
@@ -2609,10 +3682,22 @@ void main() {
     });
 
     test('styling is identity when ansi is off, SGR when on', () {
-      final plain = Console(out: StringBuffer(), err: StringBuffer(), ansi: false);
+      final plain = Console(
+        out: StringBuffer(),
+        err: StringBuffer(),
+        ansi: false,
+      );
       expect(plain.style('hi', bold: true, italic: true), 'hi');
-      final pretty = Console(out: StringBuffer(), err: StringBuffer(), ansi: true);
-      final styled = pretty.style('hi', bold: true, fg: const RgbColor(1, 2, 3));
+      final pretty = Console(
+        out: StringBuffer(),
+        err: StringBuffer(),
+        ansi: true,
+      );
+      final styled = pretty.style(
+        'hi',
+        bold: true,
+        fg: const RgbColor(1, 2, 3),
+      );
       expect(styled, contains('\x1b['));
       expect(stripAnsi(styled), 'hi');
     });
@@ -2632,12 +3717,14 @@ void main() {
                   'type': 'tool_call',
                   'name': 'read',
                   'arguments': {'path': 'a.txt'},
-                }
+                },
               ],
-            }
+            },
           },
-          {'complete': {'text': 'done'}},
-        ]
+          {
+            'complete': {'text': 'done'},
+          },
+        ],
       });
       final out = StringBuffer();
       final err = StringBuffer();
@@ -2657,16 +3744,19 @@ void main() {
 
     test('an idle spinner stop emits nothing (cannot erase the reply)', () {
       final err = StringBuffer();
-      final console =
-          Console(out: StringBuffer(), err: err, ansi: true, spinner: true);
+      final console = Console(
+        out: StringBuffer(),
+        err: err,
+        ansi: true,
+        spinner: true,
+      );
       console.stopThinking();
       expect(err.toString(), isEmpty);
 
       console.startThinking('thinking');
       // Visible output stops the spinner; extra stops must not clear again.
       console.delta('the answer\n');
-      final clears =
-          RegExp(r'\x1b\[2K').allMatches(err.toString()).length;
+      final clears = RegExp(r'\x1b\[2K').allMatches(err.toString()).length;
       console.stopThinking();
       console.stopThinking();
       expect(RegExp(r'\x1b\[2K').allMatches(err.toString()).length, clears);
@@ -2674,23 +3764,24 @@ void main() {
 
     test('the spinner stays live while a reply block buffers', () {
       final err = StringBuffer();
-      final console =
-          Console(out: StringBuffer(), err: err, ansi: true, spinner: true);
+      final console = Console(
+        out: StringBuffer(),
+        err: err,
+        ansi: true,
+        spinner: true,
+      );
       console.startThinking('thinking');
       // A partial line renders nothing; the spinner must not stop.
       console.delta('still typing the first line');
-      final clears =
-          RegExp(r'\x1b\[2K').allMatches(err.toString()).length;
+      final clears = RegExp(r'\x1b\[2K').allMatches(err.toString()).length;
       console.stopThinking();
-      expect(
-          RegExp(r'\x1b\[2K').allMatches(err.toString()).length, clears + 1);
+      expect(RegExp(r'\x1b\[2K').allMatches(err.toString()).length, clears + 1);
     });
 
     test('command output never shares a line with the spinner', () {
       final out = StringBuffer();
       final err = StringBuffer();
-      final console =
-          Console(out: out, err: err, ansi: true, spinner: true);
+      final console = Console(out: out, err: err, ansi: true, spinner: true);
       console.startThinking('thinking');
       console.info('↺ compacted 47 steps');
       // The message is its own line on stdout...
@@ -2698,24 +3789,31 @@ void main() {
       // ...and never leaks onto the spinner's stream.
       expect(err.toString(), isNot(contains('compacted')));
       // The spinner was resumed: stopping it now clears a live line.
-      final clears =
-          RegExp(r'\x1b\[2K').allMatches(err.toString()).length;
+      final clears = RegExp(r'\x1b\[2K').allMatches(err.toString()).length;
       console.stopThinking();
       expect(RegExp(r'\x1b\[2K').allMatches(err.toString()).length, clears + 1);
     });
 
     test('command output is quiet on stderr when no spinner runs', () {
       final err = StringBuffer();
-      final console =
-          Console(out: StringBuffer(), err: err, ansi: true, spinner: true);
+      final console = Console(
+        out: StringBuffer(),
+        err: err,
+        ansi: true,
+        spinner: true,
+      );
       console.info('help');
       expect(err.toString(), isEmpty);
     });
 
     test('a diagnostic never shares a line with the spinner', () {
       final err = StringBuffer();
-      final console =
-          Console(out: StringBuffer(), err: err, ansi: true, spinner: true);
+      final console = Console(
+        out: StringBuffer(),
+        err: err,
+        ansi: true,
+        spinner: true,
+      );
       console.startThinking('thinking');
       console.diagnostic('[C4 context] prompt 1 messages, no compaction');
       // The spinner line is cleared before the diagnostic is written.
@@ -2741,13 +3839,19 @@ void main() {
 
     test('a diagnostic styles the tag only when ansi is on', () {
       final plain = StringBuffer();
-      Console(out: StringBuffer(), err: plain, ansi: false)
-          .diagnostic('[C1 loop] step 1/8');
+      Console(
+        out: StringBuffer(),
+        err: plain,
+        ansi: false,
+      ).diagnostic('[C1 loop] step 1/8');
       expect(plain.toString(), '[C1 loop] step 1/8\n');
 
       final styled = StringBuffer();
-      Console(out: StringBuffer(), err: styled, ansi: true)
-          .diagnostic('[C3 tools] read -> ok');
+      Console(
+        out: StringBuffer(),
+        err: styled,
+        ansi: true,
+      ).diagnostic('[C3 tools] read -> ok');
       expect(styled.toString(), contains('\x1b['));
       expect(stripAnsi(styled.toString()), contains('[C3 tools] read -> ok'));
     });
@@ -2755,8 +3859,11 @@ void main() {
     test('multi-line results indent the body beneath the first line', () {
       final err = StringBuffer();
       final console = Console(out: StringBuffer(), err: err, ansi: false);
-      console.observation(Outcome.ok, 'first\nsecond\nthird',
-          label: 'run_command');
+      console.observation(
+        Outcome.ok,
+        'first\nsecond\nthird',
+        label: 'run_command',
+      );
       final lines = err.toString().trimRight().split('\n');
       expect(lines.first, contains('run_command'));
       expect(lines.first, contains('first'));
@@ -2791,10 +3898,15 @@ void main() {
     test('timing suffixes render on tool and result lines', () {
       final err = StringBuffer();
       final console = Console(out: StringBuffer(), err: err, ansi: false);
-      console.tool('read', {'path': 'a.dart'},
-          elapsed: const Duration(milliseconds: 2400));
-      console.observation(Outcome.ok, 'contents',
-          label: 'read', elapsed: const Duration(milliseconds: 42));
+      console.tool('read', {
+        'path': 'a.dart',
+      }, elapsed: const Duration(milliseconds: 2400));
+      console.observation(
+        Outcome.ok,
+        'contents',
+        label: 'read',
+        elapsed: const Duration(milliseconds: 42),
+      );
       final lines = err.toString().trimRight().split('\n');
       expect(lines[0], contains('· 2.4s'));
       expect(lines[1], contains('· 42ms'));
@@ -2803,8 +3915,7 @@ void main() {
     test('model output is magenta, command output yellow, input default', () {
       final out = StringBuffer();
       final err = StringBuffer();
-      final console =
-          Console(out: out, err: err, ansi: true, spinner: false);
+      final console = Console(out: out, err: err, ansi: true, spinner: false);
       console.prompt();
       console.user('goal');
       console.info('help');
@@ -2820,26 +3931,38 @@ void main() {
 
     test('the spinner shows the interrupt hint', () {
       final err = StringBuffer();
-      final console =
-          Console(out: StringBuffer(), err: err, ansi: true, spinner: true);
+      final console = Console(
+        out: StringBuffer(),
+        err: err,
+        ansi: true,
+        spinner: true,
+      );
       console.setHint('press Esc twice to interrupt');
       console.startThinking('thinking');
-      expect(stripAnsi(err.toString()),
-          contains('press Esc twice to interrupt'));
+      expect(
+        stripAnsi(err.toString()),
+        contains('press Esc twice to interrupt'),
+      );
       console.setHint(null);
       console.stopThinking();
     });
 
     test('spinner renders the phase then its detail', () async {
       final err = StringBuffer();
-      final console =
-          Console(out: StringBuffer(), err: err, ansi: true, spinner: true);
+      final console = Console(
+        out: StringBuffer(),
+        err: err,
+        ansi: true,
+        spinner: true,
+      );
       console.startThinking('thinking');
       console.setDetail('step 2 · stalled 1/3');
       await Future<void>.delayed(const Duration(milliseconds: 150));
       console.stopThinking();
-      expect(stripAnsi(err.toString()),
-          contains('thinking · step 2 · stalled 1/3'));
+      expect(
+        stripAnsi(err.toString()),
+        contains('thinking · step 2 · stalled 1/3'),
+      );
     });
 
     test('status line numbers responses and shows a ctx percentage', () async {
@@ -2849,12 +3972,12 @@ void main() {
       final provider = ScriptedProvider.fromJson({
         'steps': [
           {
-            'complete': {'text': 'one'}
+            'complete': {'text': 'one'},
           },
           {
-            'complete': {'text': 'two'}
+            'complete': {'text': 'two'},
           },
-        ]
+        ],
       });
       final err = StringBuffer();
       await runRepl(
@@ -2877,13 +4000,16 @@ void main() {
       final temp = Directory.systemTemp.createTempSync('sudoer-test-');
       addTearDown(() => temp.deleteSync(recursive: true));
       final config = _config(
-          workspaceRoot: temp.path, sessionDir: temp.path, window: 1000000);
+        workspaceRoot: temp.path,
+        sessionDir: temp.path,
+        window: 1000000,
+      );
       final provider = ScriptedProvider.fromJson({
         'steps': [
           {
-            'complete': {'text': 'ok'}
-          }
-        ]
+            'complete': {'text': 'ok'},
+          },
+        ],
       });
       final err = StringBuffer();
       await runRepl(
@@ -2906,9 +4032,9 @@ void main() {
       final provider = ScriptedProvider.fromJson({
         'steps': [
           {
-            'complete': {'text': 'done', 'reasoning': 'ponder'}
-          }
-        ]
+            'complete': {'text': 'done', 'reasoning': 'ponder'},
+          },
+        ],
       });
       final out = StringBuffer();
       final err = StringBuffer();
@@ -2928,8 +4054,10 @@ void main() {
 
   group('markdown render (C6)', () {
     test('renders headings, emphasis and inline code', () {
-      expect(renderMarkdown('# Title\n\nbody', _plainStyle),
-          'Title\n─────\n\nbody');
+      expect(
+        renderMarkdown('# Title\n\nbody', _plainStyle),
+        'Title\n─────\n\nbody',
+      );
       expect(renderMarkdown('a **b** *c* `d`', _plainStyle), 'a b c d');
     });
 
@@ -2945,13 +4073,17 @@ void main() {
       expect(renderMarkdown('1. one\n2. two', _plainStyle), '1. one\n2. two');
       expect(renderMarkdown('> quote', _plainStyle), '│ quote');
       expect(renderMarkdown('---', _plainStyle), '─' * 78);
-      expect(renderMarkdown('[text](http://x)', _plainStyle),
-          'text (http://x)');
+      expect(
+        renderMarkdown('[text](http://x)', _plainStyle),
+        'text (http://x)',
+      );
     });
 
     test('renders a table with aligned columns', () {
-      final rendered =
-          renderMarkdown('| a | b |\n|---|---|\n| 1 | 2 |', _plainStyle);
+      final rendered = renderMarkdown(
+        '| a | b |\n|---|---|\n| 1 | 2 |',
+        _plainStyle,
+      );
       expect(rendered, contains('│ a │ b │'));
       expect(rendered, contains('├───┼───┤'));
       expect(rendered, contains('│ 1 │ 2 │'));
@@ -2981,9 +4113,15 @@ void main() {
 
     test('a stream renders a list-indented code fence', () {
       final stream = MarkdownStream();
-      expect(stream.add('- static binary:\n', _plainStyle), '• static binary:\n');
+      expect(
+        stream.add('- static binary:\n', _plainStyle),
+        '• static binary:\n',
+      );
       expect(stream.add('  ```bash\n', _plainStyle), '  ╭─ bash\n');
-      expect(stream.add('  gcc -O2 main.c\n', _plainStyle), '  │ gcc -O2 main.c\n');
+      expect(
+        stream.add('  gcc -O2 main.c\n', _plainStyle),
+        '  │ gcc -O2 main.c\n',
+      );
       expect(stream.add('  ```\n', _plainStyle), '  ╰─\n');
     });
 
@@ -3015,8 +4153,12 @@ void main() {
 
     test('console renders streamed markdown to stdout with styling', () {
       final out = StringBuffer();
-      final console =
-          Console(out: out, err: StringBuffer(), ansi: true, spinner: false);
+      final console = Console(
+        out: out,
+        err: StringBuffer(),
+        ansi: true,
+        spinner: false,
+      );
       console.delta('**bold**');
       expect(out.toString(), isEmpty);
       console.endLine();
@@ -3025,67 +4167,178 @@ void main() {
       expect(out.toString(), isNot(contains('**')));
     });
 
-    test('human REPL renders the markdown answer, not the raw source',
-        () async {
-      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
-      addTearDown(() => temp.deleteSync(recursive: true));
-      final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
-      final provider = ScriptedProvider.fromJson({
-        'steps': [
-          {
-            'complete': {'text': '# done\n\nwith **weight**'}
-          }
-        ]
-      });
-      final out = StringBuffer();
-      await runRepl(
-        config: config,
-        input: Stream.fromIterable(['go', '/exit']),
-        out: out,
-        err: StringBuffer(),
-        human: true,
-        providerFactory: (_) => provider,
-      );
-      final flat = stripAnsi(out.toString());
-      expect(flat, contains('done'));
-      expect(flat, contains('weight'));
-      expect(flat, isNot(contains('**')));
-      expect(flat, isNot(contains('# done')));
-    });
+    test(
+      'human REPL renders the markdown answer, not the raw source',
+      () async {
+        final temp = Directory.systemTemp.createTempSync('sudoer-test-');
+        addTearDown(() => temp.deleteSync(recursive: true));
+        final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
+        final provider = ScriptedProvider.fromJson({
+          'steps': [
+            {
+              'complete': {'text': '# done\n\nwith **weight**'},
+            },
+          ],
+        });
+        final out = StringBuffer();
+        await runRepl(
+          config: config,
+          input: Stream.fromIterable(['go', '/exit']),
+          out: out,
+          err: StringBuffer(),
+          human: true,
+          providerFactory: (_) => provider,
+        );
+        final flat = stripAnsi(out.toString());
+        expect(flat, contains('done'));
+        expect(flat, contains('weight'));
+        expect(flat, isNot(contains('**')));
+        expect(flat, isNot(contains('# done')));
+      },
+    );
   });
 
   group('terminal keys (C6)', () {
     test('decodes arrow key sequences', () async {
-      final reader = KeyReader(Stream.fromIterable([
-        [0x1b, 0x5b, 0x41, 0x1b, 0x5b, 0x42, 0x1b, 0x5b, 0x43, 0x1b, 0x5b, 0x44],
-      ]));
+      final reader = KeyReader(
+        Stream.fromIterable([
+          [
+            0x1b,
+            0x5b,
+            0x41,
+            0x1b,
+            0x5b,
+            0x42,
+            0x1b,
+            0x5b,
+            0x43,
+            0x1b,
+            0x5b,
+            0x44,
+          ],
+        ]),
+      );
       final keys = <Key>[];
       await for (final key in reader.keys) {
         keys.add(key);
         if (keys.length == 4) break;
       }
-      expect(keys.map((k) => k.kind),
-          [KeyKind.up, KeyKind.down, KeyKind.right, KeyKind.left]);
+      expect(keys.map((k) => k.kind), [
+        KeyKind.up,
+        KeyKind.down,
+        KeyKind.right,
+        KeyKind.left,
+      ]);
+      await reader.close();
+    });
+
+    test('decodes SGR mouse wheel and click reports', () async {
+      final reader = KeyReader(
+        Stream.fromIterable([
+          utf8.encode('\x1b[<64;10;5M'),
+          utf8.encode('\x1b[<65;10;5M'),
+          utf8.encode('\x1b[<0;3;4m'),
+        ]),
+      );
+      final keys = <Key>[];
+      await for (final key in reader.keys) {
+        keys.add(key);
+        if (keys.length == 3) break;
+      }
+      expect(keys.map((k) => k.kind), [KeyKind.mouse, KeyKind.mouse, KeyKind.mouse]);
+      expect(keys[0].mouse!.button, 64);
+      expect(keys[0].mouse!.x, 10);
+      expect(keys[0].mouse!.y, 5);
+      expect(keys[0].mouse!.action, MouseAction.press);
+      expect(keys[1].mouse!.button, 65);
+      expect(keys[2].mouse!.button, 0);
+      expect(keys[2].mouse!.action, MouseAction.release);
+      await reader.close();
+    });
+
+    test('decodes an X10 mouse wheel report', () async {
+      // Cb = 64 (wheel up), Cx = 10, Cy = 5, each offset by 32.
+      final reader = KeyReader(
+        Stream.fromIterable([
+          [0x1b, 0x5b, 0x4d, 64 + 32, 10 + 32, 5 + 32],
+        ]),
+      );
+      final keys = <Key>[];
+      await for (final key in reader.keys) {
+        keys.add(key);
+        if (keys.isNotEmpty) break;
+      }
+      expect(keys.single.kind, KeyKind.mouse);
+      expect(keys.single.mouse!.button, 64);
+      expect(keys.single.mouse!.x, 10);
+      expect(keys.single.mouse!.y, 5);
+      expect(keys.single.mouse!.action, MouseAction.press);
+      await reader.close();
+    });
+
+    test('decodes an SGR drag report as motion', () async {
+      final reader = KeyReader(
+        Stream.fromIterable([utf8.encode('\x1b[<32;7;9M')]),
+      );
+      final keys = <Key>[];
+      await for (final key in reader.keys) {
+        keys.add(key);
+        if (keys.isNotEmpty) break;
+      }
+      expect(keys.single.mouse!.action, MouseAction.motion);
       await reader.close();
     });
 
     test('a lone ESC is emitted after the timeout', () async {
-      final reader = KeyReader(Stream.fromIterable([[0x1b]]),
-          escTimeout: const Duration(milliseconds: 10));
+      final reader = KeyReader(
+        Stream.fromIterable([
+          [0x1b],
+        ]),
+        escTimeout: const Duration(milliseconds: 10),
+      );
       final key = await reader.keys.first;
       expect(key.kind, KeyKind.esc);
       await reader.close();
     });
 
     test('decodes control keys', () async {
-      final reader = KeyReader(Stream.fromIterable([[13, 127, 3, 4]]));
+      final reader = KeyReader(
+        Stream.fromIterable([
+          [13, 127, 3, 4],
+        ]),
+      );
       final keys = <Key>[];
       await for (final key in reader.keys) {
         keys.add(key);
         if (keys.length == 4) break;
       }
-      expect(keys.map((k) => k.kind),
-          [KeyKind.enter, KeyKind.backspace, KeyKind.ctrlC, KeyKind.ctrlD]);
+      expect(keys.map((k) => k.kind), [
+        KeyKind.enter,
+        KeyKind.backspace,
+        KeyKind.ctrlC,
+        KeyKind.ctrlD,
+      ]);
+      await reader.close();
+    });
+
+    test('decodes the TUI shortcut control keys', () async {
+      final reader = KeyReader(
+        Stream.fromIterable([
+          [7, 12, 14, 16, 19],
+        ]),
+      );
+      final keys = <Key>[];
+      await for (final key in reader.keys) {
+        keys.add(key);
+        if (keys.length == 5) break;
+      }
+      expect(keys.map((k) => k.kind), [
+        KeyKind.ctrlG,
+        KeyKind.ctrlL,
+        KeyKind.ctrlN,
+        KeyKind.ctrlP,
+        KeyKind.ctrlS,
+      ]);
       await reader.close();
     });
 
@@ -3130,10 +4383,12 @@ void main() {
     });
 
     test('a paste split across reads is delivered whole', () async {
-      final reader = KeyReader(Stream.fromIterable([
-        [...utf8.encode('\x1b[200~foo'), 10],
-        [...utf8.encode('bar'), ...utf8.encode('\x1b[201~')],
-      ]));
+      final reader = KeyReader(
+        Stream.fromIterable([
+          [...utf8.encode('\x1b[200~foo'), 10],
+          [...utf8.encode('bar'), ...utf8.encode('\x1b[201~')],
+        ]),
+      );
       final key = await reader.keys.first;
       expect(key.kind, KeyKind.paste);
       expect(key.text, 'foo\nbar');
@@ -3142,7 +4397,8 @@ void main() {
 
     test('a malformed paste still delivers on end of input', () async {
       final reader = KeyReader(
-          Stream.fromIterable([utf8.encode('\x1b[200~unterminated')]));
+        Stream.fromIterable([utf8.encode('\x1b[200~unterminated')]),
+      );
       final key = await reader.keys.first;
       expect(key.kind, KeyKind.paste);
       expect(key.text, 'unterminated');
@@ -3157,14 +4413,23 @@ void main() {
         if (keys.length == 7) break;
       }
       expect(keys.map((k) => k.kind), [
-        KeyKind.rune, KeyKind.rune, KeyKind.rune, KeyKind.newline,
-        KeyKind.rune, KeyKind.rune, KeyKind.rune,
+        KeyKind.rune,
+        KeyKind.rune,
+        KeyKind.rune,
+        KeyKind.newline,
+        KeyKind.rune,
+        KeyKind.rune,
+        KeyKind.rune,
       ]);
       await reader.close();
     });
 
     test('a lone newline is still the submit gesture', () async {
-      final reader = KeyReader(Stream.fromIterable([[13, 127, 3, 4]]));
+      final reader = KeyReader(
+        Stream.fromIterable([
+          [13, 127, 3, 4],
+        ]),
+      );
       final keys = <Key>[];
       await for (final key in reader.keys) {
         keys.add(key);
@@ -3175,8 +4440,9 @@ void main() {
     });
 
     test('decodes PageUp and PageDown', () async {
-      final reader =
-          KeyReader(Stream.fromIterable([utf8.encode('\x1b[5~\x1b[6~')]));
+      final reader = KeyReader(
+        Stream.fromIterable([utf8.encode('\x1b[5~\x1b[6~')]),
+      );
       final keys = <Key>[];
       await for (final key in reader.keys) {
         keys.add(key);
@@ -3187,10 +4453,12 @@ void main() {
     });
 
     test('decodes Alt+Enter and Kitty Shift+Enter as newline', () async {
-      final reader = KeyReader(Stream.fromIterable([
-        [0x1b, 0x0d, 0x1b, 0x0a],
-        utf8.encode('\x1b[13;2u'),
-      ]));
+      final reader = KeyReader(
+        Stream.fromIterable([
+          [0x1b, 0x0d, 0x1b, 0x0a],
+          utf8.encode('\x1b[13;2u'),
+        ]),
+      );
       final keys = <Key>[];
       await for (final key in reader.keys) {
         keys.add(key);
@@ -3414,8 +4682,10 @@ void main() {
       expect(esc.press(now), isFalse);
       expect(esc.press(now.add(const Duration(milliseconds: 300))), isTrue);
       expect(esc.press(now.add(const Duration(seconds: 5))), isFalse);
-      expect(esc.press(now.add(const Duration(seconds: 5, milliseconds: 100))),
-          isTrue);
+      expect(
+        esc.press(now.add(const Duration(seconds: 5, milliseconds: 100))),
+        isTrue,
+      );
     });
   });
 
@@ -3440,8 +4710,13 @@ void main() {
       signal.cancel();
       await expectLater(
         raced,
-        throwsA(isA<StepFailure>()
-            .having((e) => e.kind, 'kind', FailureKind.cancelled)),
+        throwsA(
+          isA<StepFailure>().having(
+            (e) => e.kind,
+            'kind',
+            FailureKind.cancelled,
+          ),
+        ),
       );
     });
 
@@ -3465,23 +4740,36 @@ void main() {
 
     test('the openai adapter aborts a streaming call on cancel', () async {
       final config = _config(
-          kind: 'openai-compatible', extra: {'base_url': 'http://x'});
+        kind: 'openai-compatible',
+        extra: {'base_url': 'http://x'},
+      );
       final client = _HangingClient();
       addTearDown(client.dispose);
-      final provider =
-          OpenAiCompatibleProvider(config.provider, client: client);
+      final provider = OpenAiCompatibleProvider(
+        config.provider,
+        client: client,
+      );
       final signal = CancelSignal();
       final future = provider.complete(
         const ProviderRequest(
-            model: 'm', system: 's', messages: [UserEntry('go')], tools: []),
+          model: 'm',
+          system: 's',
+          messages: [UserEntry('go')],
+          tools: [],
+        ),
         onDelta: (_) {},
         cancel: signal,
       );
       signal.cancel();
       await expectLater(
         future,
-        throwsA(isA<StepFailure>()
-            .having((e) => e.kind, 'kind', FailureKind.cancelled)),
+        throwsA(
+          isA<StepFailure>().having(
+            (e) => e.kind,
+            'kind',
+            FailureKind.cancelled,
+          ),
+        ),
       );
     });
 
@@ -3490,8 +4778,9 @@ void main() {
       addTearDown(() => temp.deleteSync(recursive: true));
       final tool = RunCommandTool(WorkspaceGuard(temp.path));
       final signal = CancelSignal();
-      final future =
-          tool.executeCancellable({'command': _blockingCommand()}, signal);
+      final future = tool.executeCancellable({
+        'command': _blockingCommand(),
+      }, signal);
       signal.cancel();
       final outcome = await future;
       expect(outcome.outcome, Outcome.error);
@@ -3525,18 +4814,22 @@ void main() {
     });
 
     test('the help lists /cancel only on the automate surface', () {
-      expect(helpLines(interactive: true).join('\n'), isNot(contains('/cancel')));
+      expect(
+        helpLines(interactive: true).join('\n'),
+        isNot(contains('/cancel')),
+      );
       expect(helpLines(interactive: false).join('\n'), contains('/cancel'));
     });
 
     test('the human help notes the backslash line continuation', () {
       expect(
-          helpLines(interactive: true).join('\n'),
-          contains(
-              'end a line with \\ to continue the goal on the next line'));
+        helpLines(interactive: true).join('\n'),
+        contains('end a line with \\ to continue the goal on the next line'),
+      );
       expect(
-          helpLines(interactive: false).join('\n'),
-          isNot(contains('continue the goal on the next line')));
+        helpLines(interactive: false).join('\n'),
+        isNot(contains('continue the goal on the next line')),
+      );
     });
 
     test('the TUI help teaches the multi-line editor instead', () {
@@ -3545,26 +4838,52 @@ void main() {
       expect(text, isNot(contains('end a line with \\')));
     });
 
-    test('a /cancel sent while idle does not leak into the next goal',
-        () async {
-      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
-      addTearDown(() => temp.deleteSync(recursive: true));
-      final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
-      final out = StringBuffer();
-      final outcome = await runRepl(
-        config: config,
-        input: Stream.fromIterable(['/cancel', 'do a thing', '/exit']),
-        out: out,
-        err: StringBuffer(),
-        providerFactory: (_) => ScriptedProvider.fromJson({
-          'steps': [
-            {'complete': {'text': 'ok'}}
-          ]
-        }),
-      );
-      expect(out.toString(), contains('ok'));
-      expect(outcome.exitCode, 0);
-    });
+    test(
+      'a /cancel sent while idle does not leak into the next goal',
+      () async {
+        final temp = Directory.systemTemp.createTempSync('sudoer-test-');
+        addTearDown(() => temp.deleteSync(recursive: true));
+        final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
+        final out = StringBuffer();
+        final outcome = await runRepl(
+          config: config,
+          input: Stream.fromIterable(['/cancel', 'do a thing', '/exit']),
+          out: out,
+          err: StringBuffer(),
+          providerFactory: (_) => ScriptedProvider.fromJson({
+            'steps': [
+              {
+                'complete': {'text': 'ok'},
+              },
+            ],
+          }),
+        );
+        expect(out.toString(), contains('ok'));
+        expect(outcome.exitCode, 0);
+      },
+    );
+
+    test(
+      '/exit is the one documented quit; /quit stays a hidden alias',
+      () async {
+        final help = helpLines(interactive: true).join('\n');
+        expect(help, contains('/exit'));
+        expect(help, isNot(contains('/quit')));
+        final tui = replCommandCatalog(interactive: true, tui: true);
+        expect(tui.map((entry) => entry.$1), contains('/exit'));
+        expect(tui.map((entry) => entry.$1), isNot(contains('/quit')));
+
+        final temp = Directory.systemTemp.createTempSync('sudoer-quit-');
+        addTearDown(() => temp.deleteSync(recursive: true));
+        final outcome = await runRepl(
+          config: _config(workspaceRoot: temp.path, sessionDir: temp.path),
+          input: Stream.fromIterable(['/quit']),
+          out: StringBuffer(),
+          err: StringBuffer(),
+        );
+        expect(outcome.exitCode, 0, reason: '/quit still closes the session');
+      },
+    );
   });
 
   group('direct shell (C6)', () {
@@ -3587,42 +4906,48 @@ void main() {
 
     test('the human help lists ! but the automate help does not', () {
       expect(helpLines(interactive: true).join('\n'), contains('!<command>'));
-      expect(helpLines(interactive: false).join('\n'),
-          isNot(contains('!<command>')));
+      expect(
+        helpLines(interactive: false).join('\n'),
+        isNot(contains('!<command>')),
+      );
     });
 
-    test('a ! line runs directly in the interactive CLI, never the model',
-        () async {
-      final temp = Directory.systemTemp.createTempSync('sudoer-test-');
-      addTearDown(() => temp.deleteSync(recursive: true));
-      final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
-      final raw = StreamController<List<int>>();
-      final out = StringBuffer();
-      final repl = runRepl(
-        config: config,
-        input: const Stream<String>.empty(),
-        rawInput: raw.stream,
-        interactive: true,
-        human: true,
-        out: out,
-        err: StringBuffer(),
-        providerFactory: (_) => ScriptedProvider.fromJson({'steps': []}),
-      );
-      raw.add(utf8.encode('!echo hi\r'));
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-      raw.add([4]); // Ctrl+D: end of input.
-      await raw.close();
-      final outcome = await repl;
-      expect(out.toString(), contains('hi'));
-      expect(outcome.runs, isEmpty);
-    });
+    test(
+      'a ! line runs directly in the interactive CLI, never the model',
+      () async {
+        final temp = Directory.systemTemp.createTempSync('sudoer-test-');
+        addTearDown(() => temp.deleteSync(recursive: true));
+        final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
+        final raw = StreamController<List<int>>();
+        final out = StringBuffer();
+        final repl = runRepl(
+          config: config,
+          input: const Stream<String>.empty(),
+          rawInput: raw.stream,
+          interactive: true,
+          human: true,
+          out: out,
+          err: StringBuffer(),
+          providerFactory: (_) => ScriptedProvider.fromJson({'steps': []}),
+        );
+        raw.add(utf8.encode('!echo hi\r'));
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        raw.add([4]); // Ctrl+D: end of input.
+        await raw.close();
+        final outcome = await repl;
+        expect(out.toString(), contains('hi'));
+        expect(outcome.runs, isEmpty);
+      },
+    );
   });
 
   group('host shell (C3)', () {
     test('runs a command and captures stdout and the exit code', () async {
       final shell = HostShell();
-      final (process, _) =
-          await shell.start('echo hello', Directory.systemTemp.path);
+      final (process, _) = await shell.start(
+        'echo hello',
+        Directory.systemTemp.path,
+      );
       final out = await process.stdout.transform(utf8.decoder).join();
       final code = await process.exitCode;
       expect(out.trim(), 'hello');
@@ -3631,8 +4956,10 @@ void main() {
 
     test('killTree ends a running command tree', () async {
       final shell = HostShell();
-      final (process, grouped) =
-          await shell.start(_blockingCommand(), Directory.systemTemp.path);
+      final (process, grouped) = await shell.start(
+        _blockingCommand(),
+        Directory.systemTemp.path,
+      );
       await shell.killTree(process, grouped);
       final code = await process.exitCode;
       expect(code, isNot(0));
@@ -3662,7 +4989,7 @@ void main() {
           'model': 'm',
           'context_window': 100,
         },
-          'workspace_root': Directory.systemTemp.path,
+        'workspace_root': Directory.systemTemp.path,
       });
       expect(config.provider.apiKey, Platform.environment['PATH']);
     });
@@ -3677,8 +5004,9 @@ void main() {
       final json = action.toJson();
       expect(json['type'], 'tool_calls');
       expect((json['tool_calls'] as List).length, 2);
-      final back = Action.fromJson((jsonDecode(jsonEncode(json)) as Map)
-          .cast<String, dynamic>());
+      final back = Action.fromJson(
+        (jsonDecode(jsonEncode(json)) as Map).cast<String, dynamic>(),
+      );
       expect(back, isA<ToolBatch>());
       expect((back as ToolBatch).calls.length, 2);
       expect(back.calls[1].name, 'glob');
@@ -3695,103 +5023,118 @@ void main() {
       expect((action as ToolBatch).calls.single.id, 'old');
     });
 
-    test('one step dispatches a read-only batch and answers every call', () async {
-      final temp = Directory.systemTemp.createTempSync('sudoer-batch-');
-      addTearDown(() => temp.deleteSync(recursive: true));
-      File(p.join(temp.path, 'a.txt')).writeAsStringSync('A');
-      File(p.join(temp.path, 'b.txt')).writeAsStringSync('B');
-      final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
-      final provider = ScriptedProvider.fromJson({
-        'steps': [
-          {
-            'complete': {
-              'text': 'reading both',
-              'tool_calls': [
-                {
-                  'type': 'tool_call',
-                  'name': 'read',
-                  'arguments': {'path': 'a.txt'},
-                },
-                {
-                  'type': 'tool_call',
-                  'name': 'read',
-                  'arguments': {'path': 'b.txt'},
-                },
-              ],
-            }
-          },
-          {'complete': {'text': 'done'}},
-        ]
-      });
-      final callLog = <String>[];
-      final agent = PropAgent.assemble(
-          config: config, provider: provider, callLog: callLog);
-      final result = await agent.run(const RunRequest('read both'));
-      expect(result.status, RunStatus.complete);
-      expect(callLog, ['read', 'read']);
-      // One assistant decision carrying both calls...
-      final decisions =
-          agent.session.transcript.whereType<AssistantEntry>().toList();
-      expect(decisions.length, 2); // the batch step and the finish
-      expect((decisions[0].action as ToolBatch).calls.length, 2);
-      // ...followed by one observation per call, in the listed order.
-      final observations = agent.session.transcript
-          .whereType<ObservationEntry>()
-          .map((o) => o.text)
-          .toList();
-      expect(observations, ['A', 'B']);
-      // ids bind each observation to its call for replay.
-      final ids =
-          (decisions[0].action as ToolBatch).calls.map((c) => c.id).toList();
-      expect(
-          agent.session.transcript
-              .whereType<ObservationEntry>()
-              .map((o) => o.toolCallId),
-          ids);
-    });
-
-    test('a sibling timeout does not discard completed observations (C8)',
-        () async {
-      final temp = Directory.systemTemp.createTempSync('sudoer-batch-');
-      addTearDown(() => _deleteTemp(temp));
-      File(p.join(temp.path, 'a.txt')).writeAsStringSync('A');
-      final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
-      final provider = ScriptedProvider.fromJson({
-        'steps': [
-          {
-            'complete': {
-              'text': 'mixed batch',
-              'tool_calls': [
-                {
-                  'type': 'tool_call',
-                  'name': 'read',
-                  'arguments': {'path': 'a.txt'},
-                },
-                {
-                  'type': 'tool_call',
-                  'name': 'run_command',
-                  'arguments': {'command': _blockingCommand()},
-                },
-              ],
-            }
-          },
-          {'complete': {'text': 'recovered'}},
-        ]
-      });
-      final agent = PropAgent.assemble(
+    test(
+      'one step dispatches a read-only batch and answers every call',
+      () async {
+        final temp = Directory.systemTemp.createTempSync('sudoer-batch-');
+        addTearDown(() => temp.deleteSync(recursive: true));
+        File(p.join(temp.path, 'a.txt')).writeAsStringSync('A');
+        File(p.join(temp.path, 'b.txt')).writeAsStringSync('B');
+        final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
+        final provider = ScriptedProvider.fromJson({
+          'steps': [
+            {
+              'complete': {
+                'text': 'reading both',
+                'tool_calls': [
+                  {
+                    'type': 'tool_call',
+                    'name': 'read',
+                    'arguments': {'path': 'a.txt'},
+                  },
+                  {
+                    'type': 'tool_call',
+                    'name': 'read',
+                    'arguments': {'path': 'b.txt'},
+                  },
+                ],
+              },
+            },
+            {
+              'complete': {'text': 'done'},
+            },
+          ],
+        });
+        final callLog = <String>[];
+        final agent = PropAgent.assemble(
           config: config,
           provider: provider,
-          reliability:
-              const Reliability(buildTimeout: Duration(seconds: 1)));
-      final result = await agent.run(const RunRequest('mixed'));
-      expect(result.status, RunStatus.complete);
-      final observations = agent.session.transcript
-          .whereType<ObservationEntry>()
-          .map((o) => o.text)
-          .toList();
-      expect(observations.first, 'A');
-      expect(observations[1], contains('timed out'));
-    });
+          callLog: callLog,
+        );
+        final result = await agent.run(const RunRequest('read both'));
+        expect(result.status, RunStatus.complete);
+        expect(callLog, ['read', 'read']);
+        // One assistant decision carrying both calls...
+        final decisions = agent.session.transcript
+            .whereType<AssistantEntry>()
+            .toList();
+        expect(decisions.length, 2); // the batch step and the finish
+        expect((decisions[0].action as ToolBatch).calls.length, 2);
+        // ...followed by one observation per call, in the listed order.
+        final observations = agent.session.transcript
+            .whereType<ObservationEntry>()
+            .map((o) => o.text)
+            .toList();
+        expect(observations, ['A', 'B']);
+        // ids bind each observation to its call for replay.
+        final ids = (decisions[0].action as ToolBatch).calls
+            .map((c) => c.id)
+            .toList();
+        expect(
+          agent.session.transcript.whereType<ObservationEntry>().map(
+            (o) => o.toolCallId,
+          ),
+          ids,
+        );
+      },
+    );
+
+    test(
+      'a sibling timeout does not discard completed observations (C8)',
+      () async {
+        final temp = Directory.systemTemp.createTempSync('sudoer-batch-');
+        addTearDown(() => _deleteTemp(temp));
+        File(p.join(temp.path, 'a.txt')).writeAsStringSync('A');
+        final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
+        final provider = ScriptedProvider.fromJson({
+          'steps': [
+            {
+              'complete': {
+                'text': 'mixed batch',
+                'tool_calls': [
+                  {
+                    'type': 'tool_call',
+                    'name': 'read',
+                    'arguments': {'path': 'a.txt'},
+                  },
+                  {
+                    'type': 'tool_call',
+                    'name': 'run_command',
+                    'arguments': {'command': _blockingCommand()},
+                  },
+                ],
+              },
+            },
+            {
+              'complete': {'text': 'recovered'},
+            },
+          ],
+        });
+        final agent = PropAgent.assemble(
+          config: config,
+          provider: provider,
+          reliability: const Reliability(buildTimeout: Duration(seconds: 1)),
+        );
+        final result = await agent.run(const RunRequest('mixed'));
+        expect(result.status, RunStatus.complete);
+        final observations = agent.session.transcript
+            .whereType<ObservationEntry>()
+            .map((o) => o.text)
+            .toList();
+        expect(observations.first, 'A');
+        expect(observations[1], contains('timed out'));
+      },
+    );
   });
 
   group('tool catalog additions (C3)', () {
@@ -3807,26 +5150,42 @@ void main() {
 
     test('read returns a 0-based line range as text', () async {
       File(p.join(temp.path, 'd.txt')).writeAsStringSync('L0\nL1\nL2\nL3\n');
-      final outcome = await registry.dispatch(const ToolCall(
+      final outcome = await registry.dispatch(
+        const ToolCall(
           name: 'read',
-          arguments: {'path': 'd.txt', 'offset': 1, 'limit': 2}));
+          arguments: {'path': 'd.txt', 'offset': 1, 'limit': 2},
+        ),
+      );
       expect(outcome.outcome, Outcome.ok);
       expect(outcome.text, 'L1\nL2');
     });
 
     test('edit replace_all rewrites every occurrence', () async {
-      final file = File(p.join(temp.path, 'a.txt'))..writeAsStringSync('x x x\n');
-      final outcome = await registry.dispatch(const ToolCall(
+      final file = File(p.join(temp.path, 'a.txt'))
+        ..writeAsStringSync('x x x\n');
+      final outcome = await registry.dispatch(
+        const ToolCall(
           name: 'edit',
-          arguments: {'path': 'a.txt', 'old': 'x', 'new': 'y', 'replace_all': true}));
+          arguments: {
+            'path': 'a.txt',
+            'old': 'x',
+            'new': 'y',
+            'replace_all': true,
+          },
+        ),
+      );
       expect(outcome.outcome, Outcome.ok);
       expect(file.readAsStringSync(), 'y y y\n');
     });
 
     test('an ambiguous edit without replace_all is an error', () async {
       File(p.join(temp.path, 'a.txt')).writeAsStringSync('cat\ncat\n');
-      final outcome = await registry.dispatch(const ToolCall(
-          name: 'edit', arguments: {'path': 'a.txt', 'old': 'cat', 'new': 'dog'}));
+      final outcome = await registry.dispatch(
+        const ToolCall(
+          name: 'edit',
+          arguments: {'path': 'a.txt', 'old': 'cat', 'new': 'dog'},
+        ),
+      );
       expect(outcome.outcome, Outcome.error);
       expect(outcome.text, contains('ambiguous'));
     });
@@ -3834,30 +5193,36 @@ void main() {
     test('multi_edit applies an ordered batch atomically', () async {
       final file = File(p.join(temp.path, 'a.txt'))
         ..writeAsStringSync('foo\nbar\nfoo\n');
-      final outcome = await registry.dispatch(const ToolCall(
+      final outcome = await registry.dispatch(
+        const ToolCall(
           name: 'multi_edit',
           arguments: {
             'path': 'a.txt',
             'edits': [
               {'old': 'foo', 'new': 'baz', 'replace_all': true},
               {'old': 'bar', 'new': 'qux'},
-            ]
-          }));
+            ],
+          },
+        ),
+      );
       expect(outcome.outcome, Outcome.ok);
       expect(file.readAsStringSync(), 'baz\nqux\nbaz\n');
     });
 
     test('multi_edit writes nothing when a later edit fails', () async {
       final file = File(p.join(temp.path, 'a.txt'))..writeAsStringSync('one\n');
-      final outcome = await registry.dispatch(const ToolCall(
+      final outcome = await registry.dispatch(
+        const ToolCall(
           name: 'multi_edit',
           arguments: {
             'path': 'a.txt',
             'edits': [
               {'old': 'one', 'new': 'two'},
               {'old': 'missing', 'new': 'three'},
-            ]
-          }));
+            ],
+          },
+        ),
+      );
       expect(outcome.outcome, Outcome.error);
       expect(outcome.text, contains('edit 2'));
       expect(file.readAsStringSync(), 'one\n');
@@ -3871,8 +5236,9 @@ void main() {
           .createSync(recursive: true);
       File(p.join(temp.path, 'node_modules', 'dep', 'x.txt'))
           .writeAsStringSync('x');
-      final outcome = await registry.dispatch(const ToolCall(
-          name: 'glob', arguments: {'pattern': '**/*.txt'}));
+      final outcome = await registry.dispatch(
+        const ToolCall(name: 'glob', arguments: {'pattern': '**/*.txt'}),
+      );
       expect(outcome.outcome, Outcome.ok);
       expect(outcome.text, 'src/main.txt');
     });
@@ -3894,7 +5260,8 @@ void main() {
     test('diff reports changes and restore reverts them', () async {
       final temp = Directory.systemTemp.createTempSync('sudoer-baseline-');
       addTearDown(() => temp.deleteSync(recursive: true));
-      final file = File(p.join(temp.path, 'a.txt'))..writeAsStringSync('orig\n');
+      final file = File(p.join(temp.path, 'a.txt'))
+        ..writeAsStringSync('orig\n');
       final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
       final provider = ScriptedProvider.fromJson({
         'steps': [
@@ -3905,9 +5272,9 @@ void main() {
                   'type': 'tool_call',
                   'name': 'write',
                   'arguments': {'path': 'a.txt', 'content': 'changed\n'},
-                }
+                },
               ],
-            }
+            },
           },
           {
             'complete': {
@@ -3916,9 +5283,9 @@ void main() {
                   'type': 'tool_call',
                   'name': 'diff',
                   'arguments': {'path': 'a.txt'},
-                }
+                },
               ],
-            }
+            },
           },
           {
             'complete': {
@@ -3927,12 +5294,14 @@ void main() {
                   'type': 'tool_call',
                   'name': 'restore',
                   'arguments': {'path': 'a.txt'},
-                }
+                },
               ],
-            }
+            },
           },
-          {'complete': {'text': 'done'}},
-        ]
+          {
+            'complete': {'text': 'done'},
+          },
+        ],
       });
       final agent = PropAgent.assemble(config: config, provider: provider);
       final result = await agent.run(const RunRequest('change, review, undo'));
@@ -3949,47 +5318,52 @@ void main() {
       // The session records the baseline handle (C5) and it persists.
       expect(agent.session.baseline, isNotNull);
       expect(
-          File(p.join(config.sessionDir, agent.session.baseline!)).existsSync(),
-          isTrue);
+        File(p.join(config.sessionDir, agent.session.baseline!)).existsSync(),
+        isTrue,
+      );
       final reloaded = Session.load(config.sessionDir, agent.session.id);
       expect(reloaded.baseline, agent.session.baseline);
     });
 
-    test('restore without a path removes files added since the baseline',
-        () async {
-      final temp = Directory.systemTemp.createTempSync('sudoer-baseline-');
-      addTearDown(() => temp.deleteSync(recursive: true));
-      File(p.join(temp.path, 'keep.txt')).writeAsStringSync('keep\n');
-      final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
-      final provider = ScriptedProvider.fromJson({
-        'steps': [
-          {
-            'complete': {
-              'tool_calls': [
-                {
-                  'type': 'tool_call',
-                  'name': 'write',
-                  'arguments': {'path': 'new.txt', 'content': 'new'},
-                }
-              ],
-            }
-          },
-          {
-            'complete': {
-              'tool_calls': [
-                {'type': 'tool_call', 'name': 'restore', 'arguments': {}},
-              ],
-            }
-          },
-          {'complete': {'text': 'done'}},
-        ]
-      });
-      final agent = PropAgent.assemble(config: config, provider: provider);
-      final result = await agent.run(const RunRequest('write then undo'));
-      expect(result.status, RunStatus.complete);
-      expect(File(p.join(temp.path, 'keep.txt')).existsSync(), isTrue);
-      expect(File(p.join(temp.path, 'new.txt')).existsSync(), isFalse);
-    });
+    test(
+      'restore without a path removes files added since the baseline',
+      () async {
+        final temp = Directory.systemTemp.createTempSync('sudoer-baseline-');
+        addTearDown(() => temp.deleteSync(recursive: true));
+        File(p.join(temp.path, 'keep.txt')).writeAsStringSync('keep\n');
+        final config = _config(workspaceRoot: temp.path, sessionDir: temp.path);
+        final provider = ScriptedProvider.fromJson({
+          'steps': [
+            {
+              'complete': {
+                'tool_calls': [
+                  {
+                    'type': 'tool_call',
+                    'name': 'write',
+                    'arguments': {'path': 'new.txt', 'content': 'new'},
+                  },
+                ],
+              },
+            },
+            {
+              'complete': {
+                'tool_calls': [
+                  {'type': 'tool_call', 'name': 'restore', 'arguments': {}},
+                ],
+              },
+            },
+            {
+              'complete': {'text': 'done'},
+            },
+          ],
+        });
+        final agent = PropAgent.assemble(config: config, provider: provider);
+        final result = await agent.run(const RunRequest('write then undo'));
+        expect(result.status, RunStatus.complete);
+        expect(File(p.join(temp.path, 'keep.txt')).existsSync(), isTrue);
+        expect(File(p.join(temp.path, 'new.txt')).existsSync(), isFalse);
+      },
+    );
   });
 
   group('background jobs (C3/C8)', () {
@@ -4008,30 +5382,37 @@ void main() {
                 {
                   'type': 'tool_call',
                   'name': 'job',
-                  'arguments': {
-                    'action': 'start',
-                    'command': command,
-                  },
-                }
+                  'arguments': {'action': 'start', 'command': command},
+                },
               ],
-            }
+            },
           },
           {
             'complete': {
               'tool_calls': [
-                {'type': 'tool_call', 'name': 'job', 'arguments': {'action': 'poll', 'id': 'job1'}},
+                {
+                  'type': 'tool_call',
+                  'name': 'job',
+                  'arguments': {'action': 'poll', 'id': 'job1'},
+                },
               ],
-            }
+            },
           },
           {
             'complete': {
               'tool_calls': [
-                {'type': 'tool_call', 'name': 'job', 'arguments': {'action': 'stop', 'id': 'job1'}},
+                {
+                  'type': 'tool_call',
+                  'name': 'job',
+                  'arguments': {'action': 'stop', 'id': 'job1'},
+                },
               ],
-            }
+            },
           },
-          {'complete': {'text': 'done'}},
-        ]
+          {
+            'complete': {'text': 'done'},
+          },
+        ],
       });
       final agent = PropAgent.assemble(config: config, provider: provider);
       final result = await agent.run(const RunRequest('run a job'));
@@ -4064,9 +5445,11 @@ void main() {
 
     test('validate rejects a poll without an id', () async {
       final registry = ToolRegistry(
-          workspaceRoot: Directory.systemTemp.createTempSync('sudoer-job-').path);
+        workspaceRoot: Directory.systemTemp.createTempSync('sudoer-job-').path,
+      );
       final outcome = await registry.dispatch(
-          const ToolCall(name: 'job', arguments: {'action': 'poll'}));
+        const ToolCall(name: 'job', arguments: {'action': 'poll'}),
+      );
       expect(outcome.outcome, Outcome.error);
       expect(outcome.text, contains('id'));
     });
@@ -4085,10 +5468,14 @@ void main() {
       expect(sampling.openAiJson(), isNot(contains('top_k')));
       expect(sampling.ollamaJson(), containsPair('num_predict', 1024));
       expect(sampling.ollamaJson(), containsPair('top_k', 40));
-      expect(() => SamplingConfig.fromJson({'nope': 1}),
-          throwsA(isA<ConfigException>()));
-      expect(() => SamplingConfig.fromJson({'temperature': 9}),
-          throwsA(isA<ConfigException>()));
+      expect(
+        () => SamplingConfig.fromJson({'nope': 1}),
+        throwsA(isA<ConfigException>()),
+      );
+      expect(
+        () => SamplingConfig.fromJson({'temperature': 9}),
+        throwsA(isA<ConfigException>()),
+      );
     });
 
     test('the provider config round-trips sampling', () {
@@ -4101,10 +5488,7 @@ void main() {
         },
       });
       expect(config.provider.sampling?.temperature, 0.3);
-      expect(
-        (config.provider.toJson()['sampling'] as Map)['temperature'],
-        0.3,
-      );
+      expect((config.provider.toJson()['sampling'] as Map)['temperature'], 0.3);
     });
   });
 
@@ -4123,12 +5507,14 @@ void main() {
                   'type': 'tool_call',
                   'name': 'edit',
                   'arguments': {'path': 'a.txt', 'old': 'one', 'new': 'two'},
-                }
+                },
               ],
-            }
+            },
           },
-          {'complete': {'text': 'done'}},
-        ]
+          {
+            'complete': {'text': 'done'},
+          },
+        ],
       });
       final out = StringBuffer();
       final err = StringBuffer();
@@ -4157,14 +5543,23 @@ void main() {
           thought: 'thinking',
           action: ToolBatch([
             const ToolCall(
-                id: 'c1', name: 'read', arguments: {'path': 'a.txt'}),
+              id: 'c1',
+              name: 'read',
+              arguments: {'path': 'a.txt'},
+            ),
             const ToolCall(name: 'glob', arguments: {'pattern': '**/*.dart'}),
           ]),
         ),
         const ObservationEntry(
-            text: 'body\nmore', outcome: Outcome.error, toolCallId: 'c1'),
+          text: 'body\nmore',
+          outcome: Outcome.error,
+          toolCallId: 'c1',
+        ),
         const ObservationEntry(text: 'my own note', outcome: Outcome.ok),
-        const AssistantEntry(thought: 'final answer', action: Finish('final answer')),
+        const AssistantEntry(
+          thought: 'final answer',
+          action: Finish('final answer'),
+        ),
       ];
       final back = log.parse(log.render(entries));
       expect(
@@ -4193,7 +5588,10 @@ void main() {
           ]),
         ),
         const ObservationEntry(
-            text: 'orphan', outcome: Outcome.ok, toolCallId: 'zzz'),
+          text: 'orphan',
+          outcome: Outcome.ok,
+          toolCallId: 'zzz',
+        ),
       ];
       final norm = ContextLog.normalize(entries);
       expect(norm.length, 3);
@@ -4215,7 +5613,10 @@ void main() {
           ]),
         ),
         const ObservationEntry(
-            text: 'result', outcome: Outcome.ok, toolCallId: 'c9'),
+          text: 'result',
+          outcome: Outcome.ok,
+          toolCallId: 'c9',
+        ),
       ];
       final back = ContextLog.normalize(log.parse(log.render(entries)));
       // No placeholder was inserted: the id survived the round-trip.
@@ -4223,53 +5624,61 @@ void main() {
       expect((back.last as ObservationEntry).toolCallId, 'c9');
     });
 
-    test('a run in CLM mode adopts a model rewrite of its context file',
-        () async {
-      final temp = Directory.systemTemp.createTempSync('sudoer-clm-');
-      addTearDown(() => temp.deleteSync(recursive: true));
-      final config = Config.fromJson({
-        'provider': {'kind': 'ollama', 'model': 'scripted', 'context_window': 8192},
-        'workspace_root': temp.path,
-        'session_dir': p.join(temp.path, '.sudoer', 'sessions'),
-        'context': {'mode': 'clm'},
-      });
-      final provider = ScriptedProvider.fromJson({
-        'steps': [
-          {
-            'complete': {
-              'text': 'rewriting',
-              'tool_calls': [
-                {
-                  'type': 'tool_call',
-                  'name': 'write',
-                  'arguments': {
-                    'path': '.sudoer/context.md',
-                    'content':
-                        '[[ctx v1]]\n[[ctx role=user]]\nnote it\n'
-                            '[[ctx role=note]]\nKEEP-ME\n',
-                  },
-                }
-              ],
-            }
+    test(
+      'a run in CLM mode adopts a model rewrite of its context file',
+      () async {
+        final temp = Directory.systemTemp.createTempSync('sudoer-clm-');
+        addTearDown(() => temp.deleteSync(recursive: true));
+        final config = Config.fromJson({
+          'provider': {
+            'kind': 'ollama',
+            'model': 'scripted',
+            'context_window': 8192,
           },
-          {'complete': {'text': 'done'}},
-        ]
-      });
-      final out = StringBuffer();
-      final err = StringBuffer();
-      final outcome = await runRepl(
-        config: config,
-        input: Stream.fromIterable(['note it', '/exit']),
-        out: out,
-        err: err,
-        providerFactory: (_) => provider,
-      );
-      expect(outcome.exitCode, 0);
-      final ctx = File(p.join(temp.path, '.sudoer', 'context.md'));
-      expect(ctx.existsSync(), isTrue);
-      expect(ctx.readAsStringSync(), contains('KEEP-ME'));
-      expect(jsonEncode(outcome.session.toJson()), contains('KEEP-ME'));
-    });
+          'workspace_root': temp.path,
+          'session_dir': p.join(temp.path, '.sudoer', 'sessions'),
+          'context': {'mode': 'clm'},
+        });
+        final provider = ScriptedProvider.fromJson({
+          'steps': [
+            {
+              'complete': {
+                'text': 'rewriting',
+                'tool_calls': [
+                  {
+                    'type': 'tool_call',
+                    'name': 'write',
+                    'arguments': {
+                      'path': '.sudoer/context.md',
+                      'content':
+                          '[[ctx v1]]\n[[ctx role=user]]\nnote it\n'
+                          '[[ctx role=note]]\nKEEP-ME\n',
+                    },
+                  },
+                ],
+              },
+            },
+            {
+              'complete': {'text': 'done'},
+            },
+          ],
+        });
+        final out = StringBuffer();
+        final err = StringBuffer();
+        final outcome = await runRepl(
+          config: config,
+          input: Stream.fromIterable(['note it', '/exit']),
+          out: out,
+          err: err,
+          providerFactory: (_) => provider,
+        );
+        expect(outcome.exitCode, 0);
+        final ctx = File(p.join(temp.path, '.sudoer', 'context.md'));
+        expect(ctx.existsSync(), isTrue);
+        expect(ctx.readAsStringSync(), contains('KEEP-ME'));
+        expect(jsonEncode(outcome.session.toJson()), contains('KEEP-ME'));
+      },
+    );
 
     test('CLM sends the context verbatim; the harness ladder clips (C4)', () {
       final big = 'x' * (kObservationCapTokens * 4 + 200);
@@ -4278,17 +5687,29 @@ void main() {
         ObservationEntry(text: big, outcome: Outcome.ok),
       ];
       final clm = ContextAssembler(
-          contextWindow: 1000000, modelManagedContext: true);
-      final clmPrompt =
-          clm.assemble(model: 'm', tools: const [], transcript: transcript);
-      expect((clmPrompt.messages[1] as ObservationEntry).text.length,
-          big.length);
+        contextWindow: 1000000,
+        modelManagedContext: true,
+      );
+      final clmPrompt = clm.assemble(
+        model: 'm',
+        tools: const [],
+        transcript: transcript,
+      );
+      expect(
+        (clmPrompt.messages[1] as ObservationEntry).text.length,
+        big.length,
+      );
 
       final harness = ContextAssembler(contextWindow: 1000000);
-      final harnessPrompt =
-          harness.assemble(model: 'm', tools: const [], transcript: transcript);
-      expect((harnessPrompt.messages[1] as ObservationEntry).text.length,
-          lessThan(big.length));
+      final harnessPrompt = harness.assemble(
+        model: 'm',
+        tools: const [],
+        transcript: transcript,
+      );
+      expect(
+        (harnessPrompt.messages[1] as ObservationEntry).text.length,
+        lessThan(big.length),
+      );
     });
 
     test('config parses and round-trips the context block', () {
@@ -4324,7 +5745,7 @@ void main() {
         'provider': {
           'kind': 'ollama',
           'model': 'scripted',
-          'context_window': 8192
+          'context_window': 8192,
         },
         'workspace_root': temp.path,
         'session_dir': p.join(temp.path, '.sudoer', 'sessions'),
@@ -4349,10 +5770,14 @@ void main() {
       );
       expect(outcome.exitCode, 0);
       // harness -> clm -> harness, so each is reported more than once.
-      expect('context: harness'.allMatches(out.toString()).length,
-          greaterThanOrEqualTo(2));
-      expect('context: clm'.allMatches(out.toString()).length,
-          greaterThanOrEqualTo(2));
+      expect(
+        'context: harness'.allMatches(out.toString()).length,
+        greaterThanOrEqualTo(2),
+      );
+      expect(
+        'context: clm'.allMatches(out.toString()).length,
+        greaterThanOrEqualTo(2),
+      );
       expect(err.toString(), contains('usage: /context'));
     });
 
@@ -4460,7 +5885,10 @@ void main() {
       expect(providerPreset('zai-coding-plan'), isNotNull);
       expect(providerPreset('minimax-cn-coding-plan'), isNotNull);
       expect(providerPreset('fireworks')!.id, 'fireworks-ai');
-      expect(providerPreset('togetherai')!.baseUrl, 'https://api.together.xyz/v1');
+      expect(
+        providerPreset('togetherai')!.baseUrl,
+        'https://api.together.xyz/v1',
+      );
       for (final preset in kProviderPresets) {
         if (preset.baseUrl != null) {
           expect(preset.baseUrl, isNot(contains(r'${')), reason: preset.id);
@@ -4498,10 +5926,7 @@ void main() {
         'model': 'gpt-6-astra',
         'api_key': 'direct',
       });
-      expect(
-        resolveApiKey(direct, store: store, env: (_) => 'env'),
-        'direct',
-      );
+      expect(resolveApiKey(direct, store: store, env: (_) => 'env'), 'direct');
       store.setKey('openai', 'stored');
       final envRef = ProviderConfig.fromJson({
         'preset': 'openai',
@@ -4520,8 +5945,7 @@ void main() {
       );
       expect(
         resolveApiKey(
-          ProviderConfig.fromJson(
-              {'preset': 'openai', 'model': 'gpt-6-astra'}),
+          ProviderConfig.fromJson({'preset': 'openai', 'model': 'gpt-6-astra'}),
           store: store,
           env: (name) => name == 'OPENAI_API_KEY' ? 'openai-env' : null,
         ),
@@ -4533,16 +5957,20 @@ void main() {
       final temp = Directory.systemTemp.createTempSync('sudoer-auth-');
       addTearDown(() => temp.deleteSync(recursive: true));
       final store = AuthStore(path: p.join(temp.path, 'auth.json'));
-      final openai = ProviderConfig.fromJson(
-          {'preset': 'openai', 'model': 'gpt-6-astra'});
+      final openai = ProviderConfig.fromJson({
+        'preset': 'openai',
+        'model': 'gpt-6-astra',
+      });
       final hint = missingKeyHint(openai, store: store, env: (_) => null);
       expect(hint, contains('OPENAI_API_KEY'));
       expect(hint, contains('--setup'));
       expect(hint, isNot(contains('sk-')));
       store.setKey('openai', 'sk-hidden');
       expect(missingKeyHint(openai, store: store, env: (_) => null), isNull);
-      final ollama = ProviderConfig.fromJson(
-          {'preset': 'ollama', 'model': 'llama3.1:8b'});
+      final ollama = ProviderConfig.fromJson({
+        'preset': 'ollama',
+        'model': 'llama3.1:8b',
+      });
       expect(missingKeyHint(ollama, store: store, env: (_) => null), isNull);
     });
 
@@ -4561,16 +5989,21 @@ void main() {
       final temp = Directory.systemTemp.createTempSync('sudoer-auth-');
       addTearDown(() => temp.deleteSync(recursive: true));
       final store = AuthStore(path: p.join(temp.path, 'auth.json'));
-      final openai = ProviderConfig.fromJson(
-          {'preset': 'openai', 'model': 'gpt-6-astra'});
+      final openai = ProviderConfig.fromJson({
+        'preset': 'openai',
+        'model': 'gpt-6-astra',
+      });
       store.setKey('openai', 'Bearer ┃ pasted transcript');
       final hint = missingKeyHint(openai, store: store, env: (_) => null);
       expect(hint, contains('invalid'));
       expect(hint, contains('--setup'));
       expect(hint, isNot(contains('pasted transcript')));
       expect(hint, isNot(contains('Bearer')));
-      final listed =
-          providerListText(current: openai, store: store, env: (_) => null);
+      final listed = providerListText(
+        current: openai,
+        store: store,
+        env: (_) => null,
+      );
       expect(listed, contains('invalid'));
       expect(listed, isNot(contains('pasted transcript')));
     });
@@ -4584,22 +6017,24 @@ void main() {
         'model': 'gpt-6-astra',
         'api_key': '  sk-padded \n',
       });
-      expect(resolveApiKey(config, store: store, env: (_) => null), 'sk-padded');
+      expect(
+        resolveApiKey(config, store: store, env: (_) => null),
+        'sk-padded',
+      );
       final blank = ProviderConfig.fromJson({
         'preset': 'openai',
         'model': 'gpt-6-astra',
         'api_key': '   ',
       });
-      expect(
-        resolveApiKey(blank, store: store, env: (_) => null),
-        isNull,
-      );
+      expect(resolveApiKey(blank, store: store, env: (_) => null), isNull);
     });
 
     test('model discovery parses both wire shapes and merges the catalog', () {
       expect(parseOpenAiModels('{"data":[{"id":"a"},{"id":"b"}]}'), ['a', 'b']);
-      expect(parseOllamaModels('{"models":[{"name":"x:1"},{"model":"y"}]}'),
-          ['x:1', 'y']);
+      expect(parseOllamaModels('{"models":[{"name":"x:1"},{"model":"y"}]}'), [
+        'x:1',
+        'y',
+      ]);
       const preset = ProviderPreset(
         id: 'test',
         name: 'Test',
@@ -4627,8 +6062,11 @@ void main() {
         expect(request.headers['authorization'], 'Bearer sk-test');
         return http.Response('{"data":[{"id":"a"},{"id":"new"}]}', 200);
       });
-      final models =
-          await discoverModels(preset, apiKey: 'sk-test', client: client);
+      final models = await discoverModels(
+        preset,
+        apiKey: 'sk-test',
+        client: client,
+      );
       expect(models.map((m) => m.id), ['a', 'new']);
       expect(models.first.contextWindow, 1000);
       expect(models.last.contextWindow, kDefaultContextWindow);
@@ -4660,9 +6098,7 @@ void main() {
       // The wizard's secret field is the first field in its form, so the
       // synthetic key reaches it directly (no note field to swallow it).
       final form = Form([
-        Group([
-          Field.password(key: 'key', title: 'API key'),
-        ]),
+        Group([Field.password(key: 'key', title: 'API key')]),
       ]);
       final (formNext, _) = form.update(pasted);
       expect((formNext as Form).values.get<String>('key'), 'sk-test');
@@ -4713,15 +6149,22 @@ void main() {
       addTearDown(() => temp.deleteSync(recursive: true));
       final store = AuthStore(path: p.join(temp.path, 'auth.json'));
       store.setKey('openai', 'sk-never-print');
-      final current = ProviderConfig.fromJson(
-          {'preset': 'openai', 'model': 'gpt-6-astra'});
-      final providers =
-          providerListText(current: current, store: store, env: (_) => null);
+      final current = ProviderConfig.fromJson({
+        'preset': 'openai',
+        'model': 'gpt-6-astra',
+      });
+      final providers = providerListText(
+        current: current,
+        store: store,
+        env: (_) => null,
+      );
       expect(providers, contains('* openai'));
       expect(providers, contains('stored'));
       expect(providers, isNot(contains('sk-never-print')));
-      final models = modelListText(providerPreset('deepseek')!,
-          current: 'deepseek-v4-pro');
+      final models = modelListText(
+        providerPreset('deepseek')!,
+        current: 'deepseek-v4-pro',
+      );
       expect(models, contains('* deepseek-v4-pro'));
     });
 
@@ -4741,72 +6184,76 @@ void main() {
       expect(loaded.workspaceRoot, p.normalize(p.absolute(temp.path)));
     });
 
-    test('the setup wizard writes config plus key without echoing it',
-        () async {
-      final temp = Directory.systemTemp.createTempSync('sudoer-setup-');
-      addTearDown(() => temp.deleteSync(recursive: true));
-      final store = AuthStore(path: p.join(temp.path, 'auth.json'));
-      final configPath = p.join(temp.path, 'sudoer.json');
-      final out = StringBuffer();
-      final err = StringBuffer();
-      final code = await runProviderSetup(
-        configPath: configPath,
-        presetId: 'deepseek',
-        model: 'deepseek-v4-flash',
-        auth: store,
-        env: (_) => null,
-        out: out,
-        err: err,
-        select: (choices, {required title}) async => choices.first,
-        input: (label) async => null,
-        secret: (title, {bool optional = false}) async => 'sk-test',
-        confirm: (question) async => false,
-      );
-      expect(code, 0, reason: err.toString());
-      expect(store.keyFor('deepseek'), 'sk-test');
-      final loaded = loadConfigFile(configPath);
-      expect(loaded.provider.preset, 'deepseek');
-      expect(loaded.provider.model, 'deepseek-v4-flash');
-      expect(loaded.provider.apiKey, isNull);
-      expect(loaded.provider.apiKeyEnv, isNull);
-      expect(out.toString(), contains('stored in'));
-      expect(out.toString(), isNot(contains('sk-test')));
-    });
+    test(
+      'the setup wizard writes config plus key without echoing it',
+      () async {
+        final temp = Directory.systemTemp.createTempSync('sudoer-setup-');
+        addTearDown(() => temp.deleteSync(recursive: true));
+        final store = AuthStore(path: p.join(temp.path, 'auth.json'));
+        final configPath = p.join(temp.path, 'sudoer.json');
+        final out = StringBuffer();
+        final err = StringBuffer();
+        final code = await runProviderSetup(
+          configPath: configPath,
+          presetId: 'deepseek',
+          model: 'deepseek-v4-flash',
+          auth: store,
+          env: (_) => null,
+          out: out,
+          err: err,
+          select: (choices, {required title}) async => choices.first,
+          input: (label) async => null,
+          secret: (title, {bool optional = false}) async => 'sk-test',
+          confirm: (question) async => false,
+        );
+        expect(code, 0, reason: err.toString());
+        expect(store.keyFor('deepseek'), 'sk-test');
+        final loaded = loadConfigFile(configPath);
+        expect(loaded.provider.preset, 'deepseek');
+        expect(loaded.provider.model, 'deepseek-v4-flash');
+        expect(loaded.provider.apiKey, isNull);
+        expect(loaded.provider.apiKeyEnv, isNull);
+        expect(out.toString(), contains('stored in'));
+        expect(out.toString(), isNot(contains('sk-test')));
+      },
+    );
 
-    test('the setup wizard accepts an exact model query on a long list',
-        () async {
-      final temp = Directory.systemTemp.createTempSync('sudoer-setup-');
-      addTearDown(() => temp.deleteSync(recursive: true));
-      final store = AuthStore(path: p.join(temp.path, 'auth.json'));
-      final configPath = p.join(temp.path, 'sudoer.json');
-      final out = StringBuffer();
-      final err = StringBuffer();
-      final models = <ModelInfo>[
-        for (var i = 0; i < 15; i++)
-          ModelInfo('model-$i', 'Model $i', 100000 + i),
-        const ModelInfo('gpt-6-astra', 'GPT-6 Astra', 1050000),
-      ];
-      final inputs = <String>['gpt-6-astra'];
-      final code = await runProviderSetup(
-        configPath: configPath,
-        presetId: 'openai',
-        auth: store,
-        env: (_) => null,
-        out: out,
-        err: err,
-        discover: (preset, apiKey) async => models,
-        select: (choices, {required title}) async => choices.first,
-        input: (label) async => inputs.isEmpty ? null : inputs.removeAt(0),
-        secret: (title, {bool optional = false}) async => 'sk-test',
-        confirm: (question) async => false,
-      );
-      expect(code, 0, reason: err.toString());
-      final loaded = loadConfigFile(configPath);
-      expect(loaded.provider.model, 'gpt-6-astra');
-      expect(loaded.provider.contextWindow, 1050000);
-      expect(out.toString(), contains('stored in'));
-      expect(out.toString(), isNot(contains('sk-test')));
-    });
+    test(
+      'the setup wizard accepts an exact model query on a long list',
+      () async {
+        final temp = Directory.systemTemp.createTempSync('sudoer-setup-');
+        addTearDown(() => temp.deleteSync(recursive: true));
+        final store = AuthStore(path: p.join(temp.path, 'auth.json'));
+        final configPath = p.join(temp.path, 'sudoer.json');
+        final out = StringBuffer();
+        final err = StringBuffer();
+        final models = <ModelInfo>[
+          for (var i = 0; i < 15; i++)
+            ModelInfo('model-$i', 'Model $i', 100000 + i),
+          const ModelInfo('gpt-6-astra', 'GPT-6 Astra', 1050000),
+        ];
+        final inputs = <String>['gpt-6-astra'];
+        final code = await runProviderSetup(
+          configPath: configPath,
+          presetId: 'openai',
+          auth: store,
+          env: (_) => null,
+          out: out,
+          err: err,
+          discover: (preset, apiKey) async => models,
+          select: (choices, {required title}) async => choices.first,
+          input: (label) async => inputs.isEmpty ? null : inputs.removeAt(0),
+          secret: (title, {bool optional = false}) async => 'sk-test',
+          confirm: (question) async => false,
+        );
+        expect(code, 0, reason: err.toString());
+        final loaded = loadConfigFile(configPath);
+        expect(loaded.provider.model, 'gpt-6-astra');
+        expect(loaded.provider.contextWindow, 1050000);
+        expect(out.toString(), contains('stored in'));
+        expect(out.toString(), isNot(contains('sk-test')));
+      },
+    );
 
     test('the setup wizard rejects an invalid key before writing', () async {
       final temp = Directory.systemTemp.createTempSync('sudoer-setup-');
@@ -4848,8 +6295,10 @@ void main() {
       });
       final provider = ScriptedProvider.fromJson({
         'steps': [
-          {'complete': {'text': 'hi'}},
-        ]
+          {
+            'complete': {'text': 'hi'},
+          },
+        ],
       });
       final out = StringBuffer();
       final err = StringBuffer();
@@ -4885,8 +6334,7 @@ String _plainStyle(
   bool italic = false,
   bool reverse = false,
   RgbColor? fg,
-}) =>
-    text;
+}) => text;
 
 /// A streamed HTTP client for adapter tests: each string is emitted as one
 /// chunk, so partial SSE/NDJSON frames span chunk boundaries.
@@ -4896,10 +6344,7 @@ final class _StreamClient extends http.BaseClient {
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async =>
-      http.StreamedResponse(
-        Stream.fromIterable(chunks.map(utf8.encode)),
-        200,
-      );
+      http.StreamedResponse(Stream.fromIterable(chunks.map(utf8.encode)), 200);
 }
 
 /// A provider that blocks until its call is cancelled, so a test can drive the
@@ -4912,6 +6357,7 @@ final class _BlockingProvider implements Provider {
     ProviderRequest request, {
     void Function(String delta)? onDelta,
     void Function(String delta)? onReasoning,
+    void Function(List<PlanItem> plan)? onPlan,
     CancelSignal? cancel,
   }) async {
     if (!started.isCompleted) started.complete();

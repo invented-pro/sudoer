@@ -18,15 +18,14 @@ List<Tool> webTools(
   NetworkGuard network,
   WebConfig web, {
   http.Client? client,
-}) =>
-    [
-      WebSearchTool(guard, network, web, client: client),
-      WebFetchTool(guard, network, client: client),
-    ];
+}) => [
+  WebSearchTool(guard, network, web, client: client),
+  WebFetchTool(guard, network, client: client),
+];
 
 final class WebSearchTool extends Tool {
   WebSearchTool(super.guard, this.network, this.web, {http.Client? client})
-      : _client = client ?? http.Client();
+    : _client = client ?? http.Client();
 
   final NetworkGuard network;
   final WebConfig web;
@@ -45,14 +44,14 @@ final class WebSearchTool extends Tool {
 
   @override
   Map<String, dynamic> get parameters => {
-        'type': 'object',
-        'additionalProperties': false,
-        'required': ['query'],
-        'properties': {
-          'query': {'type': 'string'},
-          'count': {'type': 'integer', 'minimum': 1, 'maximum': kWebMaxResults},
-        },
-      };
+    'type': 'object',
+    'additionalProperties': false,
+    'required': ['query'],
+    'properties': {
+      'query': {'type': 'string'},
+      'count': {'type': 'integer', 'minimum': 1, 'maximum': kWebMaxResults},
+    },
+  };
 
   @override
   String? validate(Map<String, dynamic> args) {
@@ -70,15 +69,15 @@ final class WebSearchTool extends Tool {
     final base = web.searchUrl;
     if (base == null) {
       return const ToolOutcome.error(
-          'web_search is not configured: set web.search_url in the config');
+        'web_search is not configured: set web.search_url in the config',
+      );
     }
     final Uri endpoint;
     try {
       final trimmed = base.replaceAll(RegExp(r'/+$'), '');
-      endpoint = Uri.parse('$trimmed/search').replace(queryParameters: {
-        'q': args['query'] as String,
-        'format': 'json',
-      });
+      endpoint = Uri.parse('$trimmed/search').replace(
+        queryParameters: {'q': args['query'] as String, 'format': 'json'},
+      );
     } on FormatException catch (e) {
       return ToolOutcome.error('invalid web.search_url: ${e.message}');
     }
@@ -90,7 +89,10 @@ final class WebSearchTool extends Tool {
 
     final int count;
     try {
-      count = (args['count'] as int? ?? kWebMaxResults).clamp(1, kWebMaxResults);
+      count = (args['count'] as int? ?? kWebMaxResults).clamp(
+        1,
+        kWebMaxResults,
+      );
     } on Object {
       return const ToolOutcome.error('argument count must be an integer');
     }
@@ -98,7 +100,8 @@ final class WebSearchTool extends Tool {
       final response = await _client.get(endpoint).timeout(kWebTimeout);
       if (response.statusCode != 200) {
         return ToolOutcome.error(
-            'search backend returned HTTP ${response.statusCode}');
+          'search backend returned HTTP ${response.statusCode}',
+        );
       }
       final decoded = jsonDecode(utf8.decode(response.bodyBytes)) as Map;
       final results = decoded['results'] as List? ?? const [];
@@ -109,8 +112,10 @@ final class WebSearchTool extends Tool {
         final title = (result['title'] as String? ?? '').trim();
         final url = (result['url'] as String? ?? '').trim();
         final snippet = (result['content'] as String? ?? '').trim();
-        lines.add('${lines.length + 1}. $title\n   $url'
-            '${snippet.isEmpty ? '' : '\n   $snippet'}');
+        lines.add(
+          '${lines.length + 1}. $title\n   $url'
+          '${snippet.isEmpty ? '' : '\n   $snippet'}',
+        );
       }
       return ToolOutcome.ok('[web content — untrusted]\n${lines.join('\n\n')}');
     } on TimeoutException {
@@ -123,7 +128,7 @@ final class WebSearchTool extends Tool {
 
 final class WebFetchTool extends Tool {
   WebFetchTool(super.guard, this.network, {http.Client? client})
-      : _client = client ?? http.Client();
+    : _client = client ?? http.Client();
 
   final NetworkGuard network;
   final http.Client _client;
@@ -141,13 +146,13 @@ final class WebFetchTool extends Tool {
 
   @override
   Map<String, dynamic> get parameters => {
-        'type': 'object',
-        'additionalProperties': false,
-        'required': ['url'],
-        'properties': {
-          'url': {'type': 'string'},
-        },
-      };
+    'type': 'object',
+    'additionalProperties': false,
+    'required': ['url'],
+    'properties': {
+      'url': {'type': 'string'},
+    },
+  };
 
   @override
   String? validate(Map<String, dynamic> args) => requireString(args, 'url');
@@ -172,7 +177,8 @@ final class WebFetchTool extends Tool {
 
       final request = http.Request('GET', current)
         ..followRedirects = false
-        ..headers['accept'] = 'text/html,application/xhtml+xml,'
+        ..headers['accept'] =
+            'text/html,application/xhtml+xml,'
             'application/json,text/plain;q=0.9,*/*;q=0.1'
         ..headers['user-agent'] = 'sudoer/0.1 (web_fetch)';
       final http.StreamedResponse response;
@@ -195,7 +201,9 @@ final class WebFetchTool extends Tool {
       }
       if (response.statusCode != 200) {
         await response.stream.drain<void>();
-        return ToolOutcome.error('web_fetch returned HTTP ${response.statusCode}');
+        return ToolOutcome.error(
+          'web_fetch returned HTTP ${response.statusCode}',
+        );
       }
       final contentType = response.headers['content-type'] ?? '';
       if (!_isTextContent(contentType)) {
@@ -204,7 +212,8 @@ final class WebFetchTool extends Tool {
       }
       final body = await _readCapped(response.stream, kWebMaxBytes);
       return ToolOutcome.ok(
-          '[web content — untrusted]\n${_toText(contentType, body)}');
+        '[web content — untrusted]\n${_toText(contentType, body)}',
+      );
     }
     return const ToolOutcome.error('too many redirects');
   }
@@ -234,7 +243,8 @@ bool _isTextContent(String contentType) {
 
 String _toText(String contentType, String body) {
   final type = contentType.split(';').first.trim().toLowerCase();
-  final structured = type == 'application/json' ||
+  final structured =
+      type == 'application/json' ||
       type == 'application/xml' ||
       type.endsWith('+json') ||
       type.endsWith('+xml');
@@ -243,7 +253,10 @@ String _toText(String contentType, String body) {
 
 String _htmlToText(String html) {
   var text = html
-      .replaceAll(RegExp(r'<script[\s\S]*?</script>', caseSensitive: false), ' ')
+      .replaceAll(
+        RegExp(r'<script[\s\S]*?</script>', caseSensitive: false),
+        ' ',
+      )
       .replaceAll(RegExp(r'<style[\s\S]*?</style>', caseSensitive: false), ' ')
       .replaceAll(RegExp(r'<[^>]+>'), ' ');
   const entities = {
@@ -262,5 +275,3 @@ String _htmlToText(String html) {
       .replaceAll(RegExp(r'\n\s*\n+'), '\n\n')
       .trim();
 }
-
-

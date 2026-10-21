@@ -94,15 +94,15 @@ repeat while (still running?) is (yes)
 
 | Command | Effect |
 | --- | --- |
-| `/help` | list commands |
-| `/exit`, `/quit` | persist and close the session, then exit |
+| `/help` | list commands (a popup on the TUI) |
+| `/exit` | persist and close the session, then exit (alias: `/quit`) |
 | `/new` | start a new session (new id) |
-| `/sessions` | list saved sessions |
-| `/resume <id>` | switch to a saved session |
-| `/plan` | print the current plan (C1) |
+| `/sessions` | list saved sessions (a pick-to-resume popup on the TUI) |
+| `/resume <id>` | switch to a saved session (a picker on the TUI) |
+| `/plan` | print the current plan (C1) (a popup on the TUI) |
 | `/status` | print the current run status and budget use (C1, C8) |
-| `/provider [id]` | list the provider presets, or switch the active provider (C2) |
-| `/model [id]` | list the current provider's models, or switch model (C2) |
+| `/provider [id]` | list the provider presets, or switch the active provider (C2) (a filterable picker on the TUI) |
+| `/model [id]` | list the current provider's models, or switch model (C2) (a filterable picker on the TUI) |
 | `/context [mode]` | show or switch the context strategy, `harness` or `clm` (C4) |
 | `/diff` | show the workspace's changes against the session baseline (C3) |
 | `/cancel` | cancel the in-flight run (C1, C8); automate surface only |
@@ -120,26 +120,76 @@ with Pilot (`C2`).
 
 - **Human surface (full-screen TUI).** The default on a terminal. The
   alternate screen holds a compact header (build, active provider/model,
-  workspace, session, transcript size), a scrollable transcript, a bordered
+  workspace, session, transcript size, and the plan as a live checklist once
+  one exists), a scrollable transcript, a bordered
   multi-line editor, and a footer. The transcript streams the reply as it is
   generated; tool calls, results, reasoning, commands, and diagnostics appear
   in it with the same channel styling as `--inline`. The footer carries the
   thinking spinner and step/context detail while a run is in flight, and the
   latest status after it: result, response number, context use against the
   window as `used/window (percent)` with token counts in K/M units, plan
-  progress, step/budget, and workspace. The editor and footer stay fixed while
+  progress, step/budget, and workspace. The header carries the plan itself as
+  an ongoing progress indicator: a bordered panel whose rows checklist the
+  steps — a green check per done step, a marked active step (the first
+  pending one), and a dim circle per queued step — folded to a bounded number
+  of rows (`… +N more`) so it never crowds out the transcript. The plan is
+  live twice over: the streaming adapter reports each plan item as the model
+  writes the block, and each response's authoritative plan lands with the
+  response — the checklist never waits for the run to finish. Queued
+  follow-up messages (Enter while a run
+  is in flight) draw as their own bordered `queued` panel between the
+  transcript and the editor, folded with `+N more` when long. The editor and
+  footer stay fixed while
   the transcript scrolls, so a long run never pushes the input off-screen.
 - **Interactive input.** The TUI editor is multi-line: Enter submits,
   Shift+Enter (or Alt+Enter, the reliable fallback for terminals that do not
   report modified Enter) adds a line, and bracketed paste inserts text
   verbatim, including line breaks, without submitting. Left/Right/Home/End
   move within the text; Up/Down at the first/last line walk the input history
-  and restore the in-progress draft. PageUp/PageDown scroll the transcript.
+  and restore the in-progress draft. PageUp/PageDown scroll the transcript,
+  as does the mouse wheel: wheel events scroll the transcript — or an open
+  popup's list, when one owns the interaction — never the editor. The drag
+  selects in-app: press-drag draws a reverse-video highlight over the
+  transcript and release copies the text to the host clipboard (OSC 52), so
+  scrolling and selecting work side by side with no toggle.
   A run owns the cancellation gesture: one `Esc` cancels it immediately and
   keeps the partial transcript. While a run is in flight, Enter queues a
   follow-up to run after it, and the footer shows the queue depth. Ctrl+C restores the terminal and
   exits. The TUI reflows on terminal resize and places the hardware cursor at
   the editor caret so IME candidate windows appear in the right place.
+- **Modal popups.** Selection and reference commands never dump their listings
+  into the transcript on the TUI: `/provider`, `/model`, `/sessions`,
+  `/resume`, `/help`, and `/plan` open a centered bordered popup over the
+  frame. A popup owns the keyboard while it is open — Up/Down (and
+  PageUp/PageDown/Home/End) move, typed text filters (every whitespace token
+  must match the id, name, or detail column), Enter selects, and `Esc` (or
+  Ctrl+C) cancels without changing anything. The provider picker shows the
+  key *state* (never a value) per preset and marks the preset in effect; the
+  model picker shows the context window per model; the session picker resumes
+  on Enter. A popup command is not a model run: the footer keeps its idle
+  hints and the run queue is untouched underneath. An explicit argument
+  (`/provider ollama`) skips the popup and switches directly.
+- **Global shortcuts and the command palette.** The TUI borrows its
+  interaction grammar from Crush: `Ctrl+P` opens a command palette (every
+  command, filterable; Enter runs the chosen one), `Ctrl+L` the model picker,
+  `Ctrl+S` the session picker, `Ctrl+N` a new session, and `Ctrl+G` the help
+  popup. Shortcuts are idle-surface gestures: while a run is in flight the
+  keys keep their editor meaning.
+- **Slash completion.** Typing `/` in the editor shows a compact completion
+  menu anchored above the input (the bare `/` triggers it): commands with
+  their one-line descriptions, filtered by label prefix as you type. The
+  editor keeps the keyboard and the caret — Up/Down move the selection
+  (history recall is suspended while the menu is open), Tab fills the
+  highlighted command in, Enter fills it when it differs from the typed text
+  and sends when it is exact, and Esc dismisses the menu for that prefix (a
+  second Esc clears the draft).
+- **Missing-key prompt.** On the TUI, choosing a provider whose API key is
+  missing (or stored but unusable) prompts for the key before the switch
+  applies: a masked one-line modal — the value renders as bullets and is
+  never echoed into the transcript afterwards. Enter validates the key and
+  stores it in the auth store so the switch lands ready to call; Esc (or an
+  empty Enter) skips and the switch still applies with the usual missing-key
+  hint, because a switch is never fatal. Paste into the modal is masked too.
 - **Inline fallback (`--inline`).** Keeps the older normal-scrollback
   surface: a `› ` prompt, color and italics, a spinner, streamed replies, and
   a one-line status. Its line editor supports arrow-key cursor movement,
@@ -224,7 +274,8 @@ with Pilot (`C2`).
   `timing: <span> <duration>` lines on stderr after the run. Timings are
   runtime-only and are never written to the session or the run wire shape.
 - **Resident session.** The program stays running across many goals; it exits
-  only on `/exit`, `/quit`, Ctrl+C, or end of input (EOF).
+  only on `/exit` (`/quit` is an unadvertised alias), Ctrl+C, or end of input
+  (EOF).
 - **Command vs goal.** A leading `/` marks a local command; everything else
   is a goal for the loop. This keeps interface control from being sent to
   the model.

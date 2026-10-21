@@ -9,11 +9,11 @@ enum FailureKind { timeout, unrecoverable, cancelled }
 class StepFailure implements Exception {
   const StepFailure(this.kind, this.message);
   const StepFailure.timeout(String message)
-      : this(FailureKind.timeout, message);
+    : this(FailureKind.timeout, message);
   const StepFailure.unrecoverable(String message)
-      : this(FailureKind.unrecoverable, message);
+    : this(FailureKind.unrecoverable, message);
   const StepFailure.cancelled(String message)
-      : this(FailureKind.cancelled, message);
+    : this(FailureKind.cancelled, message);
 
   final FailureKind kind;
   final String message;
@@ -56,6 +56,6 @@ class ConfigException implements Exception {
 /// it looked and show a sample to create.
 class ConfigNotFoundException extends ConfigException {
   const ConfigNotFoundException(this.path)
-      : super('config file not found: $path');
+    : super('config file not found: $path');
   final String path;
 }

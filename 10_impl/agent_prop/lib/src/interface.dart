@@ -9,6 +9,13 @@ import 'package:dart_tui/dart_tui.dart'
         KeyMod,
         KeyPressMsg,
         Model,
+        Mouse,
+        MouseButton,
+        MouseClickMsg,
+        MouseMode,
+        MouseMotionMsg,
+        MouseReleaseMsg,
+        MouseWheelMsg,
         Msg,
         PasteMsg,
         Program,
@@ -19,7 +26,6 @@ import 'package:dart_tui/dart_tui.dart'
         TextAreaModel,
         TextAreaStyles,
         View,
-        ViewportModel,
         WindowSizeMsg,
         withAltScreen,
         withInput;
@@ -41,11 +47,18 @@ import 'providers/ollama.dart';
 import 'providers/openai_compatible.dart';
 import 'providers/provider.dart';
 import 'providers/scripted.dart';
-import 'providers/setup.dart' show formatContextWindow, modelListText, providerListText;
+import 'providers/setup.dart'
+    show
+        formatContextWindow,
+        modelListText,
+        providerListText,
+        providerPopupItems,
+        shouldPromptForKey;
 import 'reliability.dart';
 import 'session.dart';
 import 'tools/job.dart';
 import 'tui_console.dart';
+import 'tui_popup.dart';
 
 part 'tui_app.dart';
 
@@ -110,7 +123,12 @@ Future<int> runCli({
   // timestamped; the human surface's stderr stays unstamped (C6).
   final errSink = human ? (err ?? stderr) : StampingSink(err ?? stderr);
   final factory = providerFactory ?? providerFor;
-  final console = Console(out: outSink, err: errSink, ansi: human, spinner: human);
+  final console = Console(
+    out: outSink,
+    err: errSink,
+    ansi: human,
+    spinner: human,
+  );
   final observer = human ? _CliObserver(console) : null;
 
   // C7: strip `@path` tokens and load the images they name (C6).
@@ -143,8 +161,10 @@ Future<int> runCli({
       console.header(config.provider.display);
       console.user(goal);
     }
-    final result = await agent
-        .run(RunRequest(parsed.text, images: parsed.images), observer: observer);
+    final result = await agent.run(
+      RunRequest(parsed.text, images: parsed.images),
+      observer: observer,
+    );
 
     if (human) {
       console.stopThinking();
@@ -155,8 +175,10 @@ Future<int> runCli({
           result.answer != null) {
         console.answer(result.answer!);
       }
-      console.status(_statusText(observer!, result, agent.session),
-          kind: result.status.wire);
+      console.status(
+        _statusText(observer!, result, agent.session),
+        kind: result.status.wire,
+      );
       return result.status == RunStatus.complete ? 0 : 1;
     }
 
@@ -187,7 +209,11 @@ Future<int> runCli({
 
 /// The outcome of an interactive session (C6).
 final class ReplOutcome {
-  ReplOutcome({required this.exitCode, required this.runs, required this.session});
+  ReplOutcome({
+    required this.exitCode,
+    required this.runs,
+    required this.session,
+  });
   final int exitCode;
   final List<RunResult> runs;
   final Session session;
@@ -222,8 +248,11 @@ Future<ReplOutcome> runRepl({
   final useTui = tui && human && interactive && rawInput != null;
   final ConsoleSurface surface = useTui
       ? TuiConsole(
-          width: (stdout.hasTerminal ? stdout.terminalColumns : 80)
-              .clamp(20, 500))
+          width: (stdout.hasTerminal ? stdout.terminalColumns : 80).clamp(
+            20,
+            500,
+          ),
+        )
       : Console(
           out: out ?? stdout,
           // Automate surface: stderr is the log, so timestamp every line (C6).
@@ -295,6 +324,17 @@ final class _Repl {
   Config config;
   final ConsoleSurface console;
 
+  /// Installed while the TUI runs (C6): present a modal popup over the frame
+  /// and resolve with the chosen value, or null when cancelled. The
+  /// selection commands (`/provider`, `/model`, `/sessions`) go through here
+  /// instead of printing their listings into the transcript.
+  Future<String?> Function(TuiPopup popup)? showTuiPopup;
+
+  /// Installed while the TUI runs (C6): present a masked one-line modal (an
+  /// API key) and resolve with the entered value, or null when skipped. The
+  /// value never reaches the transcript or the config file.
+  Future<String?> Function(TuiPrompt prompt)? showTuiPrompt;
+
   /// Rebuilt on `/provider` and `/model`; kept in sync with
   /// [providerFactory].
   Provider provider;
@@ -323,14 +363,14 @@ final class _Repl {
   int exitCode = 0;
 
   PropAgent _build() => PropAgent.assemble(
-        config: config.copyWith(workspaceRoot: workspaceRoot),
-        provider: provider,
-        session: session,
-        callLog: callLog,
-        diagnostics: diagnostics,
-        reliability: reliability,
-        jobs: jobs,
-      );
+    config: config.copyWith(workspaceRoot: workspaceRoot),
+    provider: provider,
+    session: session,
+    callLog: callLog,
+    diagnostics: diagnostics,
+    reliability: reliability,
+    jobs: jobs,
+  );
 
   /// C2/C6: rebuild the provider and the agent after `/provider` or `/model`,
   /// releasing the replaced adapter's transport.
@@ -372,12 +412,13 @@ final class _Repl {
     // escape sequences, bracketed paste, and control bytes are decoded
     // correctly before they reach the editor.
     final reader = KeyReader(rawInput);
-    final program = Program(options: [
-      withAltScreen(),
-      withInput(null),
-    ]);
+    final program = Program(options: [withAltScreen(), withInput(null)]);
     final app = _TuiApp(repl: this, console: terminal, program: program);
     terminal.onChange = () => program.send(const _TuiRedraw());
+    // C6: the selection commands render as popups over the frame instead of
+    // dumping their listings into the transcript.
+    showTuiPopup = app.showPopup;
+    showTuiPrompt = app.showPrompt;
     app.model = _TuiModel(app);
     final running = program.run(app.model);
     final subscription = reader.keys.listen(
@@ -391,6 +432,8 @@ final class _Repl {
     try {
       await running;
     } finally {
+      showTuiPopup = null;
+      showTuiPrompt = null;
       app.shutdown();
       await app.drained;
       await subscription.cancel();
@@ -423,12 +466,17 @@ final class _Repl {
         await _compact();
         return true;
       }
+      // The selection commands open popups on the TUI surface (C6); the
+      // inline and automate surfaces keep their line listings.
+      if (await _tuiModal(trimmed)) return true;
       return _command(trimmed);
     }
     final embedded = embeddedCommand(line);
     if (embedded != null) {
-      console.info("note: '$embedded' is on a continuation line, so this is a "
-          'multi-line goal, not a command (commands must be one line)');
+      console.info(
+        "note: '$embedded' is on a continuation line, so this is a "
+        'multi-line goal, not a command (commands must be one line)',
+      );
     }
     await _runGoal(line);
     return true;
@@ -460,20 +508,23 @@ final class _Repl {
       return pending.future;
     }
 
-    final subscription = input.listen((raw) {
-      // A cancel is never buffered: while a run is in flight it reaches that
-      // run at once. Sent while idle it is a no-op, so a buffered `/cancel`
-      // cannot leak into the next goal.
-      if (_isCancel(raw)) {
-        if (running) session.cancel.cancel();
-        return;
-      }
-      queue.add(raw);
-      notify();
-    }, onDone: () {
-      inputDone = true;
-      notify();
-    });
+    final subscription = input.listen(
+      (raw) {
+        // A cancel is never buffered: while a run is in flight it reaches that
+        // run at once. Sent while idle it is a no-op, so a buffered `/cancel`
+        // cannot leak into the next goal.
+        if (_isCancel(raw)) {
+          if (running) session.cancel.cancel();
+          return;
+        }
+        queue.add(raw);
+        notify();
+      },
+      onDone: () {
+        inputDone = true;
+        notify();
+      },
+    );
 
     while (!inputDone || queue.isNotEmpty) {
       if (queue.isEmpty) {
@@ -523,29 +574,30 @@ final class _Repl {
     var stopped = false;
     var cancelled = false;
 
-    final subscription = reader.keys.listen((key) {
-      if (stopped) return;
-      if (running) {
-        if (key.kind != KeyKind.esc) return;
-        // A direct shell command (`!`) is not interruptible: swallow Esc so
-        // the hint never promises a cancel it cannot deliver.
-        if (shellRunning) return;
-        if (!cancelled && doubleEsc.press()) {
-          cancelled = true;
-          session.cancel.cancel();
-          console.setHint('interrupting…');
-        } else if (!cancelled) {
-          console.setHint('Esc again to interrupt');
+    final subscription = reader.keys.listen(
+      (key) {
+        if (stopped) return;
+        if (running) {
+          if (key.kind != KeyKind.esc) return;
+          // A direct shell command (`!`) is not interruptible: swallow Esc so
+          // the hint never promises a cancel it cannot deliver.
+          if (shellRunning) return;
+          if (!cancelled && doubleEsc.press()) {
+            cancelled = true;
+            session.cancel.cancel();
+            console.setHint('interrupting…');
+          } else if (!cancelled) {
+            console.setHint('Esc again to interrupt');
+          }
+          return;
         }
-        return;
-      }
-      final result = editor.handle(key);
-      switch (result.kind) {
-        case EditKind.submit:
-          editor.finish();
-          final line = result.text.trim();
-          if (line.isEmpty) {
-            editor.begin();
+        final result = editor.handle(key);
+        switch (result.kind) {
+          case EditKind.submit:
+            editor.finish();
+            final line = result.text.trim();
+            if (line.isEmpty) {
+              editor.begin();
             } else if (line.startsWith('!')) {
               // C6: a `!` line runs directly as a shell command; the model is
               // never involved. Human CLI only.
@@ -576,34 +628,38 @@ final class _Repl {
                 if (!finished.isCompleted) finished.complete();
               }
             } else {
-            final embedded = embeddedCommand(result.text);
-            if (embedded != null) {
-              console.endLine();
-              console.info("note: '$embedded' is on a continuation line, so "
+              final embedded = embeddedCommand(result.text);
+              if (embedded != null) {
+                console.endLine();
+                console.info(
+                  "note: '$embedded' is on a continuation line, so "
                   'this is a multi-line goal, not a command (commands must be '
-                  'one line)');
+                  'one line)',
+                );
+              }
+              running = true;
+              cancelled = false;
+              doubleEsc.reset();
+              console.setHint('press Esc twice to interrupt');
+              _runGoal(result.text).whenComplete(() {
+                running = false;
+                console.setHint(null);
+                if (stopped) return;
+                console.endLine();
+                editor.begin();
+              });
             }
-            running = true;
-            cancelled = false;
-            doubleEsc.reset();
-            console.setHint('press Esc twice to interrupt');
-            _runGoal(result.text).whenComplete(() {
-              running = false;
-              console.setHint(null);
-              if (stopped) return;
-              console.endLine();
-              editor.begin();
-            });
-          }
-        case EditKind.eof:
-          stopped = true;
-          if (!finished.isCompleted) finished.complete();
-        case EditKind.pending:
-          break;
-      }
-    }, onDone: () {
-      if (!finished.isCompleted) finished.complete();
-    });
+          case EditKind.eof:
+            stopped = true;
+            if (!finished.isCompleted) finished.complete();
+          case EditKind.pending:
+            break;
+        }
+      },
+      onDone: () {
+        if (!finished.isCompleted) finished.complete();
+      },
+    );
 
     editor.begin();
     await finished.future;
@@ -616,14 +672,191 @@ final class _Repl {
     return ReplOutcome(exitCode: exitCode, runs: runs, session: session);
   }
 
+  /// True when [line] opens a modal popup on the TUI surface (C6): these
+  /// commands run without a model turn, so the app stays idle while the
+  /// popup owns the keyboard. Only the bare command qualifies; an explicit
+  /// argument (`/provider ollama`) keeps the direct path.
+  bool isTuiModal(String line) {
+    if (!tui || showTuiPopup == null) return false;
+    final parts = line.trim().split(RegExp(r'\s+'));
+    if (parts.length != 1) return false;
+    return const {
+      '/provider',
+      '/model',
+      '/sessions',
+      '/resume',
+      '/help',
+      '/plan',
+    }.contains(parts.first);
+  }
+
+  /// Handle the popup commands; returns true when the line was consumed.
+  Future<bool> _tuiModal(String line) async {
+    if (!isTuiModal(line)) return false;
+    switch (line.trim().split(RegExp(r'\s+')).first) {
+      case '/provider':
+        await _pickProvider();
+      case '/model':
+        await _pickModel();
+      case '/sessions':
+      case '/resume':
+        await _pickSession();
+      case '/help':
+        await showTuiPopup!(
+          TuiPopup(
+            title: 'Help',
+            items: [
+              for (final helpLine in _helpLines)
+                TuiPopupItem(value: helpLine, label: helpLine),
+            ],
+            selectable: false,
+          ),
+        );
+      case '/plan':
+        final plan = session.plan;
+        await showTuiPopup!(
+          TuiPopup(
+            title: 'Plan',
+            items: [
+              if (plan.isEmpty)
+                const TuiPopupItem(value: '(no plan)', label: '(no plan)')
+              else
+                for (final item in plan)
+                  TuiPopupItem(
+                    value: item.text,
+                    label: '- [${item.done ? 'x' : ' '}] ${item.text}',
+                  ),
+            ],
+            selectable: false,
+          ),
+        );
+    }
+    return true;
+  }
+
+  /// C2/C6: the `/provider` popup — every preset, filterable, with the key
+  /// state (never a value) as the detail column. Choosing a preset whose key
+  /// is missing prompts for it (masked) before the switch applies; cancelling
+  /// the picker changes nothing.
+  Future<void> _pickProvider() async {
+    final picked = await showTuiPopup!(
+      TuiPopup(
+        title: 'Provider',
+        items: providerPopupItems(current: config.provider),
+      ),
+    );
+    if (picked == null) return;
+    await _maybeAskProviderKey(picked);
+    _providerCommand(picked);
+  }
+
+  /// C2/C6: prompt for the key a provider switch needs but cannot resolve
+  /// (config, auth store, env). Enter validates and stores a good key in the
+  /// auth store, so the switch lands ready to call; Esc or an empty Enter
+  /// skips — the switch still applies and the usual missing-key hint shows,
+  /// because a switch is never fatal. The entered value is masked while
+  /// typing and never echoed afterwards.
+  Future<void> _maybeAskProviderKey(String presetId) async {
+    final ask = showTuiPrompt;
+    if (ask == null) return;
+    final preset = providerPreset(presetId);
+    if (preset == null ||
+        !shouldPromptForKey(preset, current: config.provider)) {
+      return;
+    }
+    final entered = await ask(
+      TuiPrompt(
+        title: 'API key for ${preset.name}',
+        note: 'stored in the auth store; never echoed',
+      ),
+    );
+    final key = entered?.trim();
+    if (key == null || key.isEmpty) return; // skipped: switch without a key
+    final problem = apiKeyProblem(key);
+    if (problem != null) {
+      console.error('invalid API key: $problem');
+      return;
+    }
+    try {
+      AuthStore().setKey(preset.id, key);
+      console.info('key stored for ${preset.id} (auth store)');
+    } on Object catch (e) {
+      console.error('cannot store key: ${e.runtimeType}');
+    }
+  }
+
+  /// C2/C6: the `/model` popup for the current provider's catalog. A preset
+  /// with no catalog falls back to the listing text.
+  Future<void> _pickModel() async {
+    final preset =
+        providerPreset(config.provider.preset) ??
+        presetForConfig(config.provider);
+    if (preset.models.isEmpty) {
+      _modelCommand(null);
+      return;
+    }
+    final picked = await showTuiPopup!(
+      TuiPopup(
+        title: 'Model · ${preset.id}',
+        items: [
+          for (final model in preset.models)
+            TuiPopupItem(
+              value: model.id,
+              label: model.id,
+              detail: formatContextWindow(model.contextWindow),
+              active: model.id == config.provider.model,
+            ),
+        ],
+      ),
+    );
+    if (picked != null) _modelCommand(picked);
+  }
+
+  /// C6: the `/sessions` / `/resume` popup; Enter resumes the chosen session.
+  Future<void> _pickSession() async {
+    final ids = Session.list(config.sessionDir);
+    if (ids.isEmpty) {
+      console.info('no sessions');
+      return;
+    }
+    final picked = await showTuiPopup!(
+      TuiPopup(
+        title: 'Sessions',
+        items: [
+          for (final id in ids)
+            TuiPopupItem(value: id, label: id, active: id == session.id),
+        ],
+      ),
+    );
+    if (picked != null) _resumeSession(picked);
+  }
+
+  /// C6: switch to a saved session, rebuilding the agent and replaying the
+  /// transcript. Shared by `/resume <id>` and the session popup.
+  void _resumeSession(String id) {
+    try {
+      session = Session.load(config.sessionDir, id);
+      agent = _build();
+      if (console case TuiConsole tui) {
+        tui.resetTranscript();
+        tui.replay(session.transcript);
+      }
+      console.info('resumed ${session.id}');
+    } on Object catch (e) {
+      console.error('cannot resume: $e');
+    }
+  }
+
   /// C2/C6: list providers, or switch to a preset (rebuilding the provider
   /// and agent). A missing key is reported, not fatal: the switch still
   /// applies, and the first call explains how to add one.
   void _providerCommand(String? argument) {
     if (argument == null) {
       console.info(providerListText(current: config.provider));
-      console.info('switch: /provider <id> (session only; '
-          '`sudoer-prop --setup` persists and sets keys)');
+      console.info(
+        'switch: /provider <id> (session only; '
+        '`sudoer-prop --setup` persists and sets keys)',
+      );
       return;
     }
     final preset = providerPreset(argument);
@@ -636,8 +869,10 @@ final class _Repl {
       return;
     }
     if (preset.baseUrl == null) {
-      console.error('${preset.id} needs a base URL; '
-          'use `sudoer-prop --setup`');
+      console.error(
+        '${preset.id} needs a base URL; '
+        'use `sudoer-prop --setup`',
+      );
       return;
     }
     final nextModel = preset.defaultModel.isEmpty
@@ -664,7 +899,8 @@ final class _Repl {
   /// C2/C6: list the current provider's models, or switch model. An id the
   /// catalog does not know keeps the current context window.
   void _modelCommand(String? argument) {
-    final preset = providerPreset(config.provider.preset) ??
+    final preset =
+        providerPreset(config.provider.preset) ??
         presetForConfig(config.provider);
     if (argument == null) {
       console.info(modelListText(preset, current: config.provider.model));
@@ -678,8 +914,10 @@ final class _Repl {
     final info = preset.model(argument);
     final window = info?.contextWindow ?? config.provider.contextWindow;
     config = config.copyWith(
-      provider:
-          config.provider.copyWith(model: argument, contextWindow: window),
+      provider: config.provider.copyWith(
+        model: argument,
+        contextWindow: window,
+      ),
     );
     _rebuildProvider();
     diagnostics.event('C2 provider', 'model -> $argument');
@@ -698,7 +936,9 @@ final class _Repl {
     }
     final file = File(path);
     final size = file.existsSync() ? file.lengthSync() : 0;
-    console.info('context: clm (model-managed) ${shortPath(path, 60)} ${size}B');
+    console.info(
+      'context: clm (model-managed) ${shortPath(path, 60)} ${size}B',
+    );
   }
 
   /// C4/C6: fold older context into a brief on demand (`/compact`), below the
@@ -711,13 +951,17 @@ final class _Repl {
       console.endLine();
     }
     if (info == null) {
-      console.info(agent.contextFilePath == null
-          ? 'nothing to compact'
-          : 'context is model-managed (CLM); the agent compacts it itself');
+      console.info(
+        agent.contextFilePath == null
+            ? 'nothing to compact'
+            : 'context is model-managed (CLM); the agent compacts it itself',
+      );
     } else {
-      console.info('↺ compacted ${info.steps} earlier steps '
-          '(${_compactCount(info.beforeTokens)} → '
-          '${_compactCount(info.afterTokens)} tokens)');
+      console.info(
+        '↺ compacted ${info.steps} earlier steps '
+        '(${_compactCount(info.beforeTokens)} → '
+        '${_compactCount(info.afterTokens)} tokens)',
+      );
     }
   }
 
@@ -749,7 +993,9 @@ final class _Repl {
     final RunResult result;
     try {
       result = await agent.run(
-          RunRequest(parsed.text, images: parsed.images), observer: observer);
+        RunRequest(parsed.text, images: parsed.images),
+        observer: observer,
+      );
     } on Object catch (e) {
       if (human) {
         console.stopThinking();
@@ -786,7 +1032,10 @@ final class _Repl {
           result.answer != null) {
         console.answer(result.answer!);
       }
-      console.status(_statusText(observer!, result, session), kind: result.status.wire);
+      console.status(
+        _statusText(observer!, result, session),
+        kind: result.status.wire,
+      );
     } else {
       _render(console.out, console.err, result);
     }
@@ -804,8 +1053,7 @@ final class _Repl {
     }
   }
 
-  List<String> get _helpLines =>
-      helpLines(interactive: interactive, tui: tui);
+  List<String> get _helpLines => helpLines(interactive: interactive, tui: tui);
 
   /// Handle a `/command`. Returns false when the REPL should exit.
   bool _command(String line) {
@@ -832,17 +1080,7 @@ final class _Repl {
         if (argument == null) {
           console.error('usage: /resume <id>');
         } else {
-          try {
-            session = Session.load(config.sessionDir, argument);
-            agent = _build();
-            if (console case TuiConsole tui) {
-              tui.resetTranscript();
-              tui.replay(session.transcript);
-            }
-            console.info('resumed ${session.id}');
-          } on Object catch (e) {
-            console.error('cannot resume: $e');
-          }
+          _resumeSession(argument);
         }
       case '/plan':
         if (session.plan.isEmpty) {
@@ -854,8 +1092,9 @@ final class _Repl {
         }
       case '/diff':
         // C6/C3: the workspace's changes against the session baseline.
-        final argument =
-            parts.length > 1 ? line.substring(command.length).trim() : null;
+        final argument = parts.length > 1
+            ? line.substring(command.length).trim()
+            : null;
         if (argument != null && argument.isEmpty) {
           console.error('usage: /diff [path]');
         } else {
@@ -867,10 +1106,12 @@ final class _Repl {
         }
       case '/status':
         final last = runs.isEmpty ? null : runs.last;
-        console.info('session ${session.id}: '
-            '${session.transcript.length} entries, '
-            '${session.plan.length} plan items, '
-            'last run ${last?.status.wire ?? 'none'}');
+        console.info(
+          'session ${session.id}: '
+          '${session.transcript.length} entries, '
+          '${session.plan.length} plan items, '
+          'last run ${last?.status.wire ?? 'none'}',
+        );
       case '/context':
         if (argument == null) {
           _printContext();
@@ -929,40 +1170,88 @@ final class _Repl {
 
 /// Translate a raw-terminal [Key] into the message the TUI model consumes.
 Msg? _tuiMessage(Key key) => switch (key.kind) {
-      KeyKind.rune => KeyPressMsg(
-          TeaKey(code: KeyCode.rune, text: String.fromCharCode(key.rune))),
-      KeyKind.enter => KeyPressMsg(const TeaKey(code: KeyCode.enter)),
-      // A bare LF is another form of Enter (some terminals send it instead of
-      // CR); an explicit Alt+Enter or Kitty Shift+Enter adds a line.
-      KeyKind.newline => KeyPressMsg(const TeaKey(code: KeyCode.enter)),
-      KeyKind.altEnter => KeyPressMsg(
-          const TeaKey(code: KeyCode.enter, modifiers: {KeyMod.shift})),
-      KeyKind.paste => PasteMsg(key.text),
-      KeyKind.backspace =>
-        KeyPressMsg(const TeaKey(code: KeyCode.backspace)),
-      KeyKind.delete => KeyPressMsg(const TeaKey(code: KeyCode.delete)),
-      KeyKind.left => KeyPressMsg(const TeaKey(code: KeyCode.left)),
-      KeyKind.right => KeyPressMsg(const TeaKey(code: KeyCode.right)),
-      KeyKind.up => KeyPressMsg(const TeaKey(code: KeyCode.up)),
-      KeyKind.down => KeyPressMsg(const TeaKey(code: KeyCode.down)),
-      KeyKind.home => KeyPressMsg(const TeaKey(code: KeyCode.home)),
-      KeyKind.end => KeyPressMsg(const TeaKey(code: KeyCode.end)),
-      KeyKind.pageUp => KeyPressMsg(const TeaKey(code: KeyCode.pageUp)),
-      KeyKind.pageDown => KeyPressMsg(const TeaKey(code: KeyCode.pageDown)),
-      KeyKind.esc => KeyPressMsg(const TeaKey(code: KeyCode.escape)),
-      KeyKind.tab => KeyPressMsg(const TeaKey(code: KeyCode.tab)),
-      KeyKind.ctrlC => KeyPressMsg(
-          const TeaKey(
-              code: KeyCode.rune,
-              text: 'c',
-              modifiers: {KeyMod.ctrl})),
-      KeyKind.ctrlD => KeyPressMsg(
-          const TeaKey(
-              code: KeyCode.rune,
-              text: 'd',
-              modifiers: {KeyMod.ctrl})),
-      KeyKind.other => null,
-    };
+  KeyKind.rune => KeyPressMsg(
+    TeaKey(code: KeyCode.rune, text: String.fromCharCode(key.rune)),
+  ),
+  KeyKind.enter => KeyPressMsg(const TeaKey(code: KeyCode.enter)),
+  // A bare LF is another form of Enter (some terminals send it instead of
+  // CR); an explicit Alt+Enter or Kitty Shift+Enter adds a line.
+  KeyKind.newline => KeyPressMsg(const TeaKey(code: KeyCode.enter)),
+  KeyKind.altEnter => KeyPressMsg(
+    const TeaKey(code: KeyCode.enter, modifiers: {KeyMod.shift}),
+  ),
+  KeyKind.paste => PasteMsg(key.text),
+  KeyKind.backspace => KeyPressMsg(const TeaKey(code: KeyCode.backspace)),
+  KeyKind.delete => KeyPressMsg(const TeaKey(code: KeyCode.delete)),
+  KeyKind.left => KeyPressMsg(const TeaKey(code: KeyCode.left)),
+  KeyKind.right => KeyPressMsg(const TeaKey(code: KeyCode.right)),
+  KeyKind.up => KeyPressMsg(const TeaKey(code: KeyCode.up)),
+  KeyKind.down => KeyPressMsg(const TeaKey(code: KeyCode.down)),
+  KeyKind.home => KeyPressMsg(const TeaKey(code: KeyCode.home)),
+  KeyKind.end => KeyPressMsg(const TeaKey(code: KeyCode.end)),
+  KeyKind.pageUp => KeyPressMsg(const TeaKey(code: KeyCode.pageUp)),
+  KeyKind.pageDown => KeyPressMsg(const TeaKey(code: KeyCode.pageDown)),
+  KeyKind.esc => KeyPressMsg(const TeaKey(code: KeyCode.escape)),
+  KeyKind.tab => KeyPressMsg(const TeaKey(code: KeyCode.tab)),
+  KeyKind.ctrlC => KeyPressMsg(
+    const TeaKey(code: KeyCode.rune, text: 'c', modifiers: {KeyMod.ctrl}),
+  ),
+  KeyKind.ctrlD => KeyPressMsg(
+    const TeaKey(code: KeyCode.rune, text: 'd', modifiers: {KeyMod.ctrl}),
+  ),
+  // Crush-style shortcuts (C6): help, models, sessions, new session, and
+  // the command palette.
+  KeyKind.ctrlG => KeyPressMsg(
+    const TeaKey(code: KeyCode.rune, text: 'g', modifiers: {KeyMod.ctrl}),
+  ),
+  KeyKind.ctrlL => KeyPressMsg(
+    const TeaKey(code: KeyCode.rune, text: 'l', modifiers: {KeyMod.ctrl}),
+  ),
+  KeyKind.ctrlN => KeyPressMsg(
+    const TeaKey(code: KeyCode.rune, text: 'n', modifiers: {KeyMod.ctrl}),
+  ),
+  KeyKind.ctrlP => KeyPressMsg(
+    const TeaKey(code: KeyCode.rune, text: 'p', modifiers: {KeyMod.ctrl}),
+  ),
+  KeyKind.ctrlS => KeyPressMsg(
+    const TeaKey(code: KeyCode.rune, text: 's', modifiers: {KeyMod.ctrl}),
+  ),
+  KeyKind.other => null,
+  KeyKind.mouse => _mouseMsg(key.mouse!),
+};
+
+/// Map a decoded mouse report onto the TUI messages. Wheel events are the
+/// point: they scroll the surface under the interaction (the transcript, or
+/// an open popup). Clicks and motion are decoded but otherwise unused.
+Msg? _mouseMsg(MousePointer event) {
+  final button = switch (event.button) {
+    0 => MouseButton.left,
+    1 => MouseButton.middle,
+    2 => MouseButton.right,
+    64 => MouseButton.wheelUp,
+    65 => MouseButton.wheelDown,
+    66 => MouseButton.wheelLeft,
+    67 => MouseButton.wheelRight,
+    _ => MouseButton.none,
+  };
+  final mouse = Mouse(
+    x: event.x > 0 ? event.x - 1 : 0,
+    y: event.y > 0 ? event.y - 1 : 0,
+    button: button,
+  );
+  return switch (event.action) {
+    MouseAction.press => button == MouseButton.none
+        ? null
+        : (button == MouseButton.wheelUp ||
+              button == MouseButton.wheelDown ||
+              button == MouseButton.wheelLeft ||
+              button == MouseButton.wheelRight)
+        ? MouseWheelMsg(mouse)
+        : MouseClickMsg(mouse),
+    MouseAction.release => MouseReleaseMsg(mouse),
+    MouseAction.motion => MouseMotionMsg(mouse),
+  };
+}
 
 void _render(StringSink out, StringSink err, RunResult result) {
   if (result.reason == 'cancelled') {
@@ -1005,6 +1294,9 @@ final class _CliObserver implements RunObserver {
   void onResponse(Duration elapsed) => _responseElapsed = elapsed;
 
   @override
+  void onPlan(List<PlanItem> plan) => console.touch();
+
+  @override
   void onStep(int step, int stalls, int stallBudget) {
     this.step = step;
     this.stalls = stalls;
@@ -1012,9 +1304,9 @@ final class _CliObserver implements RunObserver {
     // Keep the phase word alone so the elapsed time reads right after it; the
     // step/budget rides behind the timer as the spinner detail.
     console.updateThinking('thinking');
-    console.setDetail(stalls > 0
-        ? 'step $step · stalled $stalls/$stallBudget'
-        : 'step $step');
+    console.setDetail(
+      stalls > 0 ? 'step $step · stalled $stalls/$stallBudget' : 'step $step',
+    );
   }
 
   @override
@@ -1028,8 +1320,10 @@ final class _CliObserver implements RunObserver {
   @override
   void onCompaction(int steps, int beforeTokens, int afterTokens) {
     console.endLine();
-    console.info('↺ compacted $steps earlier steps into a summary '
-        '(${_compactCount(beforeTokens)} → ${_compactCount(afterTokens)} tokens)');
+    console.info(
+      '↺ compacted $steps earlier steps into a summary '
+      '(${_compactCount(beforeTokens)} → ${_compactCount(afterTokens)} tokens)',
+    );
   }
 
   @override
@@ -1043,7 +1337,8 @@ final class _CliObserver implements RunObserver {
     // Keep a spinner alive while the tool runs. A `run_command` can take
     // minutes; without this the status line goes blank right after `→`.
     console.startThinking(
-        name == 'run_command' ? 'running command' : 'running $name');
+      name == 'run_command' ? 'running command' : 'running $name',
+    );
   }
 
   @override
@@ -1074,8 +1369,7 @@ String _statusText(_CliObserver o, RunResult result, Session session) {
   // The response number within this session: one per goal run, carried across
   // a resume because the transcript is.
   final response = session.transcript.whereType<UserEntry>().length;
-  final stall =
-      o.stalls > 0 ? ' (stalled ${o.stalls}/${o.stallBudget})' : '';
+  final stall = o.stalls > 0 ? ' (stalled ${o.stalls}/${o.stallBudget})' : '';
   // The leading token is the run total, which replaces the status word; the
   // status still drives the line's colour. Fall back to the status word when
   // no timing was recorded.
@@ -1133,11 +1427,12 @@ String _trimZero(double value) {
   return text.endsWith('.0') ? text.substring(0, text.length - 2) : text;
 }
 
-/// The local `/` commands the REPL understands.
+/// The local `/` commands the REPL understands. `/quit` is not listed: it is
+/// a hidden alias of `/exit` (still accepted, so old muscle memory keeps
+/// working) and never advertised.
 const Set<String> kReplCommands = {
   '/help',
   '/exit',
-  '/quit',
   '/new',
   '/sessions',
   '/resume',
@@ -1152,44 +1447,99 @@ const Set<String> kReplCommands = {
   '/verbose',
 };
 
+/// One command and its one-line description, used by the TUI's slash
+/// completion menu and its command palette (C6). Surface-aware the same way
+/// [helpLines] is: on the TUI the selection commands open popups.
+typedef ReplCommandInfo = (String command, String description);
+
+List<ReplCommandInfo> replCommandCatalog({
+  required bool interactive,
+  bool tui = false,
+}) => [
+  ('/help', tui ? 'show this help (popup)' : 'show this help'),
+  ('/exit', 'persist and close the session, then exit'),
+  ('/new', 'start a new session'),
+  ('/sessions', tui ? 'pick a saved session to resume' : 'list saved sessions'),
+  (
+    '/resume',
+    tui
+        ? '[id] pick or switch to a saved session'
+        : '<id> switch to a saved session',
+  ),
+  ('/plan', tui ? 'show the current plan (popup)' : 'print the current plan'),
+  ('/status', 'print the session status'),
+  (
+    '/provider',
+    tui
+        ? '[id] pick or switch the LLM provider preset'
+        : '[id] list or switch the LLM provider preset',
+  ),
+  (
+    '/model',
+    tui ? '[id] pick or switch the model' : '[id] list or switch the model',
+  ),
+  ('/context', '[mode] show or switch the context strategy'),
+  ('/diff', '[path] show workspace changes'),
+  if (!interactive) ('/cancel', 'cancel the in-flight run'),
+  ('/compact', 'fold earlier context into a brief now'),
+  ('/workspace', '[dir] print or change the workspace root'),
+  ('/verbose', 'on|off emit per-step routing'),
+];
+
 /// The `/help` lines for a surface. `/cancel` is a command on the automate
 /// surface only; the human CLI interrupts with a double `Esc`, so it is not
-/// listed there.
+/// listed there. On the TUI the selection commands open popups (C6), so their
+/// descriptions say "pick" instead of "list".
 List<String> helpLines({required bool interactive, bool tui = false}) => [
-      'Commands:',
-      '  /help            show this help',
-      '  /exit, /quit     persist and close the session, then exit',
-      '  /new             start a new session',
-      '  /sessions        list saved sessions',
-      '  /resume <id>     switch to a saved session',
-      '  /plan            print the current plan',
-      '  /status          print the session status',
-      '  /provider [id]   list or switch the LLM provider preset (C2)',
-      '  /model [id]      list or switch the model for the current provider',
-      '  /context [mode]  show or switch the context strategy (harness|clm)',
-      '  /diff [path]     show workspace changes against the session baseline',
-      if (!interactive) '  /cancel          cancel the in-flight run',
-      '  /compact         fold earlier context into a brief now',
-      '  /workspace [dir] print or change the workspace root',
-      '  /verbose on|off  emit per-step routing on stderr',
-      '  @path            attach an image (png/jpg/jpeg/gif/webp) to the goal',
-      if (interactive)
-        '  !<command>       run a shell command here (not sent to the model)',
-      'Anything else is a goal for the agent.',
-      if (tui)
-        '  (Shift+Enter or Alt+Enter adds a line; Enter sends; Esc cancels)'
-      else if (interactive)
-        '  (end a line with \\ to continue the goal on the next line)',
-    ];
+  'Commands:',
+  '  /help            show this help${tui ? ' (popup)' : ''}',
+  '  /exit            persist and close the session, then exit',
+  '  /new             start a new session',
+  if (tui)
+    '  /sessions        pick a saved session to resume'
+  else
+    '  /sessions        list saved sessions',
+  if (tui)
+    '  /resume [id]     pick or switch to a saved session'
+  else
+    '  /resume <id>     switch to a saved session',
+  if (tui)
+    '  /plan            show the current plan (popup)'
+  else
+    '  /plan            print the current plan',
+  '  /status          print the session status',
+  if (tui)
+    '  /provider [id]   pick or switch the LLM provider preset (C2)'
+  else
+    '  /provider [id]   list or switch the LLM provider preset (C2)',
+  if (tui)
+    '  /model [id]      pick or switch the model for the current provider'
+  else
+    '  /model [id]      list or switch the model for the current provider',
+  '  /context [mode]  show or switch the context strategy (harness|clm)',
+  '  /diff [path]     show workspace changes against the session baseline',
+  if (!interactive) '  /cancel          cancel the in-flight run',
+  '  /compact         fold earlier context into a brief now',
+  '  /workspace [dir] print or change the workspace root',
+  '  /verbose on|off  emit per-step routing on stderr',
+  '  @path            attach an image (png/jpg/jpeg/gif/webp) to the goal',
+  if (interactive)
+    '  !<command>       run a shell command here (not sent to the model)',
+  'Anything else is a goal for the agent.',
+  if (tui) ...[
+    '  (Shift+Enter or Alt+Enter adds a line; Enter sends; Esc cancels)',
+    '  Shortcuts: Ctrl+P commands · Ctrl+L models · Ctrl+S sessions ·',
+    '  Ctrl+N new session · Ctrl+G help · type / for command completion',
+  ] else if (interactive)
+    '  (end a line with \\ to continue the goal on the next line)',
+];
 
 /// True when [line] invokes the on-demand compaction command.
-bool _isCompact(String line) =>
-    line.split(RegExp(r'\s+')).first == '/compact';
+bool _isCompact(String line) => line.split(RegExp(r'\s+')).first == '/compact';
 
 /// True when [line] is the cancel command. Intercepted on the piped surface
 /// before buffering so it can interrupt an in-flight run (C6).
-bool _isCancel(String line) =>
-    line.split(RegExp(r'\s+')).first == '/cancel';
+bool _isCancel(String line) => line.split(RegExp(r'\s+')).first == '/cancel';
 
 /// C6: run a `!` command directly through the host shell (C3) in
 /// [workingDirectory], forwarding its stdout and stderr verbatim. Returns the

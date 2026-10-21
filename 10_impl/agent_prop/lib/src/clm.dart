@@ -50,7 +50,10 @@ final class ContextLog {
     final root = workspaceRoot;
     if (root == null) return file.path;
     return p.posix.joinAll(
-        p.relative(file.path, from: p.normalize(p.absolute(root))).split(p.separator));
+      p
+          .relative(file.path, from: p.normalize(p.absolute(root)))
+          .split(p.separator),
+    );
   }
 
   /// The default context file for [config]: `context.file` when set
@@ -59,9 +62,11 @@ final class ContextLog {
   static File fileFor(Config config) {
     final configured = config.context.file;
     if (configured != null && configured.isNotEmpty) {
-      return File(p.isAbsolute(configured)
-          ? configured
-          : p.join(config.workspaceRoot, configured));
+      return File(
+        p.isAbsolute(configured)
+            ? configured
+            : p.join(config.workspaceRoot, configured),
+      );
     }
     return File(p.join(config.workspaceRoot, '.sudoer', 'context.md'));
   }
@@ -73,8 +78,9 @@ final class ContextLog {
   static const String _header = '[[ctx v1]]';
 
   static final RegExp _block = RegExp(r'^\[\[ctx\s+(.*?)\]\]\s*$');
-  static final RegExp _call =
-      RegExp(r'^\[\[call(?:\s+([^\]]*))?\]\]\s+(\S+)\s*(.*)$');
+  static final RegExp _call = RegExp(
+    r'^\[\[call(?:\s+([^\]]*))?\]\]\s+(\S+)\s*(.*)$',
+  );
 
   /// The canonical text for [transcript] (the harness's default rendering).
   String render(List<Entry> transcript) {
@@ -84,14 +90,13 @@ final class ContextLog {
         case UserEntry(:final text):
           _writeBlock(out, 'role=user', text, const []);
         case AssistantEntry(:final thought, :final action):
-          _writeBlock(
-            out,
-            'role=assistant',
-            thought,
-            [for (final call in action.calls) call],
-          );
+          _writeBlock(out, 'role=assistant', thought, [
+            for (final call in action.calls) call,
+          ]);
         case ObservationEntry(:final text, :final outcome, :final toolCallId):
-          final attrs = StringBuffer('role=observation outcome=${outcome.wire}');
+          final attrs = StringBuffer(
+            'role=observation outcome=${outcome.wire}',
+          );
           if (toolCallId != null) attrs.write(' id=$toolCallId');
           _writeBlock(out, attrs.toString(), text, const []);
       }
@@ -114,8 +119,7 @@ final class ContextLog {
       // The call id round-trips so observations stay bound to their call
       // across a parse (without it, an observation would look orphaned).
       final idAttr = call.id == null ? '' : ' id=${call.id}';
-      out.write(
-          '[[call$idAttr]] ${call.name} ${jsonEncode(call.arguments)}\n');
+      out.write('[[call$idAttr]] ${call.name} ${jsonEncode(call.arguments)}\n');
     }
   }
 
@@ -139,27 +143,33 @@ final class ContextLog {
           entries.add(UserEntry(block.body()));
         case 'assistant':
           final calls = block.calls;
-          entries.add(AssistantEntry(
-            thought: block.body(),
-            action:
-                calls.isEmpty ? Finish(block.body()) : ToolBatch(calls),
-          ));
+          entries.add(
+            AssistantEntry(
+              thought: block.body(),
+              action: calls.isEmpty ? Finish(block.body()) : ToolBatch(calls),
+            ),
+          );
         case 'observation':
-          entries.add(ObservationEntry(
-            text: block.body(),
-            outcome: block.attrs['outcome'] == null
-                ? Outcome.ok
-                : OutcomeJson.fromWire(block.attrs['outcome']!),
-            toolCallId: block.attrs['id'],
-          ));
+          entries.add(
+            ObservationEntry(
+              text: block.body(),
+              outcome: block.attrs['outcome'] == null
+                  ? Outcome.ok
+                  : OutcomeJson.fromWire(block.attrs['outcome']!),
+              toolCallId: block.attrs['id'],
+            ),
+          );
         case 'note':
           // The model's own free-form note (mirrors the paper's emergent
           // "notes" role): carried as a harness-level observation.
-          entries.add(ObservationEntry(text: block.body(), outcome: Outcome.ok));
+          entries.add(
+            ObservationEntry(text: block.body(), outcome: Outcome.ok),
+          );
         default:
           throw FormatException(
-              'unknown context role: "${block.role}" '
-              '(expected user, assistant, observation, note)');
+            'unknown context role: "${block.role}" '
+            '(expected user, assistant, observation, note)',
+          );
       }
     }
 
@@ -174,8 +184,7 @@ final class ContextLog {
       // An escaped body line: drop the single backslash and keep the text.
       if (line.startsWith('\\[[')) {
         if (current == null) {
-          throw const FormatException(
-              'escaped line outside a context block');
+          throw const FormatException('escaped line outside a context block');
         }
         current!.add(line.substring(1));
         continue;
@@ -205,7 +214,8 @@ final class ContextLog {
       if (call != null) {
         if (current == null || current!.role != 'assistant') {
           throw const FormatException(
-              'a [[call]] must appear inside an assistant block');
+            'a [[call]] must appear inside an assistant block',
+          );
         }
         final callId = _parseAttrs(call.group(1) ?? '')['id'];
         final name = call.group(2)!;
@@ -220,11 +230,13 @@ final class ContextLog {
         if (args is! Map) {
           throw FormatException('call arguments must be a JSON object: $line');
         }
-        current!.calls.add(ToolCall(
-          id: callId,
-          name: name,
-          arguments: args.cast<String, dynamic>(),
-        ));
+        current!.calls.add(
+          ToolCall(
+            id: callId,
+            name: name,
+            arguments: args.cast<String, dynamic>(),
+          ),
+        );
         continue;
       }
       if (current != null) {
@@ -305,18 +317,22 @@ final class ContextLog {
           if (id != null && calls.any((call) => call.id == id)) {
             byId[id] = obs;
           } else {
-            trailing.add(ObservationEntry(text: obs.text, outcome: obs.outcome));
+            trailing.add(
+              ObservationEntry(text: obs.text, outcome: obs.outcome),
+            );
           }
           j++;
         }
         out.add(entry);
         for (final call in calls) {
-          out.add(byId[call.id] ??
-              ObservationEntry(
-                text: '[result elided]',
-                outcome: Outcome.ok,
-                toolCallId: call.id,
-              ));
+          out.add(
+            byId[call.id] ??
+                ObservationEntry(
+                  text: '[result elided]',
+                  outcome: Outcome.ok,
+                  toolCallId: call.id,
+                ),
+          );
         }
         out.addAll(trailing);
         i = j;

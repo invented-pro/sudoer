@@ -73,10 +73,12 @@ Future<TaskReport> runTask(Task task) async {
     if (task.expect.status != null) {
       if (last == null) {
         failures.add(
-            'status: expected ${task.expect.status!.wire}, but no goal ran');
+          'status: expected ${task.expect.status!.wire}, but no goal ran',
+        );
       } else if (last.status != task.expect.status) {
         failures.add(
-            'status: expected ${task.expect.status!.wire}, got ${last.status.wire}');
+          'status: expected ${task.expect.status!.wire}, got ${last.status.wire}',
+        );
       }
     }
     _checkAnswer(
@@ -90,14 +92,16 @@ Future<TaskReport> runTask(Task task) async {
     if (task.expect.runs.isNotEmpty) {
       if (outcome.runs.length != task.expect.runs.length) {
         failures.add(
-            'runs: expected ${task.expect.runs.length}, got ${outcome.runs.length}');
+          'runs: expected ${task.expect.runs.length}, got ${outcome.runs.length}',
+        );
       } else {
         for (var i = 0; i < task.expect.runs.length; i++) {
           final expected = task.expect.runs[i];
           final actual = outcome.runs[i];
           if (expected.status != null && expected.status != actual.status) {
             failures.add(
-                'runs[$i].status: expected ${expected.status!.wire}, got ${actual.status.wire}');
+              'runs[$i].status: expected ${expected.status!.wire}, got ${actual.status.wire}',
+            );
           }
           _checkAnswer(
             failures,
@@ -132,7 +136,8 @@ Future<TaskReport> runTask(Task task) async {
     if (task.expect.stdoutContains != null &&
         !out.toString().contains(task.expect.stdoutContains!)) {
       failures.add(
-          'stdout: expected to contain "${task.expect.stdoutContains}"');
+        'stdout: expected to contain "${task.expect.stdoutContains}"',
+      );
     }
 
     if (task.expect.tools != null &&
@@ -146,19 +151,22 @@ Future<TaskReport> runTask(Task task) async {
     if (task.expect.observations != null) {
       final observations = [
         for (final entry in outcome.session.transcript)
-          if (entry is ObservationEntry && entry.toolCallId != null)
-            entry.text,
+          if (entry is ObservationEntry && entry.toolCallId != null) entry.text,
       ];
       final expected = task.expect.observations!;
       for (var i = 0; i < expected.length; i++) {
         if (i >= observations.length) {
-          failures.add('observations: expected at least ${i + 1}, '
-              'got ${observations.length}');
+          failures.add(
+            'observations: expected at least ${i + 1}, '
+            'got ${observations.length}',
+          );
           break;
         }
         if (!observations[i].contains(expected[i])) {
-          failures.add('observations[$i]: expected to contain '
-              '"${expected[i]}", got "${observations[i]}"');
+          failures.add(
+            'observations[$i]: expected to contain '
+            '"${expected[i]}", got "${observations[i]}"',
+          );
         }
       }
     }
@@ -174,8 +182,7 @@ Future<TaskReport> runTask(Task task) async {
           failures.add('context: expected to contain "$needle"');
         }
       }
-      for (final needle
-          in task.expect.contextNotContains ?? const <String>[]) {
+      for (final needle in task.expect.contextNotContains ?? const <String>[]) {
         if (actual.contains(needle)) {
           failures.add('context: expected NOT to contain "$needle"');
         }
@@ -204,7 +211,8 @@ Future<TaskReport> runTask(Task task) async {
         final actual = file.existsSync() ? file.readAsStringSync() : null;
         if (actual != entry.value) {
           failures.add(
-              'file ${entry.key}: expected ${jsonEncode(entry.value)}, got ${jsonEncode(actual)}');
+            'file ${entry.key}: expected ${jsonEncode(entry.value)}, got ${jsonEncode(actual)}',
+          );
         }
       }
     }
@@ -235,12 +243,13 @@ void _checkAnswer(
 /// marked `host_shell: "posix"` is skipped (not failed) on platforms without
 /// a POSIX host shell; those paths are unit-tested instead (C3).
 Future<int> runSuite(String tasksDir) async {
-  final files = Directory(tasksDir)
-      .listSync()
-      .whereType<File>()
-      .where((f) => f.path.endsWith('.json'))
-      .toList()
-    ..sort((a, b) => a.path.compareTo(b.path));
+  final files =
+      Directory(tasksDir)
+          .listSync()
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.json'))
+          .toList()
+        ..sort((a, b) => a.path.compareTo(b.path));
   if (files.isEmpty) {
     stderr.writeln('no tasks found in $tasksDir');
     return 1;
@@ -249,7 +258,8 @@ Future<int> runSuite(String tasksDir) async {
   final skipped = <String>[];
   for (final file in files) {
     final task = Task.fromJson(
-        jsonDecode(file.readAsStringSync()) as Map<String, dynamic>);
+      jsonDecode(file.readAsStringSync()) as Map<String, dynamic>,
+    );
     if (task.hostShellPosix && Platform.isWindows) {
       skipped.add(task.id);
       print('SKIP  ${task.id} (POSIX host shell; unit-tested on Windows)');
@@ -268,8 +278,10 @@ Future<int> runSuite(String tasksDir) async {
   }
   print('');
   final runnable = files.length - skipped.length;
-  print('$runnable tasks, ${runnable - failed} passed'
-      '${skipped.isEmpty ? '' : ', ${skipped.length} skipped (POSIX host shell)'}');
+  print(
+    '$runnable tasks, ${runnable - failed} passed'
+    '${skipped.isEmpty ? '' : ', ${skipped.length} skipped (POSIX host shell)'}',
+  );
   return failed;
 }
 
@@ -279,48 +291,60 @@ Future<int> cliSmoke(String packageRoot) async {
   final temp = Directory.systemTemp.createTempSync('sudoer-smoke-');
   try {
     final workspace = Directory(p.join(temp.path, 'ws'))..createSync();
-    File(p.join(workspace.path, 'README.md')).writeAsStringSync('hello world\n');
+    File(p.join(workspace.path, 'README.md'))
+        .writeAsStringSync('hello world\n');
 
     final configFile = File(p.join(temp.path, 'config.json'))
-      ..writeAsStringSync(jsonEncode({
-        'provider': {
-          'kind': 'ollama',
-          'model': 'scripted',
-          'context_window': 8192,
-        },
-        'workspace_root': workspace.path,
-      }));
+      ..writeAsStringSync(
+        jsonEncode({
+          'provider': {
+            'kind': 'ollama',
+            'model': 'scripted',
+            'context_window': 8192,
+          },
+          'workspace_root': workspace.path,
+        }),
+      );
 
     final scriptFile = File(p.join(temp.path, 'script.json'));
     void writeScript(String scriptJson) =>
         scriptFile.writeAsStringSync(scriptJson);
     Map<String, String> env() => {
-          ...Platform.environment,
-          'SUDOER_SCRIPT_FILE': scriptFile.path,
-        };
+      ...Platform.environment,
+      'SUDOER_SCRIPT_FILE': scriptFile.path,
+    };
 
     // One-shot complete.
-    writeScript(jsonEncode({
-      'steps': [
-        {
-          'complete': {
-            'text': 'reading',
-            'tool_calls': [
-              {
-                'type': 'tool_call',
-                'name': 'read',
-                'arguments': {'path': 'README.md'},
-              }
-            ],
-          }
-        },
-        {'complete': {'text': 'hello world'}},
-      ]
-    }));
+    writeScript(
+      jsonEncode({
+        'steps': [
+          {
+            'complete': {
+              'text': 'reading',
+              'tool_calls': [
+                {
+                  'type': 'tool_call',
+                  'name': 'read',
+                  'arguments': {'path': 'README.md'},
+                },
+              ],
+            },
+          },
+          {
+            'complete': {'text': 'hello world'},
+          },
+        ],
+      }),
+    );
     final complete = Process.runSync(
       Platform.resolvedExecutable,
-      ['run', 'bin/sudoer.dart', '--config', configFile.path,
-        'Read README.md and answer with its contents.'],
+      [
+        'run',
+        'bin/sudoer.dart',
+        '--config',
+        configFile.path,
+        'Read README.md and answer with its contents.',
+      ],
       workingDirectory: packageRoot,
       environment: env(),
     );
@@ -332,11 +356,13 @@ Future<int> cliSmoke(String packageRoot) async {
     }
 
     // One-shot blocked.
-    writeScript(jsonEncode({
-      'steps': [
-        {'error': 'unrecoverable'}
-      ]
-    }));
+    writeScript(
+      jsonEncode({
+        'steps': [
+          {'error': 'unrecoverable'},
+        ],
+      }),
+    );
     final blocked = Process.runSync(
       Platform.resolvedExecutable,
       ['run', 'bin/sudoer.dart', '--config', configFile.path, 'Do anything.'],
@@ -351,23 +377,27 @@ Future<int> cliSmoke(String packageRoot) async {
     }
 
     // Interactive session over stdin: goal then /exit.
-    writeScript(jsonEncode({
-      'steps': [
-        {
-          'complete': {
-            'text': 'reading',
-            'tool_calls': [
-              {
-                'type': 'tool_call',
-                'name': 'read',
-                'arguments': {'path': 'README.md'},
-              }
-            ],
-          }
-        },
-        {'complete': {'text': 'hello world'}},
-      ]
-    }));
+    writeScript(
+      jsonEncode({
+        'steps': [
+          {
+            'complete': {
+              'text': 'reading',
+              'tool_calls': [
+                {
+                  'type': 'tool_call',
+                  'name': 'read',
+                  'arguments': {'path': 'README.md'},
+                },
+              ],
+            },
+          },
+          {
+            'complete': {'text': 'hello world'},
+          },
+        ],
+      }),
+    );
     final interactive = await Process.start(
       Platform.resolvedExecutable,
       ['run', 'bin/sudoer.dart', '--automate', '--config', configFile.path],
@@ -377,10 +407,12 @@ Future<int> cliSmoke(String packageRoot) async {
     interactive.stdin.writeln('Read README.md and answer with its contents.');
     interactive.stdin.writeln('/exit');
     await interactive.stdin.close();
-    final interactiveOut =
-        await interactive.stdout.transform(utf8.decoder).join();
-    final interactiveErr =
-        await interactive.stderr.transform(utf8.decoder).join();
+    final interactiveOut = await interactive.stdout
+        .transform(utf8.decoder)
+        .join();
+    final interactiveErr = await interactive.stderr
+        .transform(utf8.decoder)
+        .join();
     final interactiveCode = await interactive.exitCode;
     if (interactiveCode != 0) {
       failures.add('interactive: expected exit 0, got $interactiveCode');
@@ -420,12 +452,11 @@ Directory findUpwards(String start, bool Function(Directory) predicate) {
 }
 
 Directory findRepoRoot([String? from]) => findUpwards(
-      from ?? Directory.current.path,
-      (d) =>
-          Directory(p.join(d.path, '00_bp', 'agent_prop', 'tasks')).existsSync(),
-    );
+  from ?? Directory.current.path,
+  (d) => Directory(p.join(d.path, '00_bp', 'agent_prop', 'tasks')).existsSync(),
+);
 
 Directory findPackageRoot([String? from]) => findUpwards(
-      from ?? Directory.current.path,
-      (d) => File(p.join(d.path, 'pubspec.yaml')).existsSync(),
-    );
+  from ?? Directory.current.path,
+  (d) => File(p.join(d.path, 'pubspec.yaml')).existsSync(),
+);

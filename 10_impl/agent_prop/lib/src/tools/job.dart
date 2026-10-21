@@ -24,17 +24,22 @@ final class Job {
     required this.shell,
   }) {
     startedAt = DateTime.now();
-    process.stdout.transform(utf8.decoder).listen(_append,
-        onError: (_) {}, onDone: () => _outDone.complete());
-    process.stderr.transform(utf8.decoder).listen(_append,
-        onError: (_) {}, onDone: () => _errDone.complete());
-    process.exitCode.then((code) {
-      exitCode = code;
-      _exited.complete();
-    }, onError: (Object _) {
-      exitCode = -1;
-      _exited.complete();
-    });
+    process.stdout
+        .transform(utf8.decoder)
+        .listen(_append, onError: (_) {}, onDone: () => _outDone.complete());
+    process.stderr
+        .transform(utf8.decoder)
+        .listen(_append, onError: (_) {}, onDone: () => _errDone.complete());
+    process.exitCode.then(
+      (code) {
+        exitCode = code;
+        _exited.complete();
+      },
+      onError: (Object _) {
+        exitCode = -1;
+        _exited.complete();
+      },
+    );
   }
 
   final String id;
@@ -59,7 +64,8 @@ final class Job {
     _pendingLength += chunk.length;
     if (_pendingLength > kJobOutputCap) {
       final all = _pending.join();
-      final kept = '[earlier output dropped]\n'
+      final kept =
+          '[earlier output dropped]\n'
           '${all.substring(all.length - kJobOutputCap)}';
       _pending
         ..clear()
@@ -79,7 +85,8 @@ final class Job {
 
   Future<void> get exited => _exited.future;
 
-  Future<void> get outputClosed => Future.wait([_outDone.future, _errDone.future]);
+  Future<void> get outputClosed =>
+      Future.wait([_outDone.future, _errDone.future]);
 
   Future<void> stop() async {
     stopRequested = true;
@@ -89,9 +96,8 @@ final class Job {
   /// One-line status: `running`, or the exit code once it has ended.
   String statusLine() {
     final code = exitCode;
-    final seconds =
-        (DateTime.now().difference(startedAt).inMilliseconds / 1000)
-            .toStringAsFixed(1);
+    final seconds = (DateTime.now().difference(startedAt).inMilliseconds / 1000)
+        .toStringAsFixed(1);
     if (code == null) return '$id: running ${seconds}s — $command';
     return '$id: exited $code — $command';
   }
@@ -158,18 +164,18 @@ final class JobTool extends Tool implements Cancellable {
 
   @override
   Map<String, dynamic> get parameters => {
-        'type': 'object',
-        'additionalProperties': false,
-        'required': ['action'],
-        'properties': {
-          'action': {
-            'type': 'string',
-            'enum': ['start', 'poll', 'stop'],
-          },
-          'command': {'type': 'string'},
-          'id': {'type': 'string'},
-        },
-      };
+    'type': 'object',
+    'additionalProperties': false,
+    'required': ['action'],
+    'properties': {
+      'action': {
+        'type': 'string',
+        'enum': ['start', 'poll', 'stop'],
+      },
+      'command': {'type': 'string'},
+      'id': {'type': 'string'},
+    },
+  };
 
   @override
   String? validate(Map<String, dynamic> args) {
@@ -183,13 +189,13 @@ final class JobTool extends Tool implements Cancellable {
   }
 
   @override
-  Future<ToolOutcome> execute(Map<String, dynamic> args) =>
-      _run(args, null);
+  Future<ToolOutcome> execute(Map<String, dynamic> args) => _run(args, null);
 
   @override
   Future<ToolOutcome> executeCancellable(
-          Map<String, dynamic> args, CancelSignal cancel) =>
-      _run(args, cancel);
+    Map<String, dynamic> args,
+    CancelSignal cancel,
+  ) => _run(args, cancel);
 
   Future<ToolOutcome> _run(Map<String, dynamic> args, CancelSignal? cancel) {
     final action = args['action'] as String;
@@ -198,7 +204,8 @@ final class JobTool extends Tool implements Cancellable {
       'poll' => _poll(args['id'] as String),
       'stop' => _stop(args['id'] as String),
       _ => Future.value(
-          ToolOutcome.error('argument action must be one of: start, poll, stop')),
+        ToolOutcome.error('argument action must be one of: start, poll, stop'),
+      ),
     };
   }
 
@@ -209,8 +216,10 @@ final class JobTool extends Tool implements Cancellable {
     final dir = p.normalize(p.absolute(workspaceRoot));
     try {
       final job = await registry.start(command, dir);
-      return ToolOutcome.ok('${job.statusLine()} (poll with '
-          '{"action":"poll","id":"${job.id}"})');
+      return ToolOutcome.ok(
+        '${job.statusLine()} (poll with '
+        '{"action":"poll","id":"${job.id}"})',
+      );
     } on Object catch (e) {
       return ToolOutcome.error('cannot start job: $e');
     }
@@ -230,8 +239,7 @@ final class JobTool extends Tool implements Cancellable {
     try {
       if (job.exitCode == null) await job.stop();
       // Give the tree a moment to die and flush its pipes, bounded.
-      await job.exited.timeout(const Duration(seconds: 5),
-          onTimeout: () {});
+      await job.exited.timeout(const Duration(seconds: 5), onTimeout: () {});
       final output = job.drainOutput();
       final status = job.statusLine();
       return ToolOutcome.ok(output.isEmpty ? status : '$status\n$output');

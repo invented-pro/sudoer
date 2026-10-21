@@ -56,8 +56,12 @@ abstract interface class ConsoleSurface {
   void error(String text);
   void reasoning(String text);
   void tool(String name, Map<String, dynamic> arguments, {Duration? elapsed});
-  void observation(Outcome outcome, String text,
-      {String? label, Duration? elapsed});
+  void observation(
+    Outcome outcome,
+    String text, {
+    String? label,
+    Duration? elapsed,
+  });
   void diagnostic(String line);
   void startThinking(String label);
   void ensureThinking();
@@ -69,6 +73,11 @@ abstract interface class ConsoleSurface {
   void answer(String text);
   void endLine();
   void status(String text, {String? kind});
+
+  /// Nudge a live surface to repaint (a plan update, C1); the inline
+  /// console paints line by line and ignores this.
+  void touch();
+
   void close();
 }
 
@@ -81,8 +90,8 @@ final class Console implements ConsoleSurface {
     required this.ansi,
     bool spinner = false,
     int width = 80,
-  })  : _spinnerEnabled = spinner && ansi,
-        _markdown = MarkdownStream(width: width);
+  }) : _spinnerEnabled = spinner && ansi,
+       _markdown = MarkdownStream(width: width);
 
   @override
   final StringSink out;
@@ -147,20 +156,23 @@ final class Console implements ConsoleSurface {
     err.writeln(style('❯ ', bold: true) + style(text, bold: true));
   }
 
+  @override
+  void touch() {}
+
   /// Local command output (`/help`, `/plan`, `/status`, …). Yellow marks the
   /// interface's own output, distinct from the model's answer. The status
   /// spinner is cleared first so the two never share a line, then resumed.
   @override
   void info(String text) => _aroundSpinner(() {
-        endLine();
-        out.writeln(style(text, fg: _command));
-      });
+    endLine();
+    out.writeln(style(text, fg: _command));
+  });
 
   @override
   void error(String text) => _aroundSpinner(() {
-        endLine();
-        err.writeln(style('  ✗ ', fg: _red) + style(text, fg: _red, bold: true));
-      });
+    endLine();
+    err.writeln(style('  ✗ ', fg: _red) + style(text, fg: _red, bold: true));
+  });
 
   /// Print a permanent line without colliding with the status spinner: clear
   /// it, write, then resume it if it was running.
@@ -209,28 +221,35 @@ final class Console implements ConsoleSurface {
   }
 
   @override
-  void tool(String name, Map<String, dynamic> arguments,
-      {Duration? elapsed}) {
+  void tool(String name, Map<String, dynamic> arguments, {Duration? elapsed}) {
     endLine();
-    final timing =
-        elapsed == null ? '' : style(' · ${formatDuration(elapsed)}', dim: true);
-    err.writeln(style('  → ', fg: _mauve) +
-        style(name, bold: true, fg: _mauve) +
-        style(' ${briefText(jsonEncode(arguments), 72)}', dim: true) +
-        timing);
+    final timing = elapsed == null
+        ? ''
+        : style(' · ${formatDuration(elapsed)}', dim: true);
+    err.writeln(
+      style('  → ', fg: _mauve) +
+          style(name, bold: true, fg: _mauve) +
+          style(' ${briefText(jsonEncode(arguments), 72)}', dim: true) +
+          timing,
+    );
   }
 
   /// Render a tool or command result. [label] names the tool; multi-line
   /// results (e.g. `run_command`, `search`, `read`) are indented beneath the
   /// first line and capped. [elapsed] is the dispatch time when measured.
   @override
-  void observation(Outcome outcome, String text,
-      {String? label, Duration? elapsed}) {
+  void observation(
+    Outcome outcome,
+    String text, {
+    String? label,
+    Duration? elapsed,
+  }) {
     endLine();
     final ok = outcome == Outcome.ok;
     final color = ok ? _green : _red;
-    final timing =
-        elapsed == null ? '' : style(' · ${formatDuration(elapsed)}', dim: true);
+    final timing = elapsed == null
+        ? ''
+        : style(' · ${formatDuration(elapsed)}', dim: true);
     final lines = const LineSplitter().convert(text);
     final first = lines.isEmpty ? '' : briefText(lines.first, 130);
     err.writeln(
@@ -245,13 +264,17 @@ final class Console implements ConsoleSurface {
     // input or the model's reply. Errors stay red and un-dimmed to draw the eye.
     final body = lines.skip(1).take(_maxBodyLines);
     for (final line in body) {
-      err.writeln(style('      │ ', fg: _slate, dim: true) +
-          style(briefText(line, 160), dim: ok, fg: ok ? null : _red));
+      err.writeln(
+        style('      │ ', fg: _slate, dim: true) +
+            style(briefText(line, 160), dim: ok, fg: ok ? null : _red),
+      );
     }
     final hidden = lines.length - 1 - _maxBodyLines;
     if (hidden > 0) {
-      err.writeln(style('      │ ', fg: _slate, dim: true) +
-          style('… (+$hidden more lines)', dim: true));
+      err.writeln(
+        style('      │ ', fg: _slate, dim: true) +
+            style('… (+$hidden more lines)', dim: true),
+      );
     }
   }
 
@@ -260,21 +283,23 @@ final class Console implements ConsoleSurface {
   /// never share a line, then resumes it.
   @override
   void diagnostic(String line) => _aroundSpinner(() {
-        endLine();
-        if (!ansi) {
-          err.writeln(line);
-          return;
-        }
-        final match = _diagTag.firstMatch(line);
-        if (match == null) {
-          err.writeln(style('  · $line', dim: true));
-          return;
-        }
-        final tag = match.group(1)!;
-        err.writeln(style('  · ', fg: _slate) +
-            style('[$tag]', fg: componentColor(tag)) +
-            style(' ${match.group(2)!}', dim: true));
-      });
+    endLine();
+    if (!ansi) {
+      err.writeln(line);
+      return;
+    }
+    final match = _diagTag.firstMatch(line);
+    if (match == null) {
+      err.writeln(style('  · $line', dim: true));
+      return;
+    }
+    final tag = match.group(1)!;
+    err.writeln(
+      style('  · ', fg: _slate) +
+          style('[$tag]', fg: componentColor(tag)) +
+          style(' ${match.group(2)!}', dim: true),
+    );
+  });
 
   @override
   void startThinking(String label) {
@@ -323,18 +348,21 @@ final class Console implements ConsoleSurface {
     final hint = _hint;
     final detail = _detail;
     final start = _phaseStart;
-    final elapsed =
-        start == null ? Duration.zero : DateTime.now().difference(start);
+    final elapsed = start == null
+        ? Duration.zero
+        : DateTime.now().difference(start);
     // Only tick a visible timer once a call is slow enough to notice; a
     // sub-second call just flashes otherwise.
     final timing = elapsed.inMilliseconds >= 1000
         ? style(' · ${formatDuration(elapsed)}', dim: true)
         : '';
-    err.write('\r\x1b[2K  ${frames[_frame++ % frames.length]} '
-        '${style(_label, dim: true)}'
-        '$timing'
-        '${detail == null ? '' : style(' · $detail', dim: true)}'
-        '${hint == null ? '' : style(' · $hint', fg: _yellow, dim: true)}');
+    err.write(
+      '\r\x1b[2K  ${frames[_frame++ % frames.length]} '
+      '${style(_label, dim: true)}'
+      '$timing'
+      '${detail == null ? '' : style(' · $detail', dim: true)}'
+      '${hint == null ? '' : style(' · $hint', fg: _yellow, dim: true)}',
+    );
   }
 
   /// Stop the spinner, if one is running. A no-op otherwise — importantly,
@@ -405,10 +433,13 @@ final class Console implements ConsoleSurface {
     if (split > 0) {
       final head = text.substring(0, split);
       err.writeln(
-          style(head,
+        style(
+              head,
               bold: true,
-              fg: _statusColor(kind ?? head.split(' ').first)) +
-              style(text.substring(split), dim: true));
+              fg: _statusColor(kind ?? head.split(' ').first),
+            ) +
+            style(text.substring(split), dim: true),
+      );
     } else {
       err.writeln(style(text, dim: true));
     }
@@ -422,11 +453,11 @@ final class Console implements ConsoleSurface {
 }
 
 RgbColor _statusColor(String status) => switch (status) {
-      'complete' => _green,
-      'incomplete' => _yellow,
-      'blocked' => _red,
-      _ => _slate,
-    };
+  'complete' => _green,
+  'incomplete' => _yellow,
+  'blocked' => _red,
+  _ => _slate,
+};
 
 /// Colour for a diagnostic tag by its component prefix (`C1`, `C2`, …).
 RgbColor componentColor(String tag) {
@@ -449,10 +480,10 @@ String contextBar(int used, int window, int cells) {
 }
 
 String outcomeMark(Outcome outcome) => switch (outcome) {
-      Outcome.ok => '✓',
-      Outcome.error => '✗',
-      Outcome.guardDenied => '⛔',
-    };
+  Outcome.ok => '✓',
+  Outcome.error => '✗',
+  Outcome.guardDenied => '⛔',
+};
 
 /// Collapse [text] to one line and cap it at [max] characters.
 String briefText(Object? text, [int max = 100]) {

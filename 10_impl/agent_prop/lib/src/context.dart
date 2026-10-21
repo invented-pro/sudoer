@@ -27,24 +27,36 @@ String clmContextSection({
   final buffer = StringBuffer()
     ..writeln('Context management (CLM $kClmPromptVersion):')
     ..writeln('- Your live context is mirrored as a file: $contextPath')
-    ..writeln('  (any path in this workspace; edit it with run_command, write, '
-        'or edit).')
-    ..writeln('- That file *is* your context: edits take effect on your next '
-        'step. If you do not edit it, the harness appends your turn as usual.')
-    ..writeln('- Everything you delete is gone; there is no other memory of '
-        'this session. Keep the file well under the $window-token window.')
-    ..writeln('- Curate it: keep the goal, the files you touched and their '
-        'state, commands and outcomes, decisions, errors, and open threads; '
-        'compress or drop stale tool output.')
-    ..writeln('- Format: each block starts with a line '
-        '[[ctx role=user|assistant|observation|note]] followed by its body. '
-        'Inside an assistant block, one tool call per line is '
-        '[[call]] <name> <json>. A body line that must start with [[ is '
-        'escaped as \\[[ . Observations bind to a call by '
-        '[[ctx role=observation id=<call id>]].')
-    ..writeln('- The context must keep at least the user (goal) block; an '
-        'edit that removes it or is otherwise malformed is ignored and '
-        'reported, so never delete the goal.');
+    ..writeln(
+      '  (any path in this workspace; edit it with run_command, write, '
+      'or edit).',
+    )
+    ..writeln(
+      '- That file *is* your context: edits take effect on your next '
+      'step. If you do not edit it, the harness appends your turn as usual.',
+    )
+    ..writeln(
+      '- Everything you delete is gone; there is no other memory of '
+      'this session. Keep the file well under the $window-token window.',
+    )
+    ..writeln(
+      '- Curate it: keep the goal, the files you touched and their '
+      'state, commands and outcomes, decisions, errors, and open threads; '
+      'compress or drop stale tool output.',
+    )
+    ..writeln(
+      '- Format: each block starts with a line '
+      '[[ctx role=user|assistant|observation|note]] followed by its body. '
+      'Inside an assistant block, one tool call per line is '
+      '[[call]] <name> <json>. A body line that must start with [[ is '
+      'escaped as \\[[ . Observations bind to a call by '
+      '[[ctx role=observation id=<call id>]].',
+    )
+    ..writeln(
+      '- The context must keep at least the user (goal) block; an '
+      'edit that removes it or is otherwise malformed is ignored and '
+      'reported, so never delete the goal.',
+    );
   final steer = strategy.trim();
   if (steer.isNotEmpty) {
     buffer
@@ -245,8 +257,10 @@ final class ContextAssembler {
     if (prior != null && prior.trim().isNotEmpty) {
       body.write('Existing brief:\n$prior\n\n');
     }
-    body.write('New earlier work to fold in:\n$rendered\n\n'
-        'Write the updated brief now.');
+    body.write(
+      'New earlier work to fold in:\n$rendered\n\n'
+      'Write the updated brief now.',
+    );
     return CompactionTask(
       through: cut,
       beforeTokens: _plannedBefore,
@@ -262,7 +276,10 @@ final class ContextAssembler {
   /// Apply a fold planned by [planCompaction]. [brief] is the model's text; an
   /// empty or null value falls back to the deterministic digest.
   CompactionInfo applyCompaction(
-      List<Entry> transcript, int through, String? brief) {
+    List<Entry> transcript,
+    int through,
+    String? brief,
+  ) {
     if (through > _foldedThrough) {
       _foldedThrough = through;
       _brief = (brief != null && brief.trim().isNotEmpty)
@@ -294,8 +311,9 @@ final class ContextAssembler {
     // context, so no lever runs; the prompt is sent as the model left it.
     lastCompaction = null;
     final startFolded = _foldedThrough;
-    final cut =
-        modelManagedContext ? _foldedThrough : _desiredCut(system, toolsJson, transcript);
+    final cut = modelManagedContext
+        ? _foldedThrough
+        : _desiredCut(system, toolsJson, transcript);
     if (cut > _foldedThrough) {
       _foldedThrough = cut;
       _brief = _digest(transcript.sublist(0, cut)).text;
@@ -340,17 +358,20 @@ final class ContextAssembler {
       );
     }
     if (used > contextWindow) {
-      diagnostics?.event('C4 context',
-          'overflow: ~$used > $contextWindow tokens; blocking the run');
+      diagnostics?.event(
+        'C4 context',
+        'overflow: ~$used > $contextWindow tokens; blocking the run',
+      );
       throw ContextOverflowException(
-          'prompt exceeds context window ($contextWindow tokens)');
+        'prompt exceeds context window ($contextWindow tokens)',
+      );
     }
     diagnostics?.event(
       'C4 context',
       'prompt ${messages.length} messages, ~$used/$contextWindow tokens, '
-      '${_foldedThrough > 0 ? 'folded $_foldedThrough entries' : 'no folding'}'
-      '${_lastClipped > 0 ? ', $_lastClipped clipped' : ''}'
-      '${_lastCleared > 0 ? ', $_lastCleared cleared' : ''}',
+          '${_foldedThrough > 0 ? 'folded $_foldedThrough entries' : 'no folding'}'
+          '${_lastClipped > 0 ? ', $_lastClipped clipped' : ''}'
+          '${_lastCleared > 0 ? ', $_lastCleared cleared' : ''}',
     );
     return ProviderRequest(
       model: model,
@@ -376,15 +397,18 @@ final class ContextAssembler {
       return List<Entry>.of(transcript);
     }
     final clipped = _clipAll(transcript);
-    var tailStart =
-        _chooseCut(clipped, (contextWindow * kRetainFraction).round());
+    var tailStart = _chooseCut(
+      clipped,
+      (contextWindow * kRetainFraction).round(),
+    );
     if (tailStart < _foldedThrough) tailStart = _foldedThrough;
     final lastUser = transcript.lastIndexWhere((entry) => entry is UserEntry);
     final view = <Entry>[
       if (_foldedThrough > 0)
         ObservationEntry(
-            text: _brief ?? _digest(transcript.sublist(0, _foldedThrough)).text,
-            outcome: Outcome.ok),
+          text: _brief ?? _digest(transcript.sublist(0, _foldedThrough)).text,
+          outcome: Outcome.ok,
+        ),
       if (_foldedThrough > 0 && lastUser >= 0 && lastUser < _foldedThrough)
         transcript[lastUser],
     ];
@@ -411,10 +435,13 @@ final class ContextAssembler {
           kRefetchableTools.contains(call.name)) {
         _lastCleared++;
         _lastClearedCalls.add(_callKeySuffix(call.name, call.arguments));
-        view.add(ObservationEntry(
+        view.add(
+          ObservationEntry(
             text: _clearedPlaceholder(call),
             outcome: entry.outcome,
-            toolCallId: entry.toolCallId));
+            toolCallId: entry.toolCallId,
+          ),
+        );
         continue;
       }
       if (!identical(entry, transcript[i])) _lastClipped++;
@@ -425,15 +452,19 @@ final class ContextAssembler {
 
   /// Clip every oversized observation (C4); indices stay aligned with the
   /// transcript so pairing and fold boundaries are unaffected.
-  static List<Entry> _clipAll(List<Entry> transcript) =>
-      [for (final entry in transcript) _clipEntry(entry)];
+  static List<Entry> _clipAll(List<Entry> transcript) => [
+    for (final entry in transcript) _clipEntry(entry),
+  ];
 
   static Entry _clipEntry(Entry entry) {
     if (entry is! ObservationEntry) return entry;
     final clipped = _clip(entry.text);
     if (identical(clipped, entry.text)) return entry;
     return ObservationEntry(
-        text: clipped, outcome: entry.outcome, toolCallId: entry.toolCallId);
+      text: clipped,
+      outcome: entry.outcome,
+      toolCallId: entry.toolCallId,
+    );
   }
 
   /// Clip [text] to its head and tail with an elision marker when it exceeds
@@ -459,8 +490,7 @@ final class ContextAssembler {
       'web_search' => call.arguments['query'],
       _ => null,
     };
-    final what =
-        target is String && target.trim().isNotEmpty ? ' $target' : '';
+    final what = target is String && target.trim().isNotEmpty ? ' $target' : '';
     return '[cleared: ${call.name}$what — re-run to recover the output]';
   }
 
@@ -468,18 +498,25 @@ final class ContextAssembler {
   /// when it is not. The watermark ratio is measured on the thinned view —
   /// after clipping and clearing — so a fold is only warranted when the
   /// cheaper levers were not enough (C4).
-  int _desiredCut(String system, String toolsJson, List<Entry> transcript,
-      {bool force = false}) {
+  int _desiredCut(
+    String system,
+    String toolsJson,
+    List<Entry> transcript, {
+    bool force = false,
+  }) {
     if (contextWindow <= 0 || transcript.length <= 1) return _foldedThrough;
     final ratio =
         _estimate(system, toolsJson, _view(transcript)) / contextWindow;
     final atGoalBoundary = transcript.last is UserEntry;
-    final shouldFold = force ||
+    final shouldFold =
+        force ||
         ratio >= kCompactHighWater ||
         (atGoalBoundary && ratio >= kCompactWatermark);
     if (!shouldFold) return _foldedThrough;
     final chosen = _chooseCut(
-        _clipAll(transcript), (contextWindow * kRetainFraction).round());
+      _clipAll(transcript),
+      (contextWindow * kRetainFraction).round(),
+    );
     return chosen > _foldedThrough ? chosen : _foldedThrough;
   }
 
@@ -512,8 +549,9 @@ final class ContextAssembler {
 
   String _systemWithPlan(List<PlanItem> plan) {
     if (plan.isEmpty) return systemPrompt;
-    final lines =
-        plan.map((item) => '- [${item.done ? 'x' : ' '}] ${item.text}').join('\n');
+    final lines = plan
+        .map((item) => '- [${item.done ? 'x' : ' '}] ${item.text}')
+        .join('\n');
     return '$systemPrompt\n\nCurrent plan:\n$lines';
   }
 
@@ -542,8 +580,7 @@ final class ContextAssembler {
           pendingCalls
             ..clear()
             ..addAll(action.calls);
-          final call =
-              pendingCalls.isEmpty ? null : pendingCalls.removeAt(0);
+          final call = pendingCalls.isEmpty ? null : pendingCalls.removeAt(0);
           if (call != null) {
             tool = call.name;
             final pathArg = call.arguments['path'];
@@ -580,7 +617,8 @@ final class ContextAssembler {
     }
 
     final buffer = StringBuffer(
-        'Earlier session summary (${entries.length} entries folded).');
+      'Earlier session summary (${entries.length} entries folded).',
+    );
     if (goals.isNotEmpty) buffer.write('\nGoals: ${goals.join('; ')}');
     if (files.isNotEmpty) {
       buffer.write('\nFiles:');
@@ -623,23 +661,22 @@ final class ContextAssembler {
   static int _tokens(String text) => (text.length / 4).ceil();
 
   static String _render(Entry entry) => switch (entry) {
-        UserEntry(:final text) => text,
-        AssistantEntry(:final thought, :final action) => '$thought '
-            '${action.calls.map((call) => call.name).join(' ')}',
-        ObservationEntry(:final text) => text,
-      };
+    UserEntry(:final text) => text,
+    AssistantEntry(:final thought, :final action) =>
+      '$thought '
+          '${action.calls.map((call) => call.name).join(' ')}',
+    ObservationEntry(:final text) => text,
+  };
 
   /// Render an entry for the summarizer, including each tool call's arguments
   /// so the brief can preserve paths and commands verbatim (C4).
   static String _renderForBrief(Entry entry) => switch (entry) {
-        UserEntry(:final text) => text,
-        AssistantEntry(:final thought, :final action) => action.calls.isEmpty
-            ? thought
-            : '${thought.trim()} '
-                '${[
-                    for (final call in action.calls)
-                      '${call.name} ${jsonEncode(call.arguments)}',
-                  ].join(' ')}',
-        ObservationEntry(:final text) => text,
-      };
+    UserEntry(:final text) => text,
+    AssistantEntry(:final thought, :final action) =>
+      action.calls.isEmpty
+          ? thought
+          : '${thought.trim()} '
+                '${[for (final call in action.calls) '${call.name} ${jsonEncode(call.arguments)}'].join(' ')}',
+    ObservationEntry(:final text) => text,
+  };
 }

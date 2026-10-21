@@ -31,8 +31,7 @@ PlanExtraction parsePlanBlock(String text) {
   return PlanExtraction(_tidy(scan.visible), scan.plan);
 }
 
-String _tidy(String text) =>
-    text.replaceAll(RegExp(r'\n{3,}'), '\n\n').trim();
+String _tidy(String text) => text.replaceAll(RegExp(r'\n{3,}'), '\n\n').trim();
 
 /// Incremental view over a streamed model response. Feed raw content deltas to
 /// [add] and render the returned visible deltas; a partially-arrived plan
@@ -43,14 +42,18 @@ final class PlanTextStream {
   final StringBuffer _raw = StringBuffer();
   int _emitted = 0;
 
-  /// The plan parsed from the last completed block, if any.
+  /// The plan parsed so far: the last completed block, or — while a plan
+  /// block is still arriving — the items seen in it up to now (C1), so a
+  /// live surface can track the plan mid-stream.
   List<PlanItem>? plan;
 
   String get raw => _raw.toString();
 
   String add(String delta) {
     _raw.write(delta);
-    return _emit(_scan(_raw.toString(), complete: false).visible);
+    final scan = _scan(_raw.toString(), complete: false);
+    if (scan.plan != null) plan = scan.plan;
+    return _emit(scan.visible);
   }
 
   String flush() {
@@ -154,10 +157,12 @@ List<PlanItem>? _planItems(String body) {
     if (trimmed.isEmpty) continue;
     final boxed = _checkbox.firstMatch(trimmed);
     if (boxed != null) {
-      items.add(PlanItem(
-        text: boxed.group(2)!.trim(),
-        done: boxed.group(1)!.toLowerCase() == 'x',
-      ));
+      items.add(
+        PlanItem(
+          text: boxed.group(2)!.trim(),
+          done: boxed.group(1)!.toLowerCase() == 'x',
+        ),
+      );
       continue;
     }
     final text = trimmed.replaceFirst(_bullet, '').trim();

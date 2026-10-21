@@ -255,13 +255,27 @@ mirror the model edits. `/context` reports the active mode and file; see
 
 With no positional goal on a terminal, `sudoer-prop` runs the **full-screen
 TUI**: a fixed header (build, provider/model, workspace, session, transcript
-size), a scrollable transcript, a bordered multi-line editor, and a status
-footer. It uses the alternate screen and restores the shell's scrollback on
+size, and the plan as a bordered checklist panel once one exists), a
+scrollable transcript, a bordered multi-line editor, and a status
+footer. Queued follow-up messages draw as their own bordered `queued` panel
+between the transcript and the editor. It uses the alternate screen and restores the shell's scrollback on
 exit. The layout follows Pi's interactive mode: the editor and status area
 stay put while the transcript scrolls, so a long run never pushes the input
 off-screen. `--inline` keeps the older scrollback surface when a takeover is
 not wanted; `--automate` (or a non-interactive stdin/stdout) is the plain
 one-shot CLI.
+
+The header doubles as the ongoing progress area: once the model has sent a
+plan, it draws as a bordered panel under the session line — slate edges with
+a `plan` label on the top border, and one row per item: `✓` (green, dim text)
+for done steps, `❯` (mauve, bold) on the step currently in flight, `○` for
+queued steps. Long plans fold to at most five rows plus a `… +N more` line,
+keeping the active step visible; the panel grows and shrinks with the plan as
+the run progresses. The panel is live twice over: the streaming adapter
+reports the plan while the model is still writing the `plan` block (each
+checkbox lands as it arrives), and each response's authoritative plan is
+applied the moment it completes — the checklist never waits for the run to
+finish.
 
 The footer carries the spinner and step/context detail while a run is in
 flight, then the latest status: response number, result, context use as
@@ -291,13 +305,58 @@ which works even when the terminal does not report modified Enter) adds a
 line, and bracketed paste inserts text verbatim, including line breaks,
 without submitting. `←`/`→`/`Home`/`End` move within the text; `↑`/`↓` at the
 first/last line walk your input history and restore the in-progress draft.
-`PgUp`/`PgDn` scroll the transcript. While a run is in flight, `Enter`
+`PgUp`/`PgDn` scroll the transcript, and so does the mouse wheel — the wheel
+scrolls the content under the pointer's context: an open popup's list when
+one is up, the transcript otherwise; it never touches the editor, so it
+cannot walk input history by accident. The mouse buttons stay a selection
+device: press and drag across the transcript to select (reverse-video
+highlight, live as you drag), and on release the text is copied to the host
+clipboard via OSC 52; a plain click just clears the highlight. No toggle and
+no modifier: the wheel scrolls, the drag selects. While a run is in
+flight, `Enter`
 queues a follow-up to
-run after it and the footer shows the queue depth; one `Esc` cancels the run
+run after it; the queued messages show as a bordered `queued` panel just
+above the editor (folded with `+N more` when long), and the footer shows the
+queue depth; one `Esc` cancels the run
 and keeps the partial transcript. `Ctrl+C` restores the terminal and exits.
 The `--inline` fallback keeps the line editor, `\`-continued multi-line goals,
 and double-`Esc` cancellation. On a pipe or with `--automate` input is read
 one line at a time.
+
+Selection and reference commands open **popups** instead of dumping listings
+into the transcript: `/provider`, `/model`, `/sessions`, `/resume`, `/help`,
+and `/plan` (bare, without an argument) draw a centered bordered box over the
+frame. While a popup is open it owns the keyboard: `↑`/`↓` (and
+`PgUp`/`PgDn`/`Home`/`End`) move, typed text filters — every whitespace token
+must match the id, name, or detail column — `Enter` selects, and `Esc` (or
+`Ctrl+C`) cancels without changing anything. The provider picker shows each
+preset's key *state* (`stored`, `env`, `missing`, …, never a value) and marks
+the preset in effect with `●`; the model picker shows each model's context
+window; the session picker resumes the chosen session on `Enter`. A popup
+command is not a model run, so the footer keeps its idle hints and the run
+queue stays untouched underneath. An explicit argument (`/provider ollama`)
+skips the popup and switches directly.
+
+The interaction grammar follows [Crush](https://github.com/charmbracelet/crush):
+
+- `Ctrl+P` opens the **command palette** — every command with its description,
+  filterable; `Enter` runs the chosen one.
+- `Ctrl+L` opens the model picker, `Ctrl+S` the session picker, `Ctrl+N` a new
+  session, and `Ctrl+G` the help popup.
+- Typing `/` in the editor shows a **completion menu** anchored above
+  the input (the bare `/` already triggers it): matching commands with
+  one-line descriptions, filtered as you type. The editor keeps the keyboard —
+  `↑`/`↓` move the selection (history recall pauses while it is open), `Tab`
+  fills the highlighted command in, `Enter` fills it when it differs from the
+  typed text and sends when it is exact, and `Esc` dismisses the menu (a
+  second `Esc` clears the draft).
+- Choosing a provider whose API key is missing (or stored but unusable)
+  **prompts for the key** in a masked one-line modal before the switch
+  applies: `Enter` validates and stores it in the auth store (never echoed,
+  never written to the config), `Esc` or an empty `Enter` switches without a
+  key and shows the usual hint instead. Paste works too.
+- Shortcuts are idle-surface gestures: while a run is in flight the keys keep
+  their editor meaning.
 
 ```bash
 cd 10_impl/agent_prop
@@ -317,15 +376,15 @@ Built-in commands (both surfaces):
 
 | Command | Effect |
 | --- | --- |
-| `/help` | list commands |
-| `/exit`, `/quit` | persist and close the session, then exit |
+| `/help` | list commands (popup in the TUI) |
+| `/exit` | persist and close the session, then exit (`/quit` is a hidden alias) |
 | `/new` | start a new session |
-| `/sessions` | list saved sessions |
-| `/resume <id>` | switch to a saved session |
-| `/plan` | print the current plan |
+| `/sessions` | list saved sessions (pick-to-resume popup in the TUI) |
+| `/resume <id>` | switch to a saved session (picker popup in the TUI) |
+| `/plan` | print the current plan (popup in the TUI) |
 | `/status` | print the session status |
-| `/provider [id]` | list the provider presets, or switch the active provider |
-| `/model [id]` | list the current provider's models, or switch model |
+| `/provider [id]` | list the provider presets, or switch the active provider (filterable picker popup in the TUI) |
+| `/model [id]` | list the current provider's models, or switch model (filterable picker popup in the TUI) |
 | `/context [harness\|clm]` | show or switch the context strategy (and live file) |
 | `/diff [path]` | show the workspace's changes against the session baseline |
 | `/cancel` | cancel the in-flight run (automate surface; `Esc` on human surfaces) |

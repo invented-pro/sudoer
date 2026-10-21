@@ -20,9 +20,9 @@ enum ProviderKind { openAiCompatible, ollama }
 
 extension ProviderKindWire on ProviderKind {
   String get wire => switch (this) {
-        ProviderKind.openAiCompatible => 'openai-compatible',
-        ProviderKind.ollama => 'ollama',
-      };
+    ProviderKind.openAiCompatible => 'openai-compatible',
+    ProviderKind.ollama => 'ollama',
+  };
 }
 
 /// One model a preset knows about: its id, a display name, and the context
@@ -159,8 +159,11 @@ const List<ProviderPreset> kCuratedProviderPresets = [
       ModelInfo('z-ai/glm-5.3', 'GLM-5.3', 1310720),
       ModelInfo('deepseek/deepseek-v4-pro', 'DeepSeek V4 Pro', 1048576),
       ModelInfo('qwen/qwen3.8-max', 'Qwen3.8 Max', 1000000),
-      ModelInfo('deepseek/deepseek-v4-flash-vision-exp',
-          'DeepSeek V4 Flash Vision Exp', 1048576),
+      ModelInfo(
+        'deepseek/deepseek-v4-flash-vision-exp',
+        'DeepSeek V4 Flash Vision Exp',
+        1048576,
+      ),
       ModelInfo('z-ai/glm-5.3-flash', 'GLM-5.3-Flash', 1310720),
     ],
   ),
@@ -189,8 +192,11 @@ const List<ProviderPreset> kCuratedProviderPresets = [
     models: [
       ModelInfo('deepseek-v4-pro', 'DeepSeek V4 Pro', 1000000),
       ModelInfo('deepseek-v4-flash', 'DeepSeek V4 Flash', 1000000),
-      ModelInfo('deepseek-v4-flash-vision-exp',
-          'DeepSeek V4 Flash Vision Exp', 1000000),
+      ModelInfo(
+        'deepseek-v4-flash-vision-exp',
+        'DeepSeek V4 Flash Vision Exp',
+        1000000,
+      ),
     ],
   ),
   ProviderPreset(
@@ -257,7 +263,8 @@ const List<ProviderPreset> kCuratedProviderPresets = [
     baseUrl: 'https://api.minimax.io/v1',
     envKeys: ['MINIMAX_API_KEY'],
     docs: 'https://platform.minimax.io/docs',
-    note: 'International region; keys are region-specific. Use minimax-cn '
+    note:
+        'International region; keys are region-specific. Use minimax-cn '
         'for a key from platform.minimaxi.com.',
     models: [
       ModelInfo('MiniMax-M3', 'MiniMax-M3', 1048576),
@@ -273,7 +280,8 @@ const List<ProviderPreset> kCuratedProviderPresets = [
     baseUrl: 'https://api.minimax.cn/v1',
     envKeys: ['MINIMAX_CN_API_KEY', 'MINIMAX_API_KEY'],
     docs: 'https://platform.minimaxi.com/docs',
-    note: 'China region; keys are region-specific. Use minimax for a key from '
+    note:
+        'China region; keys are region-specific. Use minimax for a key from '
         'platform.minimax.io.',
     models: [
       ModelInfo('MiniMax-M3', 'MiniMax-M3', 1048576),
@@ -335,12 +343,21 @@ const List<ProviderPreset> kCuratedProviderPresets = [
     docs: 'https://docs.fireworks.ai',
     models: [
       ModelInfo('accounts/fireworks/models/glm-5p3', 'GLM 5.3', 1048573),
-      ModelInfo('accounts/fireworks/models/glm-5p3-flash', 'GLM 5.3 Flash',
-          1048573),
-      ModelInfo('accounts/fireworks/models/deepseek-v4-pro-0813',
-          'DeepSeek V4 Pro 0813', 1000000),
-      ModelInfo('accounts/fireworks/models/qwen3p8-2p4t-a95b',
-          'Qwen3.8 2.4T A95B', 262144),
+      ModelInfo(
+        'accounts/fireworks/models/glm-5p3-flash',
+        'GLM 5.3 Flash',
+        1048573,
+      ),
+      ModelInfo(
+        'accounts/fireworks/models/deepseek-v4-pro-0813',
+        'DeepSeek V4 Pro 0813',
+        1000000,
+      ),
+      ModelInfo(
+        'accounts/fireworks/models/qwen3p8-2p4t-a95b',
+        'Qwen3.8 2.4T A95B',
+        262144,
+      ),
     ],
   ),
   ProviderPreset(
@@ -352,8 +369,11 @@ const List<ProviderPreset> kCuratedProviderPresets = [
     docs: 'https://deepinfra.com/docs',
     models: [
       ModelInfo('zai-org/GLM-5.3', 'GLM-5.3', 1048576),
-      ModelInfo('deepseek-ai/DeepSeek-V4-Pro-0813', 'DeepSeek V4 Pro 0813',
-          1048576),
+      ModelInfo(
+        'deepseek-ai/DeepSeek-V4-Pro-0813',
+        'DeepSeek V4 Pro 0813',
+        1048576,
+      ),
       ModelInfo('Qwen/Qwen3.8-Max', 'Qwen3.8 Max', 256000),
       ModelInfo('Qwen/Qwen3.8-2.4T-A95B', 'Qwen3.8 2.4T A95B', 262144),
     ],
@@ -436,9 +456,7 @@ const List<ProviderPreset> kProviderPresets = [
 /// Look up a preset by id, or null when it is unknown. A few historical
 /// aliases keep older configs working while the canonical id follows
 /// models.dev/OpenCode.
-const Map<String, String> _presetAliases = {
-  'fireworks': 'fireworks-ai',
-};
+const Map<String, String> _presetAliases = {'fireworks': 'fireworks-ai'};
 
 ProviderPreset? providerPreset(String? id) {
   if (id == null) return null;
@@ -457,7 +475,8 @@ ProviderPreset? providerPreset(String? id) {
 /// hosts). The hint never includes a credential.
 String minimaxRegionHint({String? presetId, String? baseUrl}) {
   final url = (baseUrl ?? '').toLowerCase();
-  final urlChina = url.contains('api.minimax.cn') ||
+  final urlChina =
+      url.contains('api.minimax.cn') ||
       url.contains('api.minimaxi.com') ||
       url.contains('api.minimax.chat');
   final urlInternational = url.contains('api.minimax.io');

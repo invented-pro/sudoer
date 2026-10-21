@@ -36,34 +36,31 @@ final class HostShell {
 
   /// Start [command] in [workingDirectory]. The bool is whether the process
   /// leads a group that [killTree] can reap as a whole.
-  Future<(Process, bool)> start(
-      String command, String workingDirectory) async {
+  Future<(Process, bool)> start(String command, String workingDirectory) async {
     if (isWindows) {
-      final process = await Process.start(
-        commandInterpreter,
-        ['/c', command],
-        workingDirectory: workingDirectory,
-      );
+      final process = await Process.start(commandInterpreter, [
+        '/c',
+        command,
+      ], workingDirectory: workingDirectory);
       return (process, true);
     }
     if (posixShell == '/bin/sh' && _setsid != false) {
       try {
-        final process = await Process.start(
-          'setsid',
-          [posixShell, '-c', command],
-          workingDirectory: workingDirectory,
-        );
+        final process = await Process.start('setsid', [
+          posixShell,
+          '-c',
+          command,
+        ], workingDirectory: workingDirectory);
         _setsid = true;
         return (process, true);
       } on ProcessException {
         _setsid = false;
       }
     }
-    final process = await Process.start(
-      posixShell,
-      ['-c', command],
-      workingDirectory: workingDirectory,
-    );
+    final process = await Process.start(posixShell, [
+      '-c',
+      command,
+    ], workingDirectory: workingDirectory);
     return (process, false);
   }
 
@@ -116,7 +113,8 @@ void enableWindowsRawInput() {
   try {
     if (getConsoleMode(handle, mode) == 0) return; // not a console
     _savedWindowsMode ??= mode.value;
-    final next = (mode.value |
+    final next =
+        (mode.value |
             _enableVirtualTerminalInput |
             _enableExtendedFlags |
             _enableMouseInput) &

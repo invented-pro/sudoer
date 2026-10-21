@@ -63,13 +63,14 @@ List<ModelInfo> mergeModels(
     if (liveSet.contains(model.id) && seen.add(model.id)) out.add(model);
   }
   // Everything else the endpoint reported, alphabetically.
-  final rest = [for (final id in ids) if (seen.add(id)) id]..sort();
+  final rest = [
+    for (final id in ids)
+      if (seen.add(id)) id,
+  ]..sort();
   for (final id in rest) {
-    out.add(ModelInfo(
-      id,
-      id,
-      preset.model(id)?.contextWindow ?? fallbackWindow,
-    ));
+    out.add(
+      ModelInfo(id, id, preset.model(id)?.contextWindow ?? fallbackWindow),
+    );
   }
   return out;
 }
@@ -102,11 +103,13 @@ Future<List<ModelInfo>> discoverModels(
   final httpClient = client ?? http.Client();
   try {
     if (preset.kind == ProviderKind.ollama) {
-      final response =
-          await httpClient.get(Uri.parse('$base/api/tags')).timeout(timeout);
+      final response = await httpClient
+          .get(Uri.parse('$base/api/tags'))
+          .timeout(timeout);
       if (response.statusCode != 200) {
         throw HttpException(
-            'model discovery failed: HTTP ${response.statusCode}');
+          'model discovery failed: HTTP ${response.statusCode}',
+        );
       }
       return mergeModels(parseOllamaModels(response.body), preset);
     }
@@ -117,21 +120,25 @@ Future<List<ModelInfo>> discoverModels(
         throw FormatException('invalid API key: $problem');
       }
     }
-    final response = await httpClient.get(
-      Uri.parse('$base/models'),
-      headers: {
-        if (key != null && key.isNotEmpty) 'authorization': 'Bearer $key',
-      },
-    ).timeout(timeout);
+    final response = await httpClient
+        .get(
+          Uri.parse('$base/models'),
+          headers: {
+            if (key != null && key.isNotEmpty) 'authorization': 'Bearer $key',
+          },
+        )
+        .timeout(timeout);
     if (response.statusCode != 200) {
-      final hint = (response.statusCode == 401 || response.statusCode == 403) &&
+      final hint =
+          (response.statusCode == 401 || response.statusCode == 403) &&
               key != null &&
               key.isNotEmpty
           ? minimaxRegionHint(presetId: preset.id, baseUrl: preset.baseUrl)
           : '';
       throw HttpException(
-          'model discovery failed: HTTP ${response.statusCode}'
-          '${hint.isEmpty ? '' : ' $hint'}');
+        'model discovery failed: HTTP ${response.statusCode}'
+        '${hint.isEmpty ? '' : ' $hint'}',
+      );
     }
     return mergeModels(parseOpenAiModels(response.body), preset);
   } finally {

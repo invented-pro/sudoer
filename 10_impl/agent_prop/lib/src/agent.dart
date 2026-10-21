@@ -90,15 +90,13 @@ final class PropAgent {
     // prompt is used unchanged.
     final clm = config.context.mode == ContextMode.clm;
     final contextLog = clm
-        ? ContextLog(ContextLog.fileFor(config),
-            workspaceRoot: config.workspaceRoot)
+        ? ContextLog(
+            ContextLog.fileFor(config),
+            workspaceRoot: config.workspaceRoot,
+          )
         : null;
     final systemPrompt = clm
-        ? '$kPropSystemPrompt\n\n${clmContextSection(
-            contextPath: contextLog!.displayPath,
-            window: config.provider.contextWindow,
-            strategy: config.context.strategy,
-          )}'
+        ? '$kPropSystemPrompt\n\n${clmContextSection(contextPath: contextLog!.displayPath, window: config.provider.contextWindow, strategy: config.context.strategy)}'
         : kPropSystemPrompt;
     final context = ContextAssembler(
       contextWindow: config.provider.contextWindow,
@@ -158,11 +156,15 @@ final class PropAgent {
       'C6 interface',
       'goal="${brief(request.goal)}" -> session ${session.id}',
     );
-    diagnostics.event('C2 provider',
-        '${config.provider.kind.name} model=${config.provider.model}');
-    diagnostics.event('C3 tools',
-        'workspace=${session.workspaceRoot} stallBudget=$kStallBudget '
-        'ceiling=$kStepCeiling');
+    diagnostics.event(
+      'C2 provider',
+      '${config.provider.kind.name} model=${config.provider.model}',
+    );
+    diagnostics.event(
+      'C3 tools',
+      'workspace=${session.workspaceRoot} stallBudget=$kStallBudget '
+          'ceiling=$kStepCeiling',
+    );
     final result = await loop.run(request, session, observer: observer);
     session.updatedAt = DateTime.now().toUtc();
     final path = session.save(config.sessionDir);
@@ -173,7 +175,7 @@ final class PropAgent {
     diagnostics.event(
       'C6 interface',
       'result ${result.status.wire}'
-      '${result.reason != null ? ' (${result.reason})' : ''}',
+          '${result.reason != null ? ' (${result.reason})' : ''}',
     );
     return result;
   }
@@ -190,9 +192,14 @@ final class PropAgent {
       return text.isEmpty ? 'no changes' : text;
     }
     final file = tools.guard.resolve(path);
-    final relative = p.posix.joinAll(p
-        .relative(file.path, from: p.normalize(p.absolute(session.workspaceRoot)))
-        .split(p.separator));
+    final relative = p.posix.joinAll(
+      p
+          .relative(
+            file.path,
+            from: p.normalize(p.absolute(session.workspaceRoot)),
+          )
+          .split(p.separator),
+    );
     final text = baseline.diffWorkspace(only: relative);
     return text.isEmpty ? 'no changes ($path matches the baseline)' : text;
   }

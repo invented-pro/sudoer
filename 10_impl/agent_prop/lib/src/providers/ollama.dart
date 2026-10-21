@@ -15,7 +15,7 @@ import 'provider.dart';
 /// C2 adapter for a local ollama server.
 final class OllamaProvider implements Provider, ClosableProvider {
   OllamaProvider(this.config, {http.Client? client})
-      : _client = client ?? http.Client();
+    : _client = client ?? http.Client();
 
   final ProviderConfig config;
   final http.Client _client;
@@ -23,14 +23,17 @@ final class OllamaProvider implements Provider, ClosableProvider {
   @override
   void close() => _client.close();
 
-  String get _base =>
-      (config.baseUrl ?? 'http://localhost:11434').replaceAll(RegExp(r'/+$'), '');
+  String get _base => (config.baseUrl ?? 'http://localhost:11434').replaceAll(
+    RegExp(r'/+$'),
+    '',
+  );
 
   @override
   Future<ProviderResponse> complete(
     ProviderRequest request, {
     void Function(String delta)? onDelta,
     void Function(String delta)? onReasoning,
+    void Function(List<PlanItem> plan)? onPlan,
     CancelSignal? cancel,
   }) async {
     if (cancel?.isCancelled ?? false) {
@@ -57,28 +60,44 @@ final class OllamaProvider implements Provider, ClosableProvider {
 
     final http.StreamedResponse response;
     try {
-      response =
-          await raceCancel(_client.send(httpRequest), cancel).timeout(kModelTimeout);
+      response = await raceCancel(
+        _client.send(httpRequest),
+        cancel,
+      ).timeout(kModelTimeout);
     } on TimeoutException {
       throw const StepFailure.timeout('model call timed out');
     }
     if (response.statusCode != 200) {
       final body = await response.stream.bytesToString();
       throw StepFailure.unrecoverable(
-          'provider HTTP ${response.statusCode}: $body');
+        'provider HTTP ${response.statusCode}: $body',
+      );
     }
-    return _stream(response, onDelta, onReasoning, cancel);
+    return _stream(response, onDelta, onReasoning, onPlan, cancel);
   }
 
   Future<ProviderResponse> _stream(
     http.StreamedResponse response,
     void Function(String delta)? onDelta,
     void Function(String delta)? onReasoning,
+    void Function(List<PlanItem> plan)? onPlan,
     CancelSignal? cancel,
   ) async {
     final think = ThinkTextStream();
     final text = PlanTextStream();
     final toolCalls = <ToolCall>[];
+    // The plan panel advances while the block is still streaming (C1).
+    var livePlanKey = '';
+    void pushLivePlan() {
+      final live = text.plan;
+      if (live == null || onPlan == null) return;
+      final key = [
+        for (final item in live) '${item.done ? 'x' : ' '}:${item.text}',
+      ].join('\u{1}');
+      if (key == livePlanKey) return;
+      livePlanKey = key;
+      onPlan(List<PlanItem>.of(live));
+    }
     final lines = raceCancelStream(
       response.stream
           .transform(utf8.decoder)
@@ -101,6 +120,7 @@ final class OllamaProvider implements Provider, ClosableProvider {
             final chunk = text.add(thinkChunk.visible);
             if (chunk.isNotEmpty) onDelta?.call(chunk);
           }
+          pushLivePlan();
         }
         toolCalls.addAll(_parseToolCalls(message?['tool_calls']));
       }
@@ -118,25 +138,27 @@ final class OllamaProvider implements Provider, ClosableProvider {
     final tail = text.flush();
     if (tail.isNotEmpty) onDelta?.call(tail);
     final parsed = parsePlanBlock(text.raw);
-    return parseCompletion(Completion(
-      text: parsed.text,
-      toolCalls: toolCalls,
-      plan: parsed.plan,
-      reasoning: think.reasoning,
-    ));
+    return parseCompletion(
+      Completion(
+        text: parsed.text,
+        toolCalls: toolCalls,
+        plan: parsed.plan,
+        reasoning: think.reasoning,
+      ),
+    );
   }
 
   List<Map<String, dynamic>> _toolJson(List<ToolDefinition> tools) => [
-        for (final tool in tools)
-          {
-            'type': 'function',
-            'function': {
-              'name': tool.name,
-              'description': tool.description,
-              'parameters': tool.parameters,
-            },
-          }
-      ];
+    for (final tool in tools)
+      {
+        'type': 'function',
+        'function': {
+          'name': tool.name,
+          'description': tool.description,
+          'parameters': tool.parameters,
+        },
+      },
+  ];
 }
 
 List<ToolCall> _parseToolCalls(Object? raw) {
@@ -145,11 +167,15 @@ List<ToolCall> _parseToolCalls(Object? raw) {
     final map = (call as Map).cast<String, dynamic>();
     final function = (map['function'] as Map).cast<String, dynamic>();
     final arguments = function['arguments'];
-    calls.add(ToolCall(
-      id: map['id'] as String?,
-      name: function['name'] as String,
-      arguments: arguments is Map ? arguments.cast<String, dynamic>() : const {},
-    ));
+    calls.add(
+      ToolCall(
+        id: map['id'] as String?,
+        name: function['name'] as String,
+        arguments: arguments is Map
+            ? arguments.cast<String, dynamic>()
+            : const {},
+      ),
+    );
   }
   return calls;
 }
@@ -183,8 +209,8 @@ List<Map<String, dynamic>> ollamaMessages(ProviderRequest request) {
                     'function': {
                       'name': call.name,
                       'arguments': call.arguments,
-                    }
-                  }
+                    },
+                  },
               ],
             });
             pendingTool = true;

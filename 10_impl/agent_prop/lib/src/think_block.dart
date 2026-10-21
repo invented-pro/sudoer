@@ -36,8 +36,7 @@ ThinkExtraction parseThinkBlock(String text) {
   return ThinkExtraction(_tidy(scan.visible), scan.reasoning);
 }
 
-String _tidy(String text) =>
-    text.replaceAll(RegExp(r'\n{3,}'), '\n\n').trim();
+String _tidy(String text) => text.replaceAll(RegExp(r'\n{3,}'), '\n\n').trim();
 
 /// Newly revealed text from one [ThinkTextStream] feed: the visible slice and
 /// the reasoning slice that became known since the previous call.

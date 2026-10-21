@@ -23,6 +23,7 @@ import 'package:path/path.dart' as p;
 
 import '../config.dart';
 import '../errors.dart';
+import '../tui_popup.dart';
 import 'auth.dart';
 import 'discovery.dart';
 
@@ -86,7 +87,8 @@ Config configWithProvider(
   final kind = presetId != null ? preset?.kind : previous?.kind;
   if (kind == null) {
     throw const ConfigException(
-        'a config or --provider <preset> is required to choose a provider');
+      'a config or --provider <preset> is required to choose a provider',
+    );
   }
 
   final selectedModel =
@@ -100,17 +102,20 @@ Config configWithProvider(
   if (kind == ProviderKind.openAiCompatible &&
       (resolvedBase == null || resolvedBase.isEmpty)) {
     throw const ConfigException(
-        'provider.base_url is required for the openai-compatible adapter '
-        '(use --base-url)');
+      'provider.base_url is required for the openai-compatible adapter '
+      '(use --base-url)',
+    );
   }
 
-  final selectedWindow = contextWindow ??
+  final selectedWindow =
+      contextWindow ??
       (same ? previous?.contextWindow : null) ??
       preset?.model(selectedModel)?.contextWindow ??
       (preset == null ? null : kDefaultContextWindow);
   if (selectedWindow == null || selectedWindow < 1) {
     throw const ConfigException(
-        'provider.context_window is required (use --context-window)');
+      'provider.context_window is required (use --context-window)',
+    );
   }
 
   String? nextApiKey;
@@ -130,7 +135,8 @@ Config configWithProvider(
   }
   if (nextApiKey != null && nextApiKeyEnv != null) {
     throw const ConfigException(
-        'set at most one of provider.api_key and provider.api_key_env');
+      'set at most one of provider.api_key and provider.api_key_env',
+    );
   }
   if (nextApiKey != null && nextApiKey.isNotEmpty) {
     final problem = apiKeyProblem(nextApiKey);
@@ -173,6 +179,92 @@ String formatContextWindow(int tokens) {
 bool _usableKey(String? value) =>
     value != null && value.isNotEmpty && apiKeyProblem(value) == null;
 
+/// The key state of a provider row: the *state*, never a value. An existing
+/// but unusable key is called out so a stale paste is easy to spot. Shared by
+/// the `--list-providers` table and the `/provider` popup (C6).
+String providerKeyState(
+  ProviderPreset preset, {
+  ProviderConfig? current,
+  Map<String, String>? storedKeys,
+  String? Function(String name)? lookup,
+}) {
+  lookup ??= (name) => Platform.environment[name];
+  final stored = storedKeys ?? const <String, String>{};
+  if (!preset.requiresKey) return 'not required';
+  final configKey = current?.preset == preset.id ? current?.apiKey : null;
+  if (configKey != null) {
+    return _usableKey(configKey) ? 'config' : 'invalid';
+  }
+  if (stored[preset.id] != null) {
+    return _usableKey(stored[preset.id]) ? 'stored' : 'invalid';
+  }
+  String? envValue;
+  for (final name in preset.envKeys) {
+    final value = lookup(name);
+    if (value != null && value.isNotEmpty) {
+      envValue = value;
+      break;
+    }
+  }
+  return envValue == null
+      ? 'missing'
+      : (_usableKey(envValue) ? 'env' : 'invalid');
+}
+
+/// Whether a TUI provider switch to [preset] should prompt for an API key
+/// (C2/C6): the preset requires one, has a usable base URL baked in, and no
+/// key can be resolved (none stored, none in the environment — or a stored
+/// value that is unusable, so the prompt offers to replace it). The preset
+/// already in effect never prompts; local endpoints (`requiresKey == false`)
+/// never do.
+bool shouldPromptForKey(
+  ProviderPreset preset, {
+  ProviderConfig? current,
+  AuthStore? store,
+  String? Function(String name)? env,
+}) {
+  if (current?.preset == preset.id) return false;
+  if (!preset.requiresKey || preset.baseUrl == null) return false;
+  final state = providerKeyState(
+    preset,
+    current: current,
+    storedKeys: (store ?? AuthStore()).read(),
+    lookup: env,
+  );
+  return state == 'missing' || state == 'invalid';
+}
+
+/// The `/provider` popup rows (C6): one item per preset, `id — name` as the
+/// filter target, the key state as the detail column, and `●` marking the
+/// preset in effect. Cancelling changes nothing.
+List<TuiPopupItem> providerPopupItems({
+  ProviderConfig? current,
+  AuthStore? store,
+  String? Function(String name)? env,
+}) {
+  final auth = store ?? AuthStore();
+  final storedKeys = auth.read();
+  final lookup = env ?? (name) => Platform.environment[name];
+  return [
+    for (final preset in kProviderPresets)
+      TuiPopupItem(
+        value: preset.id,
+        label: '${preset.id} — ${preset.name}',
+        detail: providerKeyState(
+          preset,
+          current: current,
+          storedKeys: storedKeys,
+          lookup: lookup,
+        ),
+        active:
+            current != null &&
+            (current.preset == preset.id ||
+                (current.preset == null &&
+                    presetForBaseUrl(current.baseUrl)?.id == preset.id)),
+      ),
+  ];
+}
+
 /// The `--list-providers` table. `*` marks the current provider; the key
 /// column never reveals a key.
 String providerListText({
@@ -189,45 +281,25 @@ String providerListText({
       ? value.padRight(width)
       : '${value.substring(0, width - 1)}…';
   final buffer = StringBuffer()
-    ..writeln('  ${kProviderPresets.length} presets — OpenAI-compatible '
-        'models.dev/OpenCode set + local/custom')
-    ..writeln('  ${'ID'.padRight(idWidth)} ${'NAME'.padRight(nameWidth)} '
-        '${'KIND'.padRight(18)} KEY');
+    ..writeln(
+      '  ${kProviderPresets.length} presets — OpenAI-compatible '
+      'models.dev/OpenCode set + local/custom',
+    )
+    ..writeln(
+      '  ${'ID'.padRight(idWidth)} ${'NAME'.padRight(nameWidth)} '
+      '${'KIND'.padRight(18)} KEY',
+    );
   for (final preset in kProviderPresets) {
-    final active = current != null &&
+    final active =
+        current != null &&
         (current.preset == preset.id ||
             (current.preset == null &&
                 presetForBaseUrl(current.baseUrl)?.id == preset.id));
-    // The key column reports the *state*, never a value. An existing but
-    // unusable key is called out so a stale paste is easy to spot.
-    String keyState;
-    if (!preset.requiresKey) {
-      keyState = 'not required';
-    } else {
-      final configKey =
-          current?.preset == preset.id ? current?.apiKey : null;
-      final stored = storedKeys[preset.id];
-      if (configKey != null) {
-        keyState = _usableKey(configKey) ? 'config' : 'invalid';
-      } else if (stored != null) {
-        keyState = _usableKey(stored) ? 'stored' : 'invalid';
-      } else {
-        String? envValue;
-        for (final name in preset.envKeys) {
-          final value = lookup(name);
-          if (value != null && value.isNotEmpty) {
-            envValue = value;
-            break;
-          }
-        }
-        keyState = envValue == null
-            ? 'missing'
-            : (_usableKey(envValue) ? 'env' : 'invalid');
-      }
-    }
-    buffer.writeln('${active ? '*' : ' '} ${fit(preset.id, idWidth)} '
-        '${fit(preset.name, nameWidth)} ${preset.kind.wire.padRight(18)} '
-        '$keyState');
+    buffer.writeln(
+      '${active ? '*' : ' '} ${fit(preset.id, idWidth)} '
+      '${fit(preset.name, nameWidth)} ${preset.kind.wire.padRight(18)} '
+      '${providerKeyState(preset, current: current, storedKeys: storedKeys, lookup: lookup)}',
+    );
   }
   buffer
     ..writeln()
@@ -251,8 +323,10 @@ String modelListText(
   } else {
     for (final model in list) {
       final mark = model.id == current ? '*' : ' ';
-      buffer.writeln('$mark ${model.id.padRight(42)} '
-          '${formatContextWindow(model.contextWindow)}');
+      buffer.writeln(
+        '$mark ${model.id.padRight(42)} '
+        '${formatContextWindow(model.contextWindow)}',
+      );
     }
   }
   if (note != null && note.isNotEmpty) buffer.writeln(note);
@@ -329,8 +403,10 @@ Future<int> runProviderSetup({
         '${candidate.id} — ${candidate.name}',
     ];
     final picked = choices.length > 12
-        ? await pickModel(choices,
-            title: 'Choose an LLM provider — type to filter')
+        ? await pickModel(
+            choices,
+            title: 'Choose an LLM provider — type to filter',
+          )
         : await choose(choices, title: 'Choose an LLM provider');
     if (picked == null) {
       errSink.writeln('cancelled');
@@ -343,7 +419,8 @@ Future<int> runProviderSetup({
   var resolvedBase = baseUrl ?? preset.baseUrl;
   if (resolvedBase == null || resolvedBase.isEmpty) {
     final entered = await ask(
-        'Base URL (OpenAI-compatible, usually ending in /v1)');
+      'Base URL (OpenAI-compatible, usually ending in /v1)',
+    );
     if (entered == null || entered.trim().isEmpty) {
       errSink.writeln('cancelled');
       return 1;
@@ -370,8 +447,10 @@ Future<int> runProviderSetup({
         if (problem == null) {
           existingKey = stored.trim();
         } else {
-          errSink.writeln('ignoring the stored key for ${preset.id}: '
-              '$problem');
+          errSink.writeln(
+            'ignoring the stored key for ${preset.id}: '
+            '$problem',
+          );
         }
       }
       if (existingKey == null) {
@@ -389,8 +468,9 @@ Future<int> runProviderSetup({
 
       var keep = false;
       if (existingKey != null) {
-        final answer =
-            await askConfirm('Use the existing key for ${preset.name}?');
+        final answer = await askConfirm(
+          'Use the existing key for ${preset.name}?',
+        );
         if (answer == null) {
           errSink.writeln('cancelled');
           return 1;
@@ -473,12 +553,16 @@ Future<int> runProviderSetup({
     try {
       models = await discoverFn(discoveryPreset, discoveryKey);
     } on Object catch (e) {
-      outSink.writeln('model discovery unavailable (${e.runtimeType}); '
-          'using the built-in list');
+      outSink.writeln(
+        'model discovery unavailable (${e.runtimeType}); '
+        'using the built-in list',
+      );
       if (e is HttpException &&
           (e.message.contains('401') || e.message.contains('403'))) {
-        errSink.writeln('warning: the endpoint rejected the key (${e.message}); '
-            'it may be invalid.');
+        errSink.writeln(
+          'warning: the endpoint rejected the key (${e.message}); '
+          'it may be invalid.',
+        );
       }
       models = discoveryPreset.models;
     }
@@ -487,8 +571,9 @@ Future<int> runProviderSetup({
     } else if (models.length > 12) {
       // A live list can be hundreds of entries. Ask for a pasteable query
       // first: an exact id/name wins immediately; otherwise narrow the list.
-      final query =
-          await ask('Model id or name (paste an id, or Enter to browse)');
+      final query = await ask(
+        'Model id or name (paste an id, or Enter to browse)',
+      );
       if (query == null) {
         errSink.writeln('cancelled');
         return 1;
@@ -498,17 +583,21 @@ Future<int> runProviderSetup({
         selectedModel = await _pickModel(models, choose, pickModel, ask);
       } else {
         final exact = models
-            .where((candidate) =>
-                candidate.id.toLowerCase() == q.toLowerCase() ||
-                candidate.name.toLowerCase() == q.toLowerCase())
+            .where(
+              (candidate) =>
+                  candidate.id.toLowerCase() == q.toLowerCase() ||
+                  candidate.name.toLowerCase() == q.toLowerCase(),
+            )
             .toList();
         final matches = exact.isNotEmpty
             ? exact
             : models
-                .where((candidate) =>
-                    candidate.id.toLowerCase().contains(q.toLowerCase()) ||
-                    candidate.name.toLowerCase().contains(q.toLowerCase()))
-                .toList();
+                  .where(
+                    (candidate) =>
+                        candidate.id.toLowerCase().contains(q.toLowerCase()) ||
+                        candidate.name.toLowerCase().contains(q.toLowerCase()),
+                  )
+                  .toList();
         if (matches.length == 1) {
           selectedModel = matches.single.id;
         } else {
@@ -571,8 +660,10 @@ Future<int> runProviderSetup({
   writeConfigFile(configPath, next);
   outSink
     ..writeln('provider: ${preset.id} (${preset.kind.wire})')
-    ..writeln('model:    $selectedModel  '
-        '[${formatContextWindow(window)} context]');
+    ..writeln(
+      'model:    $selectedModel  '
+      '[${formatContextWindow(window)} context]',
+    );
   if (envName != null) {
     outSink.writeln('key:      \$$envName (environment)');
   } else if (preset.requiresKey) {
@@ -649,7 +740,8 @@ Future<_KeyChoice> _askKeyStorage(
         : '${preset.id.toUpperCase().replaceAll('-', '_')}_API_KEY';
     final name = await ask('Environment variable name (default $suggested)');
     return _EnvKey(
-        (name == null || name.trim().isEmpty) ? suggested : name.trim());
+      (name == null || name.trim().isEmpty) ? suggested : name.trim(),
+    );
   }
   return const _StoreKey();
 }
@@ -690,32 +782,23 @@ Msg? pasteAsRunes(Msg msg) {
   return KeyPressMsg(TeaKey(code: KeyCode.rune, text: text));
 }
 
-Future<String?> _defaultSelect(
-  List<String> choices, {
-  required String title,
-}) =>
+Future<String?> _defaultSelect(List<String> choices, {required String title}) =>
     promptSelect(choices, title: title, options: _selectOptions());
 
 Future<String?> _defaultInput(String label) async {
   final values = await Form([
-    Group([
-      Field.input(key: 'value', title: label),
-    ]),
+    Group([Field.input(key: 'value', title: label)]),
   ]).run(options: _textOptions());
   return values?.get<String>('value');
 }
 
-Future<String?> _defaultFilter(
-  List<String> choices, {
-  required String title,
-}) =>
+Future<String?> _defaultFilter(List<String> choices, {required String title}) =>
     filter(choices, title: title, options: _selectOptions());
 
 Future<List<ModelInfo>> _defaultDiscover(
   ProviderPreset preset,
   String? apiKey,
-) =>
-    discoverModels(preset, apiKey: apiKey);
+) => discoverModels(preset, apiKey: apiKey);
 
 Future<String?> _defaultSecret(String title, {bool optional = false}) async {
   // Keep the password as the *first* field: a preceding `Field.note` starts

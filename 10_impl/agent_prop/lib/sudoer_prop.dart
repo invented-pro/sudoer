@@ -37,3 +37,4 @@ export 'src/tools/job.dart';
 export 'src/tools/tool.dart';
 export 'src/tools/web.dart';
 export 'src/tui_console.dart';
+export 'src/tui_popup.dart';

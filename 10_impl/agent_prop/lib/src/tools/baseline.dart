@@ -70,8 +70,9 @@ final class WorkspaceBaseline {
           continue;
         }
         if (entry is! File) continue;
-        final relative =
-            p.posix.joinAll(p.relative(entry.path, from: absRoot).split(p.separator));
+        final relative = p.posix.joinAll(
+          p.relative(entry.path, from: absRoot).split(p.separator),
+        );
         final size = entry.lengthSync();
         if (size > kBaselineMaxFileBytes || total >= kBaselineMaxTotalBytes) {
           files[relative] = null;
@@ -95,8 +96,9 @@ final class WorkspaceBaseline {
   /// Persist the snapshot next to the session file; returns the handle.
   String save(String sessionDir) {
     Directory(sessionDir).createSync(recursive: true);
-    File(p.join(sessionDir, handle))
-        .writeAsStringSync(const JsonEncoder.withIndent('  ').convert(toJson()));
+    File(
+      p.join(sessionDir, handle),
+    ).writeAsStringSync(const JsonEncoder.withIndent('  ').convert(toJson()));
     return handle;
   }
 
@@ -106,23 +108,22 @@ final class WorkspaceBaseline {
     if (!file.existsSync()) return null;
     final Map<String, dynamic> json;
     try {
-      json = (jsonDecode(file.readAsStringSync()) as Map).cast<String, dynamic>();
+      json = (jsonDecode(file.readAsStringSync()) as Map)
+          .cast<String, dynamic>();
     } on FormatException {
       return null;
     }
     final raw = (json['files'] as Map).cast<String, dynamic>();
-    return WorkspaceBaseline._(
-      json['root'] as String,
-      {for (final entry in raw.entries) entry.key: entry.value as String?},
-      DateTime.parse(json['captured_at'] as String),
-    );
+    return WorkspaceBaseline._(json['root'] as String, {
+      for (final entry in raw.entries) entry.key: entry.value as String?,
+    }, DateTime.parse(json['captured_at'] as String));
   }
 
   Map<String, dynamic> toJson() => {
-        'root': root,
-        'captured_at': capturedAt.toIso8601String(),
-        'files': files,
-      };
+    'root': root,
+    'captured_at': capturedAt.toIso8601String(),
+    'files': files,
+  };
 
   /// The workspace-relative paths that currently exist under [root], using
   /// the same skip set as [capture].
@@ -137,8 +138,10 @@ final class WorkspaceBaseline {
           continue;
         }
         if (entry is! File) continue;
-        current[p.posix
-            .joinAll(p.relative(entry.path, from: absRoot).split(p.separator))] = null;
+        current[p.posix.joinAll(
+              p.relative(entry.path, from: absRoot).split(p.separator),
+            )] =
+            null;
       }
     }
 
@@ -170,8 +173,10 @@ final class WorkspaceBaseline {
         continue;
       }
       if (before == null) {
-        buffer.writeln('~ $relative (present at capture but not snapshotted; '
-            'content unknown)');
+        buffer.writeln(
+          '~ $relative (present at capture but not snapshotted; '
+          'content unknown)',
+        );
         continue;
       }
       final after = File(_absolute(relative)).readAsStringSync();
@@ -193,8 +198,10 @@ final class WorkspaceBaseline {
     }
     // LCS table (guarded by the caps above).
     final lcs = List.generate(
-        a.length + 1, (_) => List<int>.filled(b.length + 1, 0),
-        growable: false);
+      a.length + 1,
+      (_) => List<int>.filled(b.length + 1, 0),
+      growable: false,
+    );
     for (var i = a.length - 1; i >= 0; i--) {
       for (var j = b.length - 1; j >= 0; j--) {
         lcs[i][j] = a[i] == b[j]
@@ -268,7 +275,7 @@ final class WorkspaceBaseline {
       if (removed.isNotEmpty) 'removed ${removed.length} file(s)',
       if (skipped.isNotEmpty)
         'not snapshotted (left unchanged): ${skipped.take(5).join(', ')}'
-        '${skipped.length > 5 ? ', …' : ''}',
+            '${skipped.length > 5 ? ', …' : ''}',
     ];
     return parts.isEmpty ? 'nothing to restore' : parts.join('; ');
   }
@@ -291,18 +298,18 @@ final class DiffTool extends Tool {
 
   @override
   Map<String, dynamic> get parameters => {
-        'type': 'object',
-        'additionalProperties': false,
-        'properties': {
-          'path': {'type': 'string'},
-        },
-      };
+    'type': 'object',
+    'additionalProperties': false,
+    'properties': {
+      'path': {'type': 'string'},
+    },
+  };
 
   @override
   String? validate(Map<String, dynamic> args) =>
       args.containsKey('path') && args['path'] is! String
-          ? 'argument path must be a string'
-          : null;
+      ? 'argument path must be a string'
+      : null;
 
   @override
   Future<ToolOutcome> execute(Map<String, dynamic> args) async {
@@ -312,12 +319,17 @@ final class DiffTool extends Tool {
       return _vcsDiff(scope);
     }
     final text = baseline.diffWorkspace(
-        only: scope == null
-            ? null
-            : p.posix.joinAll(p
-                .relative(guard.resolve(scope).path,
-                    from: p.normalize(p.absolute(workspaceRoot)))
-                .split(p.separator)));
+      only: scope == null
+          ? null
+          : p.posix.joinAll(
+              p
+                  .relative(
+                    guard.resolve(scope).path,
+                    from: p.normalize(p.absolute(workspaceRoot)),
+                  )
+                  .split(p.separator),
+            ),
+    );
     return ToolOutcome.ok(text.isEmpty ? 'no changes' : text);
   }
 
@@ -326,8 +338,10 @@ final class DiffTool extends Tool {
   Future<ToolOutcome> _vcsDiff(String? scope) async {
     final root = p.normalize(p.absolute(workspaceRoot));
     if (!Directory(p.join(root, '.git')).existsSync()) {
-      return ToolOutcome.error('no session baseline and no .git directory; '
-          'cannot diff');
+      return ToolOutcome.error(
+        'no session baseline and no .git directory; '
+        'cannot diff',
+      );
     }
     final host = HostShell.host;
     final (process, _) = await host.start(
@@ -342,10 +356,20 @@ final class DiffTool extends Tool {
       if (!c.isCompleted) c.complete();
     }
 
-    process.stdout.transform(utf8.decoder).listen(output.write,
-        onDone: () => finish(outDone), onError: (_) => finish(outDone));
-    process.stderr.transform(utf8.decoder).listen(output.write,
-        onDone: () => finish(errDone), onError: (_) => finish(errDone));
+    process.stdout
+        .transform(utf8.decoder)
+        .listen(
+          output.write,
+          onDone: () => finish(outDone),
+          onError: (_) => finish(outDone),
+        );
+    process.stderr
+        .transform(utf8.decoder)
+        .listen(
+          output.write,
+          onDone: () => finish(errDone),
+          onError: (_) => finish(errDone),
+        );
     final code = await process.exitCode;
     await Future.wait([outDone.future, errDone.future]);
     final text = output.toString().trim();
@@ -372,18 +396,18 @@ final class RestoreTool extends Tool {
 
   @override
   Map<String, dynamic> get parameters => {
-        'type': 'object',
-        'additionalProperties': false,
-        'properties': {
-          'path': {'type': 'string'},
-        },
-      };
+    'type': 'object',
+    'additionalProperties': false,
+    'properties': {
+      'path': {'type': 'string'},
+    },
+  };
 
   @override
   String? validate(Map<String, dynamic> args) =>
       args.containsKey('path') && args['path'] is! String
-          ? 'argument path must be a string'
-          : null;
+      ? 'argument path must be a string'
+      : null;
 
   @override
   Future<ToolOutcome> execute(Map<String, dynamic> args) async {
@@ -399,9 +423,11 @@ final class RestoreTool extends Tool {
     if (!file.existsSync() && !baseline.files.containsKey(scope)) {
       return ToolOutcome.error('no such file: $scope');
     }
-    final relative = p.posix.joinAll(p
-        .relative(file.path, from: p.normalize(p.absolute(workspaceRoot)))
-        .split(p.separator));
+    final relative = p.posix.joinAll(
+      p
+          .relative(file.path, from: p.normalize(p.absolute(workspaceRoot)))
+          .split(p.separator),
+    );
     return ToolOutcome.ok('${baseline.restore(relative: relative)} ($scope)');
   }
 }

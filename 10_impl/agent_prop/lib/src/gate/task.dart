@@ -116,8 +116,7 @@ final class Task {
         for (final entry in ((json['workspace'] as Map?) ?? {}).entries)
           entry.key as String: entry.value as String,
       },
-      configOverride:
-          ((json['config'] as Map?) ?? {}).cast<String, dynamic>(),
+      configOverride: ((json['config'] as Map?) ?? {}).cast<String, dynamic>(),
       script: (json['script'] as Map).cast<String, dynamic>(),
       hostShellPosix: json['host_shell'] == 'posix',
       expect: Expect(
@@ -139,24 +138,24 @@ final class Task {
         plan: (expect['plan'] as List?)?.cast<String>(),
         sessionPersisted: expect['sessionPersisted'] as bool?,
         contextContains: (expect['contextContains'] as List?)?.cast<String>(),
-        contextNotContains:
-            (expect['contextNotContains'] as List?)?.cast<String>(),
-        transcriptContains:
-            (expect['transcriptContains'] as List?)?.cast<String>(),
-        transcriptNotContains:
-            (expect['transcriptNotContains'] as List?)?.cast<String>(),
+        contextNotContains: (expect['contextNotContains'] as List?)
+            ?.cast<String>(),
+        transcriptContains: (expect['transcriptContains'] as List?)
+            ?.cast<String>(),
+        transcriptNotContains: (expect['transcriptNotContains'] as List?)
+            ?.cast<String>(),
         stdoutContains: expect['stdoutContains'] as String?,
       ),
     );
   }
 
   static RunStatus? _status(Object? value) => switch (value) {
-        null => null,
-        'complete' => RunStatus.complete,
-        'incomplete' => RunStatus.incomplete,
-        'blocked' => RunStatus.blocked,
-        _ => throw FormatException('bad status: $value'),
-      };
+    null => null,
+    'complete' => RunStatus.complete,
+    'incomplete' => RunStatus.incomplete,
+    'blocked' => RunStatus.blocked,
+    _ => throw FormatException('bad status: $value'),
+  };
 
   static RunExpect _runExpect(Map<String, dynamic> json) {
     final answer = (json['answer'] as Map?)?.cast<String, dynamic>();

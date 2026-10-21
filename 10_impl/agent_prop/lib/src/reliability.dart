@@ -12,6 +12,7 @@ import 'errors.dart';
 /// `run_command`, so compilers and test suites can finish.
 const int kStallBudget = 3;
 const int kStepCeiling = 1000;
+
 /// Provider-call inactivity bound. Generous because some OpenAI-compatible
 /// endpoints do not stream tool-call `arguments` incrementally: they generate
 /// a whole call (e.g. a `write` of a full file) server-side and emit it in one

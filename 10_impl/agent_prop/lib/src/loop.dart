@@ -71,8 +71,12 @@ final class AgentLoop {
     session.cancel.reset();
     // The transcript keeps a text reference to the goal's `@path` images;
     // the binaries ride the provider requests of this run only (C7).
-    session.transcript.add(UserEntry(request.goal,
-        images: [for (final image in request.images) image.path]));
+    session.transcript.add(
+      UserEntry(
+        request.goal,
+        images: [for (final image in request.images) image.path],
+      ),
+    );
     var steps = 0;
     var stalls = 0;
     final seen = <String>{};
@@ -94,11 +98,17 @@ final class AgentLoop {
       if (_clm) _syncContextFile(session);
       timings.add(RunTiming('run', runWatch.elapsed));
       return RunResult(
-          status: status, answer: answer, reason: reason, timings: timings);
+        status: status,
+        answer: answer,
+        reason: reason,
+        timings: timings,
+      );
     }
 
-    diagnostics.event('C1 loop',
-        'run start: goal="${brief(request.goal)}" stallBudget=$kStallBudget');
+    diagnostics.event(
+      'C1 loop',
+      'run start: goal="${brief(request.goal)}" stallBudget=$kStallBudget',
+    );
     // A plan left fully complete belongs to the previous goal, so a new goal
     // starts with fresh planning. An unfinished plan is kept so a later goal
     // can continue the work (C5). Without this an unrelated finished plan
@@ -112,7 +122,9 @@ final class AgentLoop {
         stalls < kStallBudget &&
         steps < kStepCeiling) {
       diagnostics.event(
-          'C1 loop', 'step ${steps + 1} (stalls $stalls/$kStallBudget)');
+        'C1 loop',
+        'step ${steps + 1} (stalls $stalls/$kStallBudget)',
+      );
       observer?.onPhase('thinking');
       observer?.onStep(steps + 1, stalls, kStallBudget);
       // CLM: mirror the live transcript to the context file before the call,
@@ -136,16 +148,23 @@ final class AgentLoop {
       final compaction = context.lastCompaction;
       if (compaction != null) {
         diagnostics.event(
-            'C4 context',
-            'compacted ${compaction.steps} steps: ~${compaction.beforeTokens} '
-            '-> ~${compaction.afterTokens} tokens');
+          'C4 context',
+          'compacted ${compaction.steps} steps: ~${compaction.beforeTokens} '
+              '-> ~${compaction.afterTokens} tokens',
+        );
         observer?.onCompaction(
-            compaction.steps, compaction.beforeTokens, compaction.afterTokens);
+          compaction.steps,
+          compaction.beforeTokens,
+          compaction.afterTokens,
+        );
       }
       observer?.onContext(context.lastUsedTokens, context.contextWindow);
 
       final ProviderResponse response;
       final responseWatch = Stopwatch()..start();
+      // Baseline for the progress check after the response lands: the live
+      // plan stream may already have advanced the plan mid-call (C1).
+      final planDoneBefore = session.plan.where((item) => item.done).length;
       _traceRequest('request', prompt, session, shown, step: steps + 1);
       try {
         response = await _completeWithRetry(prompt, observer, session);
@@ -156,21 +175,30 @@ final class AgentLoop {
           diagnostics.event('C1 loop', 'run cancelled mid-call');
           await tools.reapJobs();
           observer?.onPhase('done');
-          return done(RunStatus.incomplete,
-              answer: 'run cancelled', reason: 'cancelled');
+          return done(
+            RunStatus.incomplete,
+            answer: 'run cancelled',
+            reason: 'cancelled',
+          );
         }
         if (failure.kind == FailureKind.timeout) {
           diagnostics.event(
-              'C8 reliability', 'provider timeout; recovering: ${failure.message}');
+            'C8 reliability',
+            'provider timeout; recovering: ${failure.message}',
+          );
           if (diagnostics.enabled && diagnostics.traceContent) {
-            diagnostics.event('C8 reliability',
-                'timing: response (timeout) ${formatDuration(responseWatch.elapsed)}');
+            diagnostics.event(
+              'C8 reliability',
+              'timing: response (timeout) ${formatDuration(responseWatch.elapsed)}',
+            );
           }
           timings.add(RunTiming('response (timeout)', responseWatch.elapsed));
-          session.transcript.add(ObservationEntry(
-            text: 'provider error: ${failure.message}',
-            outcome: Outcome.error,
-          ));
+          session.transcript.add(
+            ObservationEntry(
+              text: 'provider error: ${failure.message}',
+              outcome: Outcome.error,
+            ),
+          );
           steps++;
           stalls++;
           continue;
@@ -181,20 +209,25 @@ final class AgentLoop {
       }
       responseWatch.stop();
       timings.add(RunTiming('response', responseWatch.elapsed));
-      _traceResponse('response', response, session, responseWatch.elapsed,
-          step: steps + 1);
+      _traceResponse(
+        'response',
+        response,
+        session,
+        responseWatch.elapsed,
+        step: steps + 1,
+      );
       observer?.onResponse(responseWatch.elapsed);
 
       var planAdvanced = false;
       if (response.plan != null) {
-        final before = session.plan.where((item) => item.done).length;
         session.plan = List<PlanItem>.of(response.plan!);
         planAdvanced =
-            session.plan.where((item) => item.done).length > before;
+            session.plan.where((item) => item.done).length > planDoneBefore;
         diagnostics.event(
-            'C1 loop',
-            'plan updated: ${response.plan!.length} items'
-            '${planAdvanced ? ' (advanced)' : ''}');
+          'C1 loop',
+          'plan updated: ${response.plan!.length} items'
+              '${planAdvanced ? ' (advanced)' : ''}',
+        );
       }
 
       final action = response.action;
@@ -202,8 +235,9 @@ final class AgentLoop {
         diagnostics.event('C1 loop', 'finish: ${brief(action.answer)}');
         // Persist the finished turn so a later goal in the same session reads
         // a complete user/assistant exchange instead of two user turns.
-        session.transcript
-            .add(AssistantEntry(thought: action.answer, action: action));
+        session.transcript.add(
+          AssistantEntry(thought: action.answer, action: action),
+        );
         observer?.onPhase('done');
         return done(RunStatus.complete, answer: action.answer);
       }
@@ -212,16 +246,21 @@ final class AgentLoop {
         // is not a completion: record the empty turn, nudge the model, and
         // count a non-progress step rather than returning an empty `complete`.
         diagnostics.event(
-            'C1 loop',
-            'empty finish; asking for the answer '
-            '(stalls ${stalls + 1}/$kStallBudget)');
-        session.transcript
-            .add(AssistantEntry(thought: action.answer, action: action));
-        session.transcript.add(const ObservationEntry(
-          text: 'your response contained no answer; give the final answer, '
-              'or call a tool',
-          outcome: Outcome.error,
-        ));
+          'C1 loop',
+          'empty finish; asking for the answer '
+              '(stalls ${stalls + 1}/$kStallBudget)',
+        );
+        session.transcript.add(
+          AssistantEntry(thought: action.answer, action: action),
+        );
+        session.transcript.add(
+          const ObservationEntry(
+            text:
+                'your response contained no answer; give the final answer, '
+                'or call a tool',
+            outcome: Outcome.error,
+          ),
+        );
         steps++;
         stalls++;
         continue;
@@ -246,13 +285,14 @@ final class AgentLoop {
       // and this turn is re-appended on top of it (C4).
       final turnStart = session.transcript.length;
       session.transcript.add(
-          AssistantEntry(thought: response.thought, action: ToolBatch(calls)));
+        AssistantEntry(thought: response.thought, action: ToolBatch(calls)),
+      );
       for (final call in calls) {
         observer?.onTool(call.name, call.arguments);
         diagnostics.event(
           'C3 tools',
           'call ${call.name} ${brief(jsonEncode(call.arguments), 100)}'
-          ' (id=${call.id})',
+              ' (id=${call.id})',
         );
       }
 
@@ -270,8 +310,9 @@ final class AgentLoop {
               kReadOnlyTools.contains(calls[i].name)) {
             run.add(i++);
           }
-          final dispatched =
-              await Future.wait([for (final j in run) _dispatch(calls[j], session)]);
+          final dispatched = await Future.wait([
+            for (final j in run) _dispatch(calls[j], session),
+          ]);
           for (var k = 0; k < run.length; k++) {
             results[run[k]] = dispatched[k];
           }
@@ -299,16 +340,22 @@ final class AgentLoop {
         final dispatched = results[k];
         final outcome = dispatched?.outcome;
         if (outcome == null) {
-          final message = dispatched?.timeoutMessage ??
+          final message =
+              dispatched?.timeoutMessage ??
               (session.cancel.isCancelled ? 'cancelled' : 'dispatch skipped');
-          timings.add(RunTiming(
+          timings.add(
+            RunTiming(
               '${calls[k].name} (${dispatched == null ? 'skipped' : 'timeout'})',
-              dispatched?.elapsed ?? Duration.zero));
-          session.transcript.add(ObservationEntry(
-            text: 'tool error: $message',
-            outcome: Outcome.error,
-            toolCallId: calls[k].id,
-          ));
+              dispatched?.elapsed ?? Duration.zero,
+            ),
+          );
+          session.transcript.add(
+            ObservationEntry(
+              text: 'tool error: $message',
+              outcome: Outcome.error,
+              toolCallId: calls[k].id,
+            ),
+          );
           continue;
         }
         timings.add(RunTiming(calls[k].name, dispatched!.elapsed));
@@ -318,22 +365,31 @@ final class AgentLoop {
         );
         // The tool's measured time rides with its result (C2 automate trace).
         if (diagnostics.enabled && diagnostics.traceContent) {
-          diagnostics.event('C3 tools',
-              'timing: ${calls[k].name} ${formatDuration(dispatched.elapsed)}');
+          diagnostics.event(
+            'C3 tools',
+            'timing: ${calls[k].name} ${formatDuration(dispatched.elapsed)}',
+          );
         }
-        observer?.onObservation(outcome.outcome, outcome.text,
-            elapsed: dispatched.elapsed);
-        session.transcript.add(ObservationEntry(
-          text: outcome.text,
-          outcome: outcome.outcome,
-          toolCallId: calls[k].id,
-        ));
+        observer?.onObservation(
+          outcome.outcome,
+          outcome.text,
+          elapsed: dispatched.elapsed,
+        );
+        session.transcript.add(
+          ObservationEntry(
+            text: outcome.text,
+            outcome: outcome.outcome,
+            toolCallId: calls[k].id,
+          ),
+        );
         if (_novel(calls[k], outcome, seen)) {
           novel = true;
         } else if (outcome.outcome == Outcome.ok &&
             context.clearedInLastView(calls[k].name, calls[k].arguments) &&
-            recovered.add('${calls[k].name}\u0000'
-                '${jsonEncode(calls[k].arguments)}')) {
+            recovered.add(
+              '${calls[k].name}\u0000'
+              '${jsonEncode(calls[k].arguments)}',
+            )) {
           // A repeat whose earlier result was cleared to a placeholder (C4)
           // is recovery, not a loop: the model could not see the content it
           // just re-fetched, so the step delivered new information — once
@@ -375,8 +431,11 @@ final class AgentLoop {
       await tools.reapJobs();
       diagnostics.event('C1 loop', 'run cancelled');
       observer?.onPhase('done');
-      return done(RunStatus.incomplete,
-          answer: 'run cancelled', reason: 'cancelled');
+      return done(
+        RunStatus.incomplete,
+        answer: 'run cancelled',
+        reason: 'cancelled',
+      );
     }
     final reason = stalls >= kStallBudget
         ? 'stalled after $steps steps without progress'
@@ -411,23 +470,27 @@ final class AgentLoop {
     observer?.onPhase('compacting');
     String? summary;
     final watch = Stopwatch()..start();
-    _traceRequest(
-        'compaction request', task.prompt, session, _RequestTrace());
+    _traceRequest('compaction request', task.prompt, session, _RequestTrace());
     try {
       final response = await reliability.guardModel(
-          () => provider.complete(task.prompt, cancel: session.cancel));
+        () => provider.complete(task.prompt, cancel: session.cancel),
+      );
       summary = response.thought.trim();
       _traceResponse('compaction response', response, session, watch.elapsed);
     } on Object {
       summary = null;
     }
-    final info =
-        context.applyCompaction(session.transcript, task.through, summary);
+    final info = context.applyCompaction(
+      session.transcript,
+      task.through,
+      summary,
+    );
     diagnostics.event(
-        'C4 context',
-        '${summary == null || summary.isEmpty ? 'local digest' : 'model brief'} '
-        'folded ${info.steps} entries '
-        '(~${info.beforeTokens} -> ~${info.afterTokens} tokens)');
+      'C4 context',
+      '${summary == null || summary.isEmpty ? 'local digest' : 'model brief'} '
+          'folded ${info.steps} entries '
+          '(~${info.beforeTokens} -> ~${info.afterTokens} tokens)',
+    );
     observer?.onCompaction(info.steps, info.beforeTokens, info.afterTokens);
     return info;
   }
@@ -438,25 +501,36 @@ final class AgentLoop {
   /// The header line carries the call's context every time (step, session,
   /// model, ctx used/window/percent, message and tool counts). A no-op unless
   /// diagnostics are enabled with content tracing on.
-  void _traceRequest(String kind, ProviderRequest prompt, Session session,
-      _RequestTrace shown,
-      {int? step}) {
+  void _traceRequest(
+    String kind,
+    ProviderRequest prompt,
+    Session session,
+    _RequestTrace shown, {
+    int? step,
+  }) {
     if (!diagnostics.enabled || !diagnostics.traceContent) return;
     final blocks = [for (final entry in prompt.messages) _entryBlock(entry)];
     final systemChanged = shown.system != prompt.system;
     final common = _commonPrefix(shown.blocks, blocks);
     final fresh = blocks.length - common;
-    diagnostics.event('C2 provider', '── $kind${_stepTag(step)} ── '
-        'session=${session.id} model=${prompt.model}${_ctxTag(step)} '
-        'messages=${blocks.length} new=$fresh tools=${prompt.tools.length}'
-        '${_toolNames(prompt.tools)}${_imageTag(prompt.images)}');
+    diagnostics.event(
+      'C2 provider',
+      '── $kind${_stepTag(step)} ── '
+          'session=${session.id} model=${prompt.model}${_ctxTag(step)} '
+          'messages=${blocks.length} new=$fresh tools=${prompt.tools.length}'
+          '${_toolNames(prompt.tools)}${_imageTag(prompt.images)}',
+    );
     if (systemChanged) {
-      _emitBlock('── system${_tokTag(prompt.system)} ──',
-          _indentBlock(prompt.system));
+      _emitBlock(
+        '── system${_tokTag(prompt.system)} ──',
+        _indentBlock(prompt.system),
+      );
     }
     if (common > 0) {
-      diagnostics.event('C2 provider',
-          '   ($common earlier message${common == 1 ? '' : 's'} unchanged)');
+      diagnostics.event(
+        'C2 provider',
+        '   ($common earlier message${common == 1 ? '' : 's'} unchanged)',
+      );
     }
     shown.system = prompt.system;
     shown.blocks = blocks;
@@ -470,22 +544,33 @@ final class AgentLoop {
   /// C2 trace (automate only): log what the model answered — reasoning,
   /// thought, plan, and the action — with the call's context and its measured
   /// time as an inline `timing:` line.
-  void _traceResponse(String kind, ProviderResponse response, Session session,
-      Duration elapsed,
-      {int? step}) {
+  void _traceResponse(
+    String kind,
+    ProviderResponse response,
+    Session session,
+    Duration elapsed, {
+    int? step,
+  }) {
     if (!diagnostics.enabled || !diagnostics.traceContent) return;
     final action = response.action;
-    diagnostics.event('C2 provider', '── $kind${_stepTag(step)} ── '
-        'session=${session.id} action='
-        '${action is Finish ? 'finish' : 'tool_batch(${action.calls.length})'}'
-        '${_ctxTag(step)}');
+    diagnostics.event(
+      'C2 provider',
+      '── $kind${_stepTag(step)} ── '
+          'session=${session.id} action='
+          '${action is Finish ? 'finish' : 'tool_batch(${action.calls.length})'}'
+          '${_ctxTag(step)}',
+    );
     if (response.reasoning.trim().isNotEmpty) {
-      _emitBlock('── reasoning${_tokTag(response.reasoning)} ──',
-          _indentBlock(response.reasoning));
+      _emitBlock(
+        '── reasoning${_tokTag(response.reasoning)} ──',
+        _indentBlock(response.reasoning),
+      );
     }
     if (action is ToolBatch && response.thought.trim().isNotEmpty) {
       _emitBlock(
-          '── thought${_tokTag(response.thought)} ──', _indentBlock(response.thought));
+        '── thought${_tokTag(response.thought)} ──',
+        _indentBlock(response.thought),
+      );
     }
     if (response.plan != null) {
       final done = response.plan!.where((item) => item.done).length;
@@ -496,17 +581,18 @@ final class AgentLoop {
     }
     switch (action) {
       case Finish(:final answer):
-        _emitBlock(
-            '── finish${_tokTag(answer)} ──', _indentBlock(answer));
+        _emitBlock('── finish${_tokTag(answer)} ──', _indentBlock(answer));
       case ToolBatch(:final calls):
         _emitBlock('── tool_calls ──', [
           for (final call in calls)
             '  ${call.name} ${jsonEncode(call.arguments)}'
-            '${call.id == null ? '' : ' (id=${call.id})'}',
+                '${call.id == null ? '' : ' (id=${call.id})'}',
         ]);
     }
     diagnostics.event(
-        'C2 provider', 'timing: $kind ${formatDuration(elapsed)}');
+      'C2 provider',
+      'timing: $kind ${formatDuration(elapsed)}',
+    );
   }
 
   /// Emit one trace block: its header then its indented body, each line
@@ -521,21 +607,22 @@ final class AgentLoop {
   /// One transcript entry as a trace block: a section header carrying a
   /// token estimate plus the entry's content.
   static String _entryBlock(Entry entry) => switch (entry) {
-        UserEntry(:final text, :final images) => _block(
-            'user${images.isEmpty ? '' : ' (+${images.length} images)'}',
-            _indentBlock(text)),
-        AssistantEntry(:final thought, :final action) => _block('assistant', [
-            ..._indentBlock(thought),
-            for (final call in action.calls)
-              '  call ${call.name} ${jsonEncode(call.arguments)}'
-              '${call.id == null ? '' : ' (id=${call.id})'}',
-          ]),
-        ObservationEntry(:final text, :final outcome, :final toolCallId) =>
-          _block(
-              'observation ${outcome.wire}'
-              '${toolCallId == null ? '' : ' for $toolCallId'}',
-              _indentBlock(text)),
-      };
+    UserEntry(:final text, :final images) => _block(
+      'user${images.isEmpty ? '' : ' (+${images.length} images)'}',
+      _indentBlock(text),
+    ),
+    AssistantEntry(:final thought, :final action) => _block('assistant', [
+      ..._indentBlock(thought),
+      for (final call in action.calls)
+        '  call ${call.name} ${jsonEncode(call.arguments)}'
+            '${call.id == null ? '' : ' (id=${call.id})'}',
+    ]),
+    ObservationEntry(:final text, :final outcome, :final toolCallId) => _block(
+      'observation ${outcome.wire}'
+      '${toolCallId == null ? '' : ' for $toolCallId'}',
+      _indentBlock(text),
+    ),
+  };
 
   static String _block(String label, List<String> body) {
     final joined = body.join('\n');
@@ -562,8 +649,7 @@ final class AgentLoop {
     if (step == null) return '';
     final used = context.lastUsedTokens;
     final window = context.contextWindow;
-    final pct =
-        window <= 0 ? '' : ' (${(used / window * 100).round()}%)';
+    final pct = window <= 0 ? '' : ' (${(used / window * 100).round()}%)';
     return ' ctx ~$used/$window$pct';
   }
 
@@ -590,7 +676,8 @@ final class AgentLoop {
   /// caller credits as recovery, since the model could not see it.
   static bool _novel(ToolCall call, ToolOutcome outcome, Set<String> seen) {
     if (outcome.outcome == Outcome.guardDenied) return false;
-    final key = '${call.name}\u0000${jsonEncode(call.arguments)}\u0000'
+    final key =
+        '${call.name}\u0000${jsonEncode(call.arguments)}\u0000'
         '${outcome.outcome.wire}\u0000${outcome.text}';
     return seen.add(key);
   }
@@ -609,9 +696,10 @@ final class AgentLoop {
     } on StepFailure catch (failure) {
       watch.stop();
       diagnostics.event(
-          'C8 reliability', 'tool timeout; recovering: ${failure.message}');
-      return _Dispatched(null, watch.elapsed,
-          timeoutMessage: failure.message);
+        'C8 reliability',
+        'tool timeout; recovering: ${failure.message}',
+      );
+      return _Dispatched(null, watch.elapsed, timeoutMessage: failure.message);
     }
   }
 
@@ -647,18 +735,24 @@ final class AgentLoop {
         ..addAll(adopted)
         ..addAll(turn);
       diagnostics.event(
-          'C4 context',
-          'CLM: adopted model context edit '
-          '(${adopted.length} entries + ${turn.length} this turn)');
+        'C4 context',
+        'CLM: adopted model context edit '
+            '(${adopted.length} entries + ${turn.length} this turn)',
+      );
     } on FormatException catch (e) {
-      session.transcript.add(ObservationEntry(
-        text: 'context edit ignored (malformed): ${e.message}. '
-            'Your previous context is unchanged; re-read the file before '
-            'editing it again.',
-        outcome: Outcome.error,
-      ));
+      session.transcript.add(
+        ObservationEntry(
+          text:
+              'context edit ignored (malformed): ${e.message}. '
+              'Your previous context is unchanged; re-read the file before '
+              'editing it again.',
+          outcome: Outcome.error,
+        ),
+      );
       diagnostics.event(
-          'C4 context', 'CLM: malformed context edit ignored: ${e.message}');
+        'C4 context',
+        'CLM: malformed context edit ignored: ${e.message}',
+      );
     }
   }
 
@@ -677,12 +771,21 @@ final class AgentLoop {
       try {
         if (observer == null) {
           return await reliability.guardModel(
-              () => provider.complete(prompt, cancel: session.cancel));
+            () => provider.complete(prompt, cancel: session.cancel),
+          );
         }
-        return await provider.complete(prompt,
-            onDelta: observer.onDelta,
-            onReasoning: observer.onReasoning,
-            cancel: session.cancel);
+        return await provider.complete(
+          prompt,
+          onDelta: observer.onDelta,
+          onReasoning: observer.onReasoning,
+          // Mid-call plan updates land on the session at once (C1), so the
+          // header panel advances while the response is still streaming.
+          onPlan: (plan) {
+            session.plan = List<PlanItem>.of(plan);
+            observer.onPlan(session.plan);
+          },
+          cancel: session.cancel,
+        );
       } on StepFailure catch (failure) {
         if (failure.kind != FailureKind.timeout ||
             attempt >= reliability.providerTimeoutRetries) {
@@ -691,10 +794,11 @@ final class AgentLoop {
         attempt++;
         final delay = reliability.backoffFor(attempt);
         diagnostics.event(
-            'C8 reliability',
-            'provider timeout; retrying $attempt/'
-            '${reliability.providerTimeoutRetries} in '
-            '${formatDuration(delay)}: ${failure.message}');
+          'C8 reliability',
+          'provider timeout; retrying $attempt/'
+              '${reliability.providerTimeoutRetries} in '
+              '${formatDuration(delay)}: ${failure.message}',
+        );
         await reliability.sleep(delay);
       }
     }
@@ -712,10 +816,10 @@ final class AgentLoop {
         plan: session.plan,
       );
       final watch = Stopwatch()..start();
-      _traceRequest(
-          'best-effort request', prompt, session, _RequestTrace());
-      final response =
-          await reliability.guardModel(() => provider.complete(prompt));
+      _traceRequest('best-effort request', prompt, session, _RequestTrace());
+      final response = await reliability.guardModel(
+        () => provider.complete(prompt),
+      );
       watch.stop();
       timings.add(RunTiming('response (best-effort)', watch.elapsed));
       _traceResponse('best-effort response', response, session, watch.elapsed);
@@ -737,8 +841,10 @@ final class AgentLoop {
     final observations = session.transcript.whereType<ObservationEntry>();
     if (observations.isNotEmpty) {
       final last = observations.last.text.trim();
-      parts.add('Last observation: '
-          '${last.length > 200 ? '${last.substring(0, 200)}...' : last}');
+      parts.add(
+        'Last observation: '
+        '${last.length > 200 ? '${last.substring(0, 200)}...' : last}',
+      );
     }
     return parts.isEmpty ? 'no answer' : parts.join(' ');
   }

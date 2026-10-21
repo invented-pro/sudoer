@@ -34,8 +34,7 @@ final class ScriptedProvider implements Provider {
     for (final raw in (json['steps'] as List? ?? const [])) {
       final step = (raw as Map).cast<String, dynamic>();
       if (step.containsKey('complete')) {
-        final completion =
-            (step['complete'] as Map).cast<String, dynamic>();
+        final completion = (step['complete'] as Map).cast<String, dynamic>();
         final toolCalls = <ToolCall>[
           for (final call in (completion['tool_calls'] as List? ?? const []))
             ToolCall.fromJson((call as Map).cast<String, dynamic>()),
@@ -47,18 +46,24 @@ final class ScriptedProvider implements Provider {
                 for (final item in planRaw)
                   PlanItem.fromJson((item as Map).cast<String, dynamic>()),
               ];
-        steps.add(CompleteStep(Completion(
-          text: completion['text'] as String? ?? '',
-          toolCalls: toolCalls,
-          plan: plan,
-          reasoning: completion['reasoning'] as String? ?? '',
-        )));
+        steps.add(
+          CompleteStep(
+            Completion(
+              text: completion['text'] as String? ?? '',
+              toolCalls: toolCalls,
+              plan: plan,
+              reasoning: completion['reasoning'] as String? ?? '',
+            ),
+          ),
+        );
       } else if (step.containsKey('error')) {
-        steps.add(ErrorStep(
-          step['error'] == 'timeout'
-              ? FailureKind.timeout
-              : FailureKind.unrecoverable,
-        ));
+        steps.add(
+          ErrorStep(
+            step['error'] == 'timeout'
+                ? FailureKind.timeout
+                : FailureKind.unrecoverable,
+          ),
+        );
       }
     }
     return ScriptedProvider(steps);
@@ -69,6 +74,7 @@ final class ScriptedProvider implements Provider {
     ProviderRequest request, {
     void Function(String delta)? onDelta,
     void Function(String delta)? onReasoning,
+    void Function(List<PlanItem> plan)? onPlan,
     CancelSignal? cancel,
   }) async {
     if (cancel?.isCancelled ?? false) {
@@ -80,16 +86,21 @@ final class ScriptedProvider implements Provider {
     final step = steps[_index++];
     return switch (step) {
       CompleteStep(:final completion) => () {
-          if (onReasoning != null && completion.reasoning.isNotEmpty) {
-            onReasoning(completion.reasoning);
-          }
-          if (onDelta != null && completion.text.isNotEmpty) {
-            onDelta(completion.text);
-          }
-          return parseCompletion(completion);
-        }(),
-      ErrorStep(:final kind) =>
-        throw StepFailure(kind, 'simulated ${kind.name}'),
+        if (onReasoning != null && completion.reasoning.isNotEmpty) {
+          onReasoning(completion.reasoning);
+        }
+        if (onDelta != null && completion.text.isNotEmpty) {
+          onDelta(completion.text);
+        }
+        if (onPlan != null && completion.plan != null) {
+          onPlan(completion.plan!);
+        }
+        return parseCompletion(completion);
+      }(),
+      ErrorStep(:final kind) => throw StepFailure(
+        kind,
+        'simulated ${kind.name}',
+      ),
     };
   }
 }

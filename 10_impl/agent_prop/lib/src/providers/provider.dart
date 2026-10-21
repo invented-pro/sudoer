@@ -17,10 +17,16 @@ abstract class Provider {
   /// When [cancel] is supplied the adapter races it: a user cancel aborts the
   /// in-flight HTTP request and response stream at once and the call fails
   /// with a cancelled `StepFailure` (C8).
+  ///
+  /// When [onPlan] is supplied it is invoked with the plan parsed so far as
+  /// soon as it changes during streaming (C1/C2) — even while the plan block
+  /// is still arriving — so a live surface can repaint its progress area
+  /// before the response completes.
   Future<ProviderResponse> complete(
     ProviderRequest request, {
     void Function(String delta)? onDelta,
     void Function(String delta)? onReasoning,
+    void Function(List<PlanItem> plan)? onPlan,
     CancelSignal? cancel,
   });
 }

@@ -40,15 +40,14 @@ ParsedGoal parseGoal(String raw) {
       throw FormatException('attachment not found: $path');
     }
     if (!kImageExtensions.contains(p.extension(path).toLowerCase())) {
-      throw FormatException('attachment is not an image '
-          '(${kImageExtensions.join(', ')}): $path');
+      throw FormatException(
+        'attachment is not an image '
+        '(${kImageExtensions.join(', ')}): $path',
+      );
     }
     images.add(ImageAttachment(path: path, bytes: file.readAsBytesSync()));
   }
-  return ParsedGoal(
-    normalizeToText(textWords.join(' ')),
-    images,
-  );
+  return ParsedGoal(normalizeToText(textWords.join(' ')), images);
 }
 
 /// Like [parseGoal], but reports failure through the return value.

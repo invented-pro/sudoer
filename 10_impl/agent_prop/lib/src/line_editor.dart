@@ -38,12 +38,45 @@ enum KeyKind {
   esc,
   ctrlC,
   ctrlD,
+  ctrlG,
+  ctrlL,
+  ctrlN,
+  ctrlP,
+  ctrlS,
   tab,
+  mouse,
   other,
 }
 
+/// What a mouse report means: a button went down, came up, or dragged.
+enum MouseAction { press, release, motion }
+
+/// One decoded mouse report (C6): which button or wheel notch ([button]
+/// uses the terminal's encoding — 0–2 are buttons, 64–67 are wheel
+/// up/down/left/right), the 1-based cell it happened at, and the action.
+final class MousePointer {
+  const MousePointer({
+    required this.button,
+    required this.x,
+    required this.y,
+    required this.action,
+  });
+
+  final int button;
+  final int x;
+  final int y;
+  final MouseAction action;
+}
+
 final class Key {
-  const Key(this.kind, [this.rune = 0, this.text = '']);
+  const Key(this.kind, [this.rune = 0, this.text = '', this.mouse]);
+
+  /// A decoded mouse report; set only when [kind] is [KeyKind.mouse].
+  Key.mouse(this.mouse)
+    : kind = KeyKind.mouse,
+      rune = 0,
+      text = '';
+
   final KeyKind kind;
   final int rune;
 
@@ -52,12 +85,15 @@ final class Key {
   /// a large paste redraws once instead of once per character.
   final String text;
 
+  /// Mouse payload, set only when [kind] is [KeyKind.mouse].
+  final MousePointer? mouse;
+
   @override
   String toString() => kind == KeyKind.rune
       ? 'rune(${String.fromCharCode(rune)})'
       : kind == KeyKind.paste
-          ? 'paste(${text.length})'
-          : kind.name;
+      ? 'paste(${text.length})'
+      : kind.name;
 }
 
 /// Decodes {@code input} into key events on [keys]. One background
@@ -77,8 +113,7 @@ final class KeyReader {
   }
 
   final Duration escTimeout;
-  final StreamController<Key> _controller =
-      StreamController<Key>.broadcast();
+  final StreamController<Key> _controller = StreamController<Key>.broadcast();
   late final StreamSubscription<List<int>> _subscription;
   final List<int> _buffer = [];
   Timer? _escTimer;
@@ -246,6 +281,12 @@ final class KeyReader {
           return _consume(4, const Key(KeyKind.pageDown));
         }
         break;
+      // SGR mouse report (1006): `ESC [ < b ; x ; y M|m`.
+      case 0x3C:
+        return _takeSgrMouse();
+      // X10 mouse report (1000): `ESC [ M Cb Cx Cy`.
+      case 0x4D:
+        return _takeX10Mouse();
     }
     // Kitty keyboard: Shift+Enter is CSI 13;2u. Terminals that negotiate
     // modified keys send this; plain Enter remains CR/LF above.
@@ -280,6 +321,47 @@ final class KeyReader {
     return null;
   }
 
+  /// Decode an SGR mouse report (1006): `ESC [ < b ; x ; y M|m`. Waits for
+  /// the final byte so a report split across reads stays whole.
+  Key? _takeSgrMouse() {
+    final down = _buffer.indexOf(0x4D, 3);
+    final up = _buffer.indexOf(0x6D, 3);
+    final end = down >= 0 && (up < 0 || down < up) ? down : up;
+    if (end < 0) return null;
+    final param = String.fromCharCodes(_buffer.sublist(3, end));
+    final parts = param.split(';');
+    final b = int.tryParse(parts.first) ?? 0;
+    final x = parts.length > 1 ? int.tryParse(parts[1]) ?? 1 : 1;
+    final y = parts.length > 2 ? int.tryParse(parts[2]) ?? 1 : 1;
+    _buffer.removeRange(0, end + 1);
+    final action = b & 32 != 0
+        ? MouseAction.motion
+        : end == up
+        ? MouseAction.release
+        : MouseAction.press;
+    return Key.mouse(
+      MousePointer(button: b & 67, x: x, y: y, action: action),
+    );
+  }
+
+  /// Decode an X10 mouse report (1000): `ESC [ M Cb Cx Cy`, each payload
+  /// byte offset by 32. Terminals without SGR still report this way.
+  Key? _takeX10Mouse() {
+    if (_buffer.length < 6) return null;
+    final b = _buffer[3] - 32;
+    final x = _buffer[4] - 32;
+    final y = _buffer[5] - 32;
+    _buffer.removeRange(0, 6);
+    final action = b & 32 != 0
+        ? MouseAction.motion
+        : (b & 3) == 3
+        ? MouseAction.release
+        : MouseAction.press;
+    return Key.mouse(
+      MousePointer(button: b & 67, x: x, y: y, action: action),
+    );
+  }
+
   Key? _takePlain() {
     final b = _buffer.first;
     switch (b) {
@@ -293,6 +375,18 @@ final class KeyReader {
         return _consume(1, const Key(KeyKind.ctrlC));
       case 4:
         return _consume(1, const Key(KeyKind.ctrlD));
+      // Crush-style TUI shortcuts (C6): the full-screen app binds these to
+      // its pickers and palette; the inline surface ignores them.
+      case 7:
+        return _consume(1, const Key(KeyKind.ctrlG));
+      case 12:
+        return _consume(1, const Key(KeyKind.ctrlL));
+      case 14:
+        return _consume(1, const Key(KeyKind.ctrlN));
+      case 16:
+        return _consume(1, const Key(KeyKind.ctrlP));
+      case 19:
+        return _consume(1, const Key(KeyKind.ctrlS));
     }
     if (b < 0x20) return _consume(1, const Key(KeyKind.other));
     if (b < 0x80) return _consume(1, Key(KeyKind.rune, b));
@@ -363,13 +457,9 @@ final class DoubleEsc {
 enum EditKind { pending, submit, eof }
 
 final class EditResult {
-  const EditResult.pending()
-      : kind = EditKind.pending,
-        text = '';
+  const EditResult.pending() : kind = EditKind.pending, text = '';
   const EditResult.submit(this.text) : kind = EditKind.submit;
-  const EditResult.eof()
-      : kind = EditKind.eof,
-        text = '';
+  const EditResult.eof() : kind = EditKind.eof, text = '';
 
   final EditKind kind;
   final String text;
@@ -380,8 +470,11 @@ final class EditResult {
 /// marks and zero-width controls, 1 otherwise. A compiled-in approximation of
 /// East Asian Width, not a full Unicode mapping (ZWJ emoji sequences still
 /// count one cell per base rune).
-int runeWidth(int rune) =>
-    _inRanges(rune, _zeroWidth) ? 0 : _inRanges(rune, _wide) ? 2 : 1;
+int runeWidth(int rune) => _inRanges(rune, _zeroWidth)
+    ? 0
+    : _inRanges(rune, _wide)
+    ? 2
+    : 1;
 
 /// Total terminal cell width of [runes]. An emoji variation selector after a
 /// narrow base counts one extra cell: the cluster renders as a wide emoji.
@@ -615,6 +708,12 @@ final class LineEditor {
       case KeyKind.pageDown:
       case KeyKind.esc:
       case KeyKind.tab:
+      case KeyKind.mouse:
+      case KeyKind.ctrlG:
+      case KeyKind.ctrlL:
+      case KeyKind.ctrlN:
+      case KeyKind.ctrlP:
+      case KeyKind.ctrlS:
       case KeyKind.other:
         break;
     }
@@ -625,8 +724,7 @@ final class LineEditor {
   EditResult _enter() {
     final current = String.fromCharCodes(_lines[_line]);
     if (current.endsWith('\\')) {
-      _lines[_line] =
-          current.substring(0, current.length - 1).runes.toList();
+      _lines[_line] = current.substring(0, current.length - 1).runes.toList();
       _lines.add([]);
       _line++;
       _col = 0;
