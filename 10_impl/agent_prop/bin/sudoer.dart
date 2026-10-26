@@ -165,6 +165,15 @@ Future<void> main(List<String> args) async {
     exit(0);
   }
 
+  final goal = results.rest.join(' ').trim();
+  final interactive = stdin.hasTerminal && stdout.hasTerminal;
+  // One broadcast view of stdin, created only when the first-run wizard runs
+  // in this process. dart_tui's prompts must not subscribe raw stdin (it is
+  // single-subscription and dart_tui caches its own adapter), or the REPL's
+  // KeyReader would fail with "Stream has already been listened to" once the
+  // wizard finishes and the session starts.
+  Stream<List<int>>? sharedStdin;
+
   // A provider flag is enough to run without a config: the preset supplies
   // kind, base URL, and context window.
   Config? baseConfig;
@@ -176,8 +185,45 @@ Future<void> main(List<String> args) async {
       exit(2);
     }
   } else if (providerArg == null) {
-    stderr.write(missingConfigReport(configPath));
-    exit(2);
+    // First run: with no config and no --provider, an interactive terminal
+    // drops into the provider setup wizard (the "provider page") so a fresh
+    // machine is configured in place, then continues with the config it
+    // wrote. Scripts, pipes, and catalog listings keep the plain report.
+    if (autoSetupForMissingConfig(
+      interactive: interactive,
+      automate: results['automate'] as bool,
+      listModels: results['list-models'] as bool,
+    )) {
+      stderr
+        ..writeln('no config at $configPath — opening provider setup')
+        ..writeln('(Esc or Ctrl+C cancels back to this message)');
+      sharedStdin = stdin.asBroadcastStream();
+      final code = await runProviderSetup(
+        configPath: configPath,
+        presetId: providerArg,
+        model: modelArg,
+        apiKey: apiKeyArg,
+        baseUrl: baseUrlArg,
+        contextWindow: contextWindowArg,
+        nextStep: goal.isEmpty ? 'Starting the session…' : 'Running the goal…',
+        stdinStream: sharedStdin,
+      );
+      if (code != 0) {
+        // Cancelled or rejected input: the config is still missing, so the
+        // manual path (sample config) stays on stderr.
+        stderr.write(missingConfigReport(configPath));
+        exit(2);
+      }
+      try {
+        baseConfig = loadConfigFile(configPath);
+      } on ConfigException catch (e) {
+        stderr.writeln('config error: ${e.message}');
+        exit(2);
+      }
+    } else {
+      stderr.write(missingConfigReport(configPath));
+      exit(2);
+    }
   }
 
   final Config config;
@@ -235,9 +281,7 @@ Future<void> main(List<String> args) async {
     exit(2);
   }
 
-  final goal = results.rest.join(' ').trim();
   final verbose = results['verbose'] as bool;
-  final interactive = stdin.hasTerminal && stdout.hasTerminal;
   // Human is the default on a terminal; --automate (or a pipe/redirect)
   // selects the plain line path so scripts and the gate never hang.
   final human = chooseMode(
@@ -318,7 +362,10 @@ Future<void> main(List<String> args) async {
       final outcome = await runRepl(
         config: config,
         input: stdin.transform(utf8.decoder).transform(const LineSplitter()),
-        rawInput: stdin,
+        // After the first-run wizard, the shared broadcast stream is the
+        // process's one stdin subscription; otherwise raw stdin is still
+        // untouched and cheaper.
+        rawInput: sharedStdin ?? stdin,
         interactive: interactive,
         tui: useTui,
         session: session,
@@ -371,6 +418,7 @@ void _printUsage(ArgParser parser, {IOSink? to}) {
     ..writeln('"api_key": "\$OPENAI_API_KEY". An unset variable is an error.')
     ..writeln()
     ..writeln('Examples:')
+    ..writeln('  sudoer-prop                          # first run: setup opens')
     ..writeln('  sudoer-prop --setup                 # provider + key + model')
     ..writeln('  sudoer-prop --list-providers')
     ..writeln('  sudoer-prop --list-models --provider ollama')

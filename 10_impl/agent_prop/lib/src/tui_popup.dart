@@ -245,6 +245,18 @@ final class TuiPopup {
     if (available < 3) return frameContent;
     final shown = rows.length.clamp(1, maxRows.clamp(1, available - 2));
 
+    // The drawn window can be narrower than the caller's [maxRows] (a short
+    // transcript leaves less room), while key handling scrolls with the
+    // [maxRows] field. Sync the field to what is actually drawn and keep the
+    // cursor inside the window, so the row indicator can never move onto a
+    // row this box does not render (C6: the `/` completion menu).
+    this.maxRows = shown;
+    if (cursor < scroll) scroll = cursor;
+    if (cursor >= scroll + shown) {
+      scroll = (cursor - shown + 1).clamp(0, rows.length - 1);
+    }
+    scroll = scroll.clamp(0, (rows.length - shown).clamp(0, rows.length));
+
     var contentWidth = 10;
     for (final row in rows.take(shown)) {
       final w =

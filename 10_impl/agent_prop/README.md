@@ -122,6 +122,10 @@ full-screen, and the key/text fields accept a paste. The provider chooser is
 searchable (type to filter) because the catalog tracks the full
 OpenAI-compatible models.dev set. `--login` is an alias.
 
+You rarely need the flag: with no config on a terminal, `sudoer-prop` opens
+this same wizard by itself (see the CLI bullets below), then continues into
+the session with the config it wrote.
+
 Or write a config by hand. The smallest form names a preset and a model;
 `kind`, `base_url`, and `context_window` come from the built-in catalog
 (`--list-providers`):
@@ -384,8 +388,8 @@ Built-in commands (both surfaces):
 | `/resume <id>` | switch to a saved session (picker popup in the TUI) |
 | `/plan` | print the current plan (popup in the TUI) |
 | `/status` | print the session status |
-| `/provider [id]` | list the provider presets, or switch the active provider (filterable picker popup in the TUI) |
-| `/model [id]` | list the current provider's models, or switch model (filterable picker popup in the TUI) |
+| `/provider [id]` | list the provider presets, or switch the active provider (filterable picker popup in the TUI); a keyed preset prompts for its key — empty keeps the current one, so re-selecting the active preset rotates its key |
+| `/model [id]` | list the current provider's models, or switch model (filterable picker popup in the TUI); recently used provider/model pairs are offered first — picking one switches provider and model together |
 | `/context [harness\|clm]` | show or switch the context strategy (and live file) |
 | `/diff [path]` | show the workspace's changes against the session baseline |
 | `/cancel` | cancel the in-flight run (automate surface; `Esc` on human surfaces) |
@@ -402,9 +406,23 @@ mise exec -- dart run bin/sudoer.dart -c /path/to/config.json \
 - On the automate surface, answers go to **stdout**; diagnostics, plan, and
   status to **stderr**. The human surfaces render those into the transcript
   and footer.
+- Output never blocks input in the TUI: while a run streams, read-only
+  commands (`/status`, `/help`, `/plan`, `/diff`, `/verbose`) and the
+  provider/model switches (`/provider`, `/model`, `/rekey`) answer at once —
+  a switch applies mid-run without aborting the stream (the live run keeps
+  its retired transport until it ends). Goals and `!` lines queue as before
+  (the footer shows the queue depth), and so does a session resume.
+- Recently used provider/model pairs are kept in
+  `~/.config/sudoer/recent.json` (capped, most recent first) and offered at
+  the top of the `/model` picker; picking a cross-provider pair switches
+  both at once.
 - `--config` / `-c` defaults to `$SUDOER_CONFIG`, then
   `~/.config/sudoer/config.json` (`$SUDOER_HOME` moves the whole app dir;
   the dir and its `sessions/` sub-directory are created on first start).
+- A first run with no config opens the setup wizard on a terminal (the
+  provider page) and continues with the config it wrote; `--automate`,
+  `--list-models`, and piped stdin/stdout keep the missing-config report
+  instead, so scripts and the gate never hang.
 - `--automate` forces the plain surface; `--human` forces the styled surface;
   `--inline` uses the scrollback line editor instead of the full-screen TUI;
   `--verbose` emits per-step events.

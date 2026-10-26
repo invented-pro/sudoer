@@ -50,11 +50,14 @@ import 'providers/scripted.dart';
 import 'providers/setup.dart'
     show
         formatContextWindow,
+        keyPromptNote,
         modelListText,
+        providerKeyState,
         providerListText,
         providerPopupItems,
-        shouldPromptForKey;
+        shouldOfferKeyEntry;
 import 'reliability.dart';
+import 'recent.dart';
 import 'session.dart';
 import 'tools/job.dart';
 import 'tui_console.dart';
@@ -321,6 +324,9 @@ final class _Repl {
       traceContent: !human,
     );
     agent = _build();
+    // The configured pair counts as used (C2): recents start with what this
+    // session launched with, not empty.
+    _recordRecent();
   }
 
   /// Mutable so a session-level command (`/workspace`, `/context`, or a
@@ -339,6 +345,16 @@ final class _Repl {
   /// API key) and resolve with the entered value, or null when skipped. The
   /// value never reaches the transcript or the config file.
   Future<String?> Function(TuiPrompt prompt)? showTuiPrompt;
+
+  /// Set by the TUI while a model turn streams (C6): a picker opened mid-run
+  /// resolves its switch as a command line queued for the end of the turn —
+  /// the UI responds immediately, the state change lands when the run ends.
+  /// Null means apply at once (no run in flight).
+  void Function(String line)? deferCommand;
+
+  /// The provider/model pairs actually used (C2): feeds the recents section
+  /// of the `/model` picker across sessions.
+  final RecentModels recents = RecentModels();
 
   /// Rebuilt on `/provider` and `/model`; kept in sync with
   /// [providerFactory].
@@ -381,11 +397,56 @@ final class _Repl {
 
   /// C2/C6: rebuild the provider and the agent after `/provider` or `/model`,
   /// releasing the replaced adapter's transport.
+  /// Provider/model pairs and goals in flight. A goal captures its agent at
+  /// `run`, so a mid-run switch only affects later runs — but the previous
+  /// provider must not be closed under a live stream.
+  int _liveModelRuns = 0;
+
+  /// Providers replaced while a run was still streaming on them; closed when
+  /// the last live run ends (C2/C6: a switch must never abort the run in
+  /// flight).
+  final List<ClosableProvider> _retiredProviders = [];
+
   void _rebuildProvider() {
     final previous = provider;
     provider = providerFactory(config.provider);
-    if (previous is ClosableProvider) (previous as ClosableProvider).close();
+    if (previous is ClosableProvider) {
+      if (_liveModelRuns > 0) {
+        _retiredProviders.add(previous as ClosableProvider);
+      } else {
+        (previous as ClosableProvider).close();
+      }
+    }
     agent = _build();
+    // Every provider/model switch funnels through here (C2): record the pair
+    // now in effect so the `/model` picker can offer it back later.
+    _recordRecent();
+  }
+
+  /// Close providers retired by mid-run switches once no run streams on
+  /// them anymore (C2/C6).
+  void _closeRetiredProviders() {
+    if (_liveModelRuns > 0 || _retiredProviders.isEmpty) return;
+    for (final retired in _retiredProviders) {
+      retired.close();
+    }
+    _retiredProviders.clear();
+  }
+
+  /// Record the current provider/model pair as used (C2). A legacy explicit
+  /// provider with no matching preset records nothing — there is no stable
+  /// preset id to switch back to.
+  /// Record the current provider/model pair as used (C2). Only the TUI
+  /// records: the picker is the only reader, and non-TUI surfaces (automate,
+  /// the gate, scripts) stay free of home-directory writes.
+  void _recordRecent() {
+    if (!tui) return;
+    // A legacy explicit provider maps to a fallback preset (custom), which
+    // is still a stable, switchable combo.
+    final preset =
+        config.provider.preset ?? presetForConfig(config.provider).id;
+    if (preset.isEmpty) return;
+    recents.record(preset, config.provider.model);
   }
 
   Future<ReplOutcome> start({
@@ -456,7 +517,12 @@ final class _Repl {
   /// Dispatch one submitted TUI turn. The caller has already echoed the user
   /// line; this mirrors the inline path's command/goal/shell split and returns
   /// false when the session should close.
-  Future<bool> submitTui(String line) async {
+  ///
+  /// [deferApply] is set when a model turn is still streaming (C6): a
+  /// session picker's resume queues for the end of the turn; provider and
+  /// model pickers apply at once (their replaced transport retires when the
+  /// run ends, C2).
+  Future<bool> submitTui(String line, {bool deferApply = false}) async {
     final trimmed = line.trim();
     if (trimmed.isEmpty) return true;
     if (trimmed.startsWith('!')) {
@@ -475,7 +541,7 @@ final class _Repl {
       }
       // The selection commands open popups on the TUI surface (C6); the
       // inline and automate surfaces keep their line listings.
-      if (await _tuiModal(trimmed)) return true;
+      if (await _tuiModal(trimmed, deferApply: deferApply)) return true;
       return _command(trimmed);
     }
     final embedded = embeddedCommand(line);
@@ -697,8 +763,24 @@ final class _Repl {
     }.contains(parts.first);
   }
 
+  /// True for lines the TUI may dispatch while a model turn is still
+  /// streaming (C6): read-only commands, UI popups, and the live-safe
+  /// provider/model switches (see [kImmediateCommands]) — output must not
+  /// block input. Everything else (a goal, a shell line, a command that
+  /// mutates the session or its run) queues until the turn ends.
+  bool runsImmediately(String line) {
+    final trimmed = line.trim();
+    if (!trimmed.startsWith('/')) return false;
+    return kImmediateCommands.contains(
+      trimmed.split(RegExp(r'\s+')).first,
+    );
+  }
+
   /// Handle the popup commands; returns true when the line was consumed.
-  Future<bool> _tuiModal(String line) async {
+  /// With [deferApply] a session picker's resume is queued for the end of
+  /// the streaming turn (C6); provider and model pickers always apply at
+  /// once — the replaced transport retires when the run ends (C2).
+  Future<bool> _tuiModal(String line, {bool deferApply = false}) async {
     if (!isTuiModal(line)) return false;
     switch (line.trim().split(RegExp(r'\s+')).first) {
       case '/provider':
@@ -707,7 +789,7 @@ final class _Repl {
         await _pickModel();
       case '/sessions':
       case '/resume':
-        await _pickSession();
+        await _pickSession(deferApply: deferApply);
       case '/help':
         await showTuiPopup!(
           TuiPopup(
@@ -741,10 +823,27 @@ final class _Repl {
     return true;
   }
 
+  /// Run [apply] now, or queue [line] for the end of the turn when the TUI
+  /// deferred because a run is streaming (C6). Only a session resume defers:
+  /// provider/model switches retire the old transport instead, so they apply
+  /// at once (C2).
+  void _applyOrDefer(String line, void Function() apply) {
+    final defer = deferCommand;
+    if (defer != null) {
+      defer(line);
+      console.info('queued after this run: $line');
+    } else {
+      apply();
+    }
+  }
+
   /// C2/C6: the `/provider` popup — every preset, filterable, with the key
-  /// state (never a value) as the detail column. Choosing a preset whose key
-  /// is missing prompts for it (masked) before the switch applies; cancelling
-  /// the picker changes nothing.
+  /// state (never a value) as the detail column. Every key-requiring preset
+  /// prompts for its key (masked): required when none resolves, offered as a
+  /// replacement when one already does — so re-selecting the preset in
+  /// effect rotates its key. Cancelling the picker changes nothing. A switch
+  /// applies at once even mid-run: the live run keeps its provider and the
+  /// replaced one is retired when the stream ends.
   Future<void> _pickProvider() async {
     final picked = await showTuiPopup!(
       TuiPopup(
@@ -753,47 +852,103 @@ final class _Repl {
       ),
     );
     if (picked == null) return;
-    await _maybeAskProviderKey(picked);
+    final rekeyed = await _maybeAskProviderKey(picked);
+    if (rekeyed && picked == config.provider.preset) {
+      // Re-keying the provider already in effect: the rebuild above applied
+      // it; there is no switch to perform.
+      return;
+    }
     _providerCommand(picked);
   }
 
-  /// C2/C6: prompt for the key a provider switch needs but cannot resolve
-  /// (config, auth store, env). Enter validates and stores a good key in the
-  /// auth store, so the switch lands ready to call; Esc or an empty Enter
-  /// skips — the switch still applies and the usual missing-key hint shows,
-  /// because a switch is never fatal. The entered value is masked while
-  /// typing and never echoed afterwards.
-  Future<void> _maybeAskProviderKey(String presetId) async {
+  /// C2/C6: prompt for the key after a provider pick. Every key-requiring
+  /// preset is offered entry: required when no key resolves (config, auth
+  /// store, env) and offered as a replacement when one already does, so a
+  /// stored key — or the preset already in effect, re-selected — can be
+  /// changed without leaving the session. Enter validates and stores a good
+  /// key in the auth store (a config literal is dropped for this session,
+  /// which the store then outranks); Esc or an empty Enter keeps the key
+  /// already in place. The value is masked while typing and never echoed
+  /// afterwards. Returns true when a new key was stored and applied.
+  Future<bool> _maybeAskProviderKey(String presetId) async {
     final ask = showTuiPrompt;
-    if (ask == null) return;
     final preset = providerPreset(presetId);
-    if (preset == null ||
-        !shouldPromptForKey(preset, current: config.provider)) {
-      return;
+    if (ask == null || preset == null || !shouldOfferKeyEntry(preset)) {
+      return false;
     }
+    final state = providerKeyState(
+      preset,
+      current: config.provider,
+      storedKeys: AuthStore().read(),
+    );
     final entered = await ask(
       TuiPrompt(
         title: 'API key for ${preset.name}',
-        note: 'stored in the auth store; never echoed',
+        note: keyPromptNote(state),
       ),
     );
     final key = entered?.trim();
-    if (key == null || key.isEmpty) return; // skipped: switch without a key
+    if (key == null || key.isEmpty) return false; // keep what resolves today
     final problem = apiKeyProblem(key);
     if (problem != null) {
       console.error('invalid API key: $problem');
-      return;
+      return false;
     }
     try {
       AuthStore().setKey(preset.id, key);
       console.info('key stored for ${preset.id} (auth store)');
     } on Object catch (e) {
       console.error('cannot store key: ${e.runtimeType}');
+      return false;
     }
+    if (state == 'config') {
+      // A config literal outranks the store: clear it for this session so
+      // the key just stored is the one used. The config file on disk is
+      // untouched (a `/provider` switch is session-only).
+      final previous = config.provider;
+      config = config.copyWith(
+        provider: ProviderConfig(
+          kind: previous.kind,
+          model: previous.model,
+          contextWindow: previous.contextWindow,
+          preset: previous.preset,
+          baseUrl: previous.baseUrl,
+          apiKeyEnv: previous.apiKeyEnv,
+          sampling: previous.sampling,
+        ),
+      );
+    }
+    if (preset.id == config.provider.preset) {
+      // Re-keyed the provider in effect: rebuild it so calls use the new key
+      // now instead of at the next provider switch. The live run (if any)
+      // keeps streaming on the retired transport (C2/C6).
+      _rekeyCommand(preset.id);
+    }
+    return true;
   }
 
-  /// C2/C6: the `/model` popup for the current provider's catalog. A preset
-  /// with no catalog falls back to the listing text.
+  /// Hidden `/rekey <id>`: rebuild the provider in effect so a newly stored
+  /// key is used. The `/provider` picker queues this while a run streams;
+  /// with no argument it rebuilds whatever is in effect.
+  void _rekeyCommand(String? argument) {
+    final id = argument ?? config.provider.preset;
+    if (id == null || providerPreset(id) == null) {
+      console.error('unknown provider: $id');
+      return;
+    }
+    if (id != config.provider.preset) {
+      console.error('$id is not in effect; use /provider $id');
+      return;
+    }
+    _rebuildProvider();
+    console.info('provider rebuilt with the new key: $id');
+  }
+
+  /// C2/C6: the `/model` popup — recently used provider/model pairs first
+  /// (the cross-provider combos the catalog cannot offer), then the current
+  /// provider's catalog. A preset with no catalog falls back to the listing
+  /// text. A pick applies at once even mid-run: the live run keeps its
+  /// provider and the replaced one is retired when the stream ends.
   Future<void> _pickModel() async {
     final preset =
         providerPreset(config.provider.preset) ??
@@ -805,22 +960,32 @@ final class _Repl {
     final picked = await showTuiPopup!(
       TuiPopup(
         title: 'Model · ${preset.id}',
-        items: [
-          for (final model in preset.models)
-            TuiPopupItem(
-              value: model.id,
-              label: model.id,
-              detail: formatContextWindow(model.contextWindow),
-              active: model.id == config.provider.model,
-            ),
-        ],
+        items: modelPopupItems(
+          current: config.provider,
+          catalog: preset.models,
+          recents: recents.read(),
+        ),
       ),
     );
-    if (picked != null) _modelCommand(picked);
+    if (picked == null) return;
+    final recent = recentFromPopupValue(picked);
+    if (recent == null) {
+      _modelCommand(picked);
+      return;
+    }
+    if (recent.preset == preset.id) {
+      // A model of the provider already in effect: one switch.
+      _modelCommand(recent.model);
+      return;
+    }
+    // A cross-provider combo: switch the preset, then the model.
+    _providerCommand(recent.preset);
+    _modelCommand(recent.model);
   }
 
-  /// C6: the `/sessions` / `/resume` popup; Enter resumes the chosen session.
-  Future<void> _pickSession() async {
+  /// C6: the `/sessions` / `/resume` popup; Enter resumes the chosen session
+  /// (queued for the end of the turn when a run streams).
+  Future<void> _pickSession({bool deferApply = false}) async {
     final ids = Session.list(config.sessionDir);
     if (ids.isEmpty) {
       console.info('no sessions');
@@ -835,7 +1000,9 @@ final class _Repl {
         ],
       ),
     );
-    if (picked != null) _resumeSession(picked);
+    if (picked != null) {
+      _applyOrDefer('/resume $picked', () => _resumeSession(picked));
+    }
   }
 
   /// C6: switch to a saved session, rebuilding the agent and replaying the
@@ -998,6 +1165,7 @@ final class _Repl {
     if (parsed == null) return null;
     final observer = human ? _CliObserver(console) : null;
     final RunResult result;
+    _liveModelRuns++;
     try {
       result = await agent.run(
         RunRequest(parsed.text, images: parsed.images),
@@ -1021,6 +1189,11 @@ final class _Repl {
       if (human) console.stopThinking();
       exitCode = 1;
       return null;
+    } finally {
+      // A mid-run `/model` or `/provider` switch replaced the provider this
+      // run streams on; retire it only now that the stream is done.
+      _liveModelRuns--;
+      _closeRetiredProviders();
     }
     runs.add(result);
     // Any non-`complete` final run makes the process exit non-zero (C6);
@@ -1150,6 +1323,10 @@ final class _Repl {
         _providerCommand(argument);
       case '/model':
         _modelCommand(argument);
+      case '/rekey':
+        // Hidden (not in /help or completions): the `/provider` picker queues
+        // this while a run streams.
+        _rekeyCommand(argument);
       case '/workspace':
         if (argument == null) {
           console.info(workspaceRoot);
@@ -1173,6 +1350,73 @@ final class _Repl {
     }
     return true;
   }
+}
+
+/// Commands the TUI dispatches at once even while a model turn streams (C6):
+/// read-only listings and UI, plus the provider/model switches — a goal
+/// captures its agent at `run`, so a switch never aborts the stream; the
+/// replaced transport retires when the run ends (C2). Goals, `!` lines, and
+/// session-mutating commands queue instead.
+const Set<String> kImmediateCommands = {
+  '/help',
+  '/plan',
+  '/status',
+  '/diff',
+  '/verbose',
+  '/provider',
+  '/model',
+  '/rekey',
+};
+
+/// The value prefix marking a `/model` popup recents row (C2). A `|` separates
+/// the preset from the model; `:` cannot (ollama model ids contain it).
+const String kRecentModelPrefix = 'recent|';
+
+/// The `/model` popup rows (C2/C6): recently used provider/model pairs first
+/// — the cross-provider combos the catalog cannot offer — then the current
+/// provider's catalog with the active model marked. The pair in effect is
+/// skipped (the catalog row already marks it).
+List<TuiPopupItem> modelPopupItems({
+  required ProviderConfig current,
+  required List<ModelInfo> catalog,
+  required List<RecentModel> recents,
+}) {
+  final catalogIds = {for (final model in catalog) model.id};
+  return [
+    for (final recent in recents)
+      if (!(recent.preset == current.preset &&
+          recent.model == current.model))
+        TuiPopupItem(
+          value: '$kRecentModelPrefix${recent.preset}|${recent.model}',
+          label: recent.model,
+          detail: recent.preset == current.preset
+              ? 'recent'
+              : '${recent.preset} · recent',
+          active:
+              recent.preset == current.preset &&
+              catalogIds.contains(recent.model),
+        ),
+    for (final model in catalog)
+      TuiPopupItem(
+        value: model.id,
+        label: model.id,
+        detail: formatContextWindow(model.contextWindow),
+        active: model.id == current.model,
+      ),
+  ];
+}
+
+/// Parse a `/model` popup recents-row value back into its pair; null when
+/// [value] is a plain catalog model id.
+({String preset, String model})? recentFromPopupValue(String value) {
+  if (!value.startsWith(kRecentModelPrefix)) return null;
+  final body = value.substring(kRecentModelPrefix.length);
+  final split = body.indexOf('|');
+  if (split <= 0 || split >= body.length - 1) return null;
+  return (
+    preset: body.substring(0, split),
+    model: body.substring(split + 1),
+  );
 }
 
 /// Translate a raw-terminal [Key] into the message the TUI model consumes.
@@ -1535,6 +1779,8 @@ List<String> helpLines({required bool interactive, bool tui = false}) => [
   'Anything else is a goal for the agent.',
   if (tui) ...[
     '  (Shift+Enter or Alt+Enter adds a line; Enter sends; Esc cancels)',
+    '  While a run streams: /status, /model, /provider… answer at once',
+    '  (a switched model applies after the live stream); goals and ! queue.',
     '  Shortcuts: Ctrl+P commands · Ctrl+L models · Ctrl+S sessions ·',
     '  Ctrl+N new session · Ctrl+G help · type / for command completion',
   ] else if (interactive)

@@ -124,6 +124,11 @@ final class _TuiApp {
 
   Future<void> _active = Future<void>.value();
 
+  /// A command turn running beside the live turn (C6): read-only commands and
+  /// pickers dispatched while output streams. Awaited at shutdown with the
+  /// main turn so no callback writes into a dead frame.
+  Future<void> _side = Future<void>.value();
+
   /// List rows a popup may show at the current terminal height.
   int get _popupRows => (height - 8).clamp(3, 40);
 
@@ -177,7 +182,7 @@ final class _TuiApp {
   }
 
   /// Completes when the current run (and any queued follow-up) is done.
-  Future<void> get drained => _active;
+  Future<void> get drained => Future.wait([_active, _side]);
 
   /// Replay a resumed session into the transcript so the TUI opens with the
   /// same conversation the session file holds.
@@ -458,7 +463,7 @@ final class _TuiApp {
 
     if (stroke == 'enter' || stroke == 'ctrl+j') {
       if (running) {
-        queueTurn();
+        _submitDuringRun();
       } else {
         final menu = completions;
         if (menu != null && menu.visible.isNotEmpty) {
@@ -959,6 +964,55 @@ final class _TuiApp {
     queue.add(text);
     _remember(text);
     setEditor('');
+    console.setHint('${queue.length} queued');
+  }
+
+  /// C6: a line submitted while a turn streams. Output must never block
+  /// input: read-only commands and the live-safe provider/model switches run
+  /// at once (a switch retires the old transport when the stream ends), the
+  /// session picker queues its resume, and everything else queues as before.
+  void _submitDuringRun() {
+    final text = editor.value.trim();
+    if (text.isEmpty) return;
+    final immediate = repl.runsImmediately(text);
+    if (immediate || repl.isTuiModal(text)) {
+      setEditor('');
+      _remember(text);
+      console.user(text);
+      _side = _runSideTurn(text, deferApply: !immediate);
+      return;
+    }
+    queueTurn();
+  }
+
+  /// Run one line concurrently with the streaming turn (C6): never touches
+  /// `running` or the queue, which belong to the live run. With
+  /// [deferApply], a picker's switch is queued instead of applied.
+  Future<void> _runSideTurn(String text, {bool deferApply = false}) async {
+    if (closed) return;
+    repl.deferCommand = deferApply ? queueCommand : null;
+    try {
+      final keep = await repl.submitTui(text, deferApply: deferApply);
+      if (!keep) close();
+    } on Object catch (e) {
+      // Never interpolate a raw transport error: it can carry a key.
+      final detail = switch (e) {
+        StepFailure(:final message) => message,
+        ConfigException(:final message) => message,
+        GuardDeniedException(:final message) => message,
+        _ => '${e.runtimeType}',
+      };
+      console.error('run failed: $detail');
+    } finally {
+      repl.deferCommand = null;
+    }
+  }
+
+  /// Queue a command line for the end of the live turn (C6): the deferred
+  /// half of a picker opened while a run streamed.
+  void queueCommand(String line) {
+    if (closed) return;
+    queue.add(line);
     console.setHint('${queue.length} queued');
   }
 

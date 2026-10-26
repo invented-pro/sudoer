@@ -14,14 +14,14 @@ import 'package:dart_tui/dart_tui.dart'
         PasteStartMsg,
         ProgramOption,
         TeaKey,
-        filter,
         promptConfirm,
-        promptSelect,
         withAltScreen,
-        withFilter;
+        withFilter,
+        withInput;
 
 import '../config.dart';
 import '../errors.dart';
+import '../tui_pick.dart';
 import '../tui_popup.dart';
 import 'auth.dart';
 import 'discovery.dart';
@@ -233,6 +233,25 @@ bool shouldPromptForKey(
   return state == 'missing' || state == 'invalid';
 }
 
+/// Whether the TUI `/provider` picker offers key entry for [preset] (C2/C6):
+/// every preset that requires a key over a baked-in base URL. Entry is
+/// *required* when no key resolves (see [shouldPromptForKey]) and *offered
+/// as a replacement* when one already does — including the preset already in
+/// effect, re-selected, so a stored key can be rotated without leaving the
+/// session. Local endpoints and URL-less presets never prompt.
+bool shouldOfferKeyEntry(ProviderPreset preset) =>
+    preset.requiresKey && preset.baseUrl != null;
+
+/// The masked prompt's note for a provider key entry, from the preset's key
+/// state ([providerKeyState]): replaces-or-keeps wording when a key already
+/// resolves, the plain storage wording when none does. Never a key value.
+String keyPromptNote(String keyState) => switch (keyState) {
+  'stored' => 'Enter replaces the stored key · empty keeps it · never echoed',
+  'env' => 'Enter replaces the env key · empty keeps it · never echoed',
+  'config' => 'Enter replaces the config key for this session · never echoed',
+  _ => 'stored in the auth store; never echoed',
+};
+
 /// The `/provider` popup rows (C6): one item per preset, `id — name` as the
 /// filter target, the key state as the detail column, and `●` marking the
 /// preset in effect. Cancelling changes nothing.
@@ -344,12 +363,34 @@ void writeConfigFile(String path, Config config) {
   temp.renameSync(path);
 }
 
+/// Whether a missing config drops into the setup wizard (the "provider
+/// page") instead of the missing-config report (C6). The wizard needs a
+/// terminal, `--automate` promises a non-interactive surface, and
+/// `--list-models` is a catalog listing that must not write a config file.
+bool autoSetupForMissingConfig({
+  required bool interactive,
+  required bool automate,
+  required bool listModels,
+}) => interactive && !automate && !listModels;
+
 /// Run the interactive provider setup wizard. Returns a process exit code.
 ///
 /// It selects a provider preset, asks for the endpoint (custom only), obtains
 /// and stores the key, discovers the endpoint's live models when reachable,
 /// selects a model, and writes the config. With [presetId] / [model] /
 /// [apiKey] / [baseUrl] supplied, the corresponding prompt is skipped.
+///
+/// [nextStep] replaces the closing relaunch hint: the first-run auto setup
+/// (see [autoSetupForMissingConfig]) passes a "continuing" line because the
+/// process goes straight into the session with the config just written; an
+/// empty string omits the line entirely.
+///
+/// [stdinStream] redirects the dart_tui prompts away from raw `stdin`. The
+/// process's stdin is single-subscription: without this, dart_tui caches its
+/// own subscription and a later listener in the same process (the REPL's
+/// KeyReader, after the first-run auto setup) fails with "Stream has already
+/// been listened to". Pass one shared broadcast adapter and keep listening to
+/// it for the whole process.
 Future<int> runProviderSetup({
   required String configPath,
   Config? existing,
@@ -358,6 +399,8 @@ Future<int> runProviderSetup({
   String? apiKey,
   String? baseUrl,
   int? contextWindow,
+  String? nextStep,
+  Stream<List<int>>? stdinStream,
   AuthStore? auth,
   String? Function(String name)? env,
   StringSink? out,
@@ -372,11 +415,23 @@ Future<int> runProviderSetup({
   final outSink = out ?? stdout;
   final errSink = err ?? stderr;
   final store = auth ?? AuthStore();
-  final choose = select ?? _defaultSelect;
-  final ask = input ?? _defaultInput;
-  final askSecret = secret ?? _defaultSecret;
-  final askConfirm = confirm ?? _defaultConfirm;
-  final pickModel = filterChoices ?? _defaultFilter;
+  // Every dart_tui one-shot below must share one stdin view: the defaults
+  // thread [stdinStream] (or dart_tui's own cache when null — fine for a
+  // standalone `--setup`, which exits before anything else listens).
+  final choose = select ??
+      (List<String> choices, {required String title}) =>
+          _defaultSelect(choices, title: title, stdinStream: stdinStream);
+  final ask = input ??
+      (String label) => _defaultInput(label, stdinStream: stdinStream);
+  final askSecret = secret ??
+      (String title, {bool optional = false}) =>
+          _defaultSecret(title, optional: optional, stdinStream: stdinStream);
+  final askConfirm = confirm ??
+      (String question) =>
+          _defaultConfirm(question, stdinStream: stdinStream);
+  final pickModel = filterChoices ??
+      (List<String> choices, {required String title}) =>
+          _defaultFilter(choices, title: title, stdinStream: stdinStream);
   final discoverFn = discover ?? _defaultDiscover;
 
   // A key supplied non-interactively (`--setup --api-key`, or a test) must
@@ -672,8 +727,12 @@ Future<int> runProviderSetup({
   }
   outSink
     ..writeln('config:   $configPath')
-    ..writeln()
-    ..writeln('Start it with: sudoer-prop -c $configPath');
+    ..writeln();
+  if (nextStep == null) {
+    outSink.writeln('Start it with: sudoer-prop -c $configPath');
+  } else if (nextStep.isNotEmpty) {
+    outSink.writeln(nextStep);
+  }
   return 0;
 }
 
@@ -760,14 +819,22 @@ Future<_KeyChoice> _askKeyStorage(
 /// Full-screen prompt options. dart_tui's one-shot widgets default to inline
 /// rendering, which leaves stale rows when the content is taller than the
 /// prompt; the alternate screen guarantees a full clear/redraw and restores
-/// the scrollback when the prompt ends.
-List<ProgramOption> _selectOptions() => [withAltScreen()];
+/// the scrollback when the prompt ends. [stdinStream], when set, keeps
+/// dart_tui off raw `stdin` so a later listener in the same process works.
+List<ProgramOption> _selectOptions(Stream<List<int>>? stdinStream) => [
+  withAltScreen(),
+  if (stdinStream != null) withInput(stdinStream),
+];
 
 /// Text prompts additionally translate a bracketed paste into the printable
 /// rune key that `TextInputModel` already inserts. dart_tui's forms ignore
 /// `PasteMsg`; this keeps the wizard's fields pasteable without a bespoke
 /// text widget.
-List<ProgramOption> _textOptions() => [withAltScreen(), _withPaste()];
+List<ProgramOption> _textOptions(Stream<List<int>>? stdinStream) => [
+  withAltScreen(),
+  if (stdinStream != null) withInput(stdinStream),
+  _withPaste(),
+];
 
 ProgramOption _withPaste() => withFilter((_, msg) => pasteAsRunes(msg));
 
@@ -781,25 +848,51 @@ Msg? pasteAsRunes(Msg msg) {
   return KeyPressMsg(TeaKey(code: KeyCode.rune, text: text));
 }
 
-Future<String?> _defaultSelect(List<String> choices, {required String title}) =>
-    promptSelect(choices, title: title, options: _selectOptions());
+Future<String?> _defaultSelect(
+  List<String> choices, {
+  required String title,
+  Stream<List<int>>? stdinStream,
+}) => _pickChoice(choices, title: title, stdinStream: stdinStream);
 
-Future<String?> _defaultInput(String label) async {
+Future<String?> _defaultInput(String label, {Stream<List<int>>? stdinStream}) async {
   final values = await Form([
     Group([Field.input(key: 'value', title: label)]),
-  ]).run(options: _textOptions());
+  ]).run(options: _textOptions(stdinStream));
   return values?.get<String>('value');
 }
 
-Future<String?> _defaultFilter(List<String> choices, {required String title}) =>
-    filter(choices, title: title, options: _selectOptions());
+Future<String?> _defaultFilter(
+  List<String> choices, {
+  required String title,
+  Stream<List<int>>? stdinStream,
+}) => _pickChoice(choices, title: title, stdinStream: stdinStream);
+
+/// Both chooser defaults run the same one-shot page (C6): a full-height,
+/// non-modal picker — type to filter and move at the same time — instead of
+/// dart_tui's 10-row `filter()`, whose modal filter mode ignores arrows and
+/// strands the keyboard after backspace-on-empty leaves filter mode.
+Future<String?> _pickChoice(
+  List<String> choices, {
+  required String title,
+  Stream<List<int>>? stdinStream,
+}) => runPickPage(
+  title: title,
+  items: [
+    for (final choice in choices) TuiPopupItem(value: choice, label: choice),
+  ],
+  stdinStream: stdinStream,
+);
 
 Future<List<ModelInfo>> _defaultDiscover(
   ProviderPreset preset,
   String? apiKey,
 ) => discoverModels(preset, apiKey: apiKey);
 
-Future<String?> _defaultSecret(String title, {bool optional = false}) async {
+Future<String?> _defaultSecret(
+  String title, {
+  bool optional = false,
+  Stream<List<int>>? stdinStream,
+}) async {
   // Keep the password as the *first* field: a preceding `Field.note` starts
   // the form on a non-input field and swallows the first typed/pasted key
   // before the form refocuses.
@@ -817,9 +910,11 @@ Future<String?> _defaultSecret(String title, {bool optional = false}) async {
         },
       ),
     ]),
-  ]).run(options: _textOptions());
+  ]).run(options: _textOptions(stdinStream));
   return values?.get<String>('key');
 }
 
-Future<bool?> _defaultConfirm(String question) =>
-    promptConfirm(question, options: _selectOptions());
+Future<bool?> _defaultConfirm(
+  String question, {
+  Stream<List<int>>? stdinStream,
+}) => promptConfirm(question, options: _selectOptions(stdinStream));

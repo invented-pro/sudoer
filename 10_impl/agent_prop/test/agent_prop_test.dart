@@ -13,7 +13,9 @@ import 'package:dart_tui/dart_tui.dart'
         PasteMsg,
         PasteStartMsg,
         RgbColor,
+        TeaKey,
         TextInputModel,
+        WindowSizeMsg,
         stripAnsi;
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -2412,6 +2414,93 @@ void main() {
       },
     );
 
+    test('the pick page filters and moves at the same time', () {
+      // The wizard's choosers must not be modal: typing narrows the list and
+      // arrows keep moving the cursor, in any order (dart_tui's `filter()`
+      // ignores arrows in filter mode and strands the keyboard after
+      // backspace-on-empty exits it).
+      const rows = [
+        'openai — OpenAI',
+        'anthropic — Anthropic Claude',
+        'google — Google Gemini',
+        'ollama — Ollama',
+        'zhipuai — Zhipu AI (GLM)',
+      ];
+      final page = TuiPopup(
+        title: 'Choose an LLM provider',
+        items: [
+          for (final row in rows) TuiPopupItem(value: row, label: row),
+        ],
+      );
+      final model = PickPageModel(page);
+
+      // The page sizes itself from the terminal, not a fixed 10-row window.
+      final (sized, _) = model.update(WindowSizeMsg(100, 30));
+      expect(page.maxRows, 22);
+      expect((sized as PickPageModel).height, 30);
+
+      // Type to filter…
+      model.update(KeyPressMsg(TeaKey(code: KeyCode.rune, text: 'g')));
+      model.update(KeyPressMsg(TeaKey(code: KeyCode.rune, text: 'l')));
+      model.update(KeyPressMsg(TeaKey(code: KeyCode.rune, text: 'm')));
+      expect(page.query, 'glm');
+      expect(
+        page.visible.map((item) => item.label).toList(),
+        ['zhipuai — Zhipu AI (GLM)'],
+      );
+
+      // …then clear it, and move while a filter is still typed.
+      page.backspace();
+      page.backspace();
+      page.backspace();
+      expect(page.query, isEmpty);
+      model.update(KeyPressMsg(TeaKey(code: KeyCode.rune, text: 'o')));
+      expect(page.visible, hasLength(4)); // openai, anthropic, google, ollama
+      model.update(KeyPressMsg(TeaKey(code: KeyCode.down)));
+      model.update(KeyPressMsg(TeaKey(code: KeyCode.down)));
+      expect(page.cursor, 2);
+      expect(page.query, 'o'); // moving never disturbs the filter
+
+      // Backspace on an empty filter never strands the keyboard: the page
+      // stays one surface, so typing keeps working afterwards.
+      page.backspace();
+      expect(page.query, isEmpty);
+      model.update(KeyPressMsg(TeaKey(code: KeyCode.rune, text: 'z')));
+      expect(page.query, 'z');
+
+      // Enter confirms the highlighted row under the filter.
+      final (done, _) = model.update(
+        KeyPressMsg(TeaKey(code: KeyCode.enter)),
+      );
+      expect((done as PickPageModel).outcome, 'zhipuai — Zhipu AI (GLM)');
+    });
+
+    test('the pick page cancels on Esc and pages with the keyboard', () {
+      final page = TuiPopup(
+        title: 'Choose a model',
+        items: [
+          for (var i = 0; i < 30; i++)
+            TuiPopupItem(value: 'model-$i', label: 'model-$i'),
+        ],
+      );
+      final model = PickPageModel(page);
+      model.update(WindowSizeMsg(100, 40));
+      expect(page.maxRows, 32);
+
+      model.update(KeyPressMsg(TeaKey(code: KeyCode.end)));
+      expect(page.cursor, 29);
+      model.update(KeyPressMsg(TeaKey(code: KeyCode.pageUp)));
+      model.update(KeyPressMsg(TeaKey(code: KeyCode.pageUp)));
+      expect(page.cursor, lessThan(29));
+      model.update(KeyPressMsg(TeaKey(code: KeyCode.home)));
+      expect(page.cursor, 0);
+
+      final (cancelled, _) = model.update(
+        KeyPressMsg(TeaKey(code: KeyCode.escape)),
+      );
+      expect((cancelled as PickPageModel).outcome, isNull);
+    });
+
     test('the filter matches whitespace tokens in label and detail', () {
       final popup = TuiPopup(
         title: 'Provider',
@@ -2640,6 +2729,54 @@ void main() {
       expect(cramped, frame.join('\n'));
     });
 
+    test('the anchored menu never moves its indicator off the drawn rows', () {
+      // The `/` completion list can be longer than the anchored window (8
+      // rows above the editor, fewer on a short screen). Key handling
+      // scrolls with `maxRows`, the render with the room it actually has:
+      // the two must agree, or the cursor walks onto rows that are never
+      // drawn and the `❯` indicator disappears (C6).
+      final menu = TuiPopup(
+        title: 'Commands',
+        matchLabelPrefix: true,
+        items: [
+          for (var i = 1; i <= 15; i++)
+            TuiPopupItem(value: '/cmd$i', label: '/cmd$i'),
+        ],
+      )..query = '/';
+      final frame = List<String>.generate(
+        24,
+        (i) => 'frame row $i'.padRight(60),
+      ).join('\n');
+
+      // Room for the full 8-row window.
+      for (var step = 0; step < 14; step++) {
+        menu.move(1);
+        final lines = menu
+            .overlayAnchored(frame, width: 60, height: 24, bottomRow: 20)
+            .split('\n')
+            .map(stripAnsi)
+            .toList();
+        final indicator = lines.where((l) => l.contains('❯')).toList();
+        expect(indicator, hasLength(1), reason: 'step $step: indicator lost');
+        expect(indicator.single, contains('/cmd${step + 2}'));
+      }
+
+      // A short transcript leaves room for fewer rows than maxRows; the
+      // window shrinks and the indicator must still stay on a drawn row.
+      menu..cursor = 0..scroll = 0;
+      for (var step = 0; step < 14; step++) {
+        menu.move(1);
+        final lines = menu
+            .overlayAnchored(frame, width: 60, height: 24, bottomRow: 9)
+            .split('\n')
+            .map(stripAnsi)
+            .toList();
+        final indicator = lines.where((l) => l.contains('❯')).toList();
+        expect(indicator, hasLength(1), reason: 'cramped step $step');
+        expect(indicator.single, contains('/cmd${step + 2}'));
+      }
+    });
+
     test('a provider switch prompts for a key only when one is needed', () {
       final temp = Directory.systemTemp.createTempSync('sudoer-key-');
       addTearDown(() => temp.deleteSync(recursive: true));
@@ -2712,6 +2849,35 @@ void main() {
       );
     });
 
+    test('the provider picker offers key entry for every keyed preset', () {
+      // The TUI prompt is an offer, not just a need: re-selecting a preset
+      // with a resolvable key (or the one already in effect) must let the
+      // user replace that key (C2/C6).
+      expect(shouldOfferKeyEntry(providerPreset('openai')!), isTrue);
+      expect(shouldOfferKeyEntry(providerPreset('zhipuai-coding-plan')!), isTrue);
+      expect(shouldOfferKeyEntry(providerPreset('deepseek')!), isTrue);
+      // Local endpoints and URL-less presets never prompt.
+      expect(shouldOfferKeyEntry(providerPreset('ollama')!), isFalse);
+      expect(shouldOfferKeyEntry(providerPreset('custom')!), isFalse);
+    });
+
+    test('the key prompt note explains replace-or-keep, never a value', () {
+      expect(
+        keyPromptNote('stored'),
+        contains('replaces the stored key'),
+      );
+      expect(keyPromptNote('stored'), contains('empty keeps it'));
+      expect(keyPromptNote('env'), contains('env key'));
+      expect(keyPromptNote('config'), contains('for this session'));
+      // A key that does not resolve: plain storage wording.
+      expect(keyPromptNote('missing'), contains('auth store'));
+      expect(keyPromptNote('invalid'), contains('auth store'));
+      expect(keyPromptNote('not required'), contains('auth store'));
+      for (final state in ['stored', 'env', 'config', 'missing', 'invalid']) {
+        expect(keyPromptNote(state), contains('never echoed'));
+      }
+    });
+
     test('the key prompt masks the value and keeps it out of the frame', () {
       final frame = List<String>.generate(
         24,
@@ -2751,6 +2917,132 @@ void main() {
         boxLeft + 4 + 'sk-secret-never-print'.length,
         reason: 'left margin + border/prompt + masked width',
       );
+    });
+  });
+
+  group('model recents and immediate commands (C2/C6)', () {
+    test('RecentModels moves to front, de-duplicates, and caps', () {
+      final temp = Directory.systemTemp.createTempSync('sudoer-recent-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final capped = RecentModels(
+        path: p.join(temp.path, 'capped.json'),
+        limit: 3,
+      );
+      capped.record('openai', 'gpt-6-astra');
+      capped.record('deepseek', 'deepseek-v4-pro');
+      capped.record('ollama', 'llama3.1:8b');
+      capped.record('zhipuai-coding-plan', 'glm-5.3-flash');
+      expect(
+        capped.read().map((r) => '${r.preset}/${r.model}').toList(),
+        [
+          'zhipuai-coding-plan/glm-5.3-flash',
+          'ollama/llama3.1:8b',
+          'deepseek/deepseek-v4-pro',
+        ],
+        reason: 'capped at 3, most recent first',
+      );
+      // Re-recording moves to the front without duplicating.
+      capped.record('deepseek', 'deepseek-v4-pro');
+      expect(
+        capped.read().first,
+        const RecentModel(preset: 'deepseek', model: 'deepseek-v4-pro'),
+      );
+      expect(capped.read(), hasLength(3));
+      // Colons in ollama model ids survive the round trip.
+      expect(capped.read()[2].model, 'llama3.1:8b');
+    });
+
+    test('RecentModels tolerates a missing and a corrupt file', () {
+      final temp = Directory.systemTemp.createTempSync('sudoer-recent-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final missing = RecentModels(path: p.join(temp.path, 'nope.json'));
+      expect(missing.read(), isEmpty);
+      final corrupt = File(p.join(temp.path, 'bad.json'))
+        ..writeAsStringSync('{"preset": "x"} 46,0,fine?');
+      final store = RecentModels(path: corrupt.path);
+      expect(store.read(), isEmpty, reason: 'not a list');
+      corrupt.writeAsStringSync('[{"preset": "", "model": "m"}, 42, {}]');
+      expect(store.read(), isEmpty, reason: 'no usable entries');
+      store.record('openai', 'gpt-6-astra');
+      expect(store.read(), hasLength(1));
+    });
+
+    test('the /model popup offers recents above the catalog', () {
+      final current = ProviderConfig.fromJson({
+        'preset': 'zhipuai-coding-plan',
+        'model': 'glm-5.3-flash',
+      });
+      final catalog = [
+        const ModelInfo('glm-5.3-flash', 'GLM 5.3 Flash', 1000000),
+        const ModelInfo('glm-5.3-air', 'GLM 5.3 Air', 200000),
+      ];
+      final items = modelPopupItems(
+        current: current,
+        catalog: catalog,
+        recents: [
+          const RecentModel(
+            preset: 'zhipuai-coding-plan',
+            model: 'glm-5.3-flash',
+          ), // the pair in effect: skipped
+          const RecentModel(preset: 'deepseek', model: 'deepseek-v4-pro'),
+          const RecentModel(preset: 'zhipuai-coding-plan', model: 'glm-5.3-air'),
+        ],
+      );
+      // Recents first (cross-provider detail), then the catalog; the current
+      // pair appears once, marked active in the catalog.
+      expect(
+        items.map((i) => i.value).toList(),
+        [
+          'recent|deepseek|deepseek-v4-pro',
+          'recent|zhipuai-coding-plan|glm-5.3-air',
+          'glm-5.3-flash',
+          'glm-5.3-air',
+        ],
+      );
+      expect(items[0].detail, contains('deepseek'));
+      expect(items[1].detail, 'recent');
+      expect(
+        items.firstWhere((i) => i.value == 'glm-5.3-flash').active,
+        isTrue,
+      );
+      // Round trip: colons in model ids survive the encoded value.
+      final ollama = recentFromPopupValue('recent|ollama|llama3.1:8b')!;
+      expect(ollama.preset, 'ollama');
+      expect(ollama.model, 'llama3.1:8b');
+      expect(recentFromPopupValue('glm-5.3-flash'), isNull);
+      expect(recentFromPopupValue('recent|only-preset|'), isNull);
+    });
+
+    test('immediate commands are live-safe; goals and session changes queue',
+        () {
+      expect(
+        kImmediateCommands,
+        containsAll(['/status', '/help', '/plan', '/model', '/provider']),
+      );
+      // A model switch is live-safe: the goal captured its agent at run, so
+      // the switch applies at once and the old transport retires later.
+      for (final line in ['/model glm', '/provider openai', '/rekey openai']) {
+        expect(
+          kImmediateCommands.contains(line.trim().split(RegExp(r'\s+')).first),
+          isTrue,
+          reason: '$line must answer while a run streams',
+        );
+      }
+      // Goals, shell lines, and session/context mutations queue.
+      for (final line in [
+        'fix the bug',
+        '!ls',
+        '/new',
+        '/resume s1',
+        '/context clm',
+        '/exit',
+      ]) {
+        expect(
+          kImmediateCommands.contains(line.trim().split(RegExp(r'\s+')).first),
+          isFalse,
+          reason: '$line must queue while a run streams',
+        );
+      }
     });
   });
 
@@ -6386,6 +6678,81 @@ void main() {
         expect(out.toString(), isNot(contains('sk-test')));
       },
     );
+
+    test('a missing config auto-opens setup only on a human interactive run',
+        () {
+      // The "provider page" needs a terminal, --automate promises a script
+      // surface, and a catalog listing must not write a config file.
+      expect(
+        autoSetupForMissingConfig(
+          interactive: true,
+          automate: false,
+          listModels: false,
+        ),
+        isTrue,
+      );
+      expect(
+        autoSetupForMissingConfig(
+          interactive: false,
+          automate: false,
+          listModels: false,
+        ),
+        isFalse,
+      );
+      expect(
+        autoSetupForMissingConfig(
+          interactive: true,
+          automate: true,
+          listModels: false,
+        ),
+        isFalse,
+      );
+      expect(
+        autoSetupForMissingConfig(
+          interactive: true,
+          automate: false,
+          listModels: true,
+        ),
+        isFalse,
+      );
+    });
+
+    test('the wizard closing line follows nextStep', () async {
+      Future<(String, String)> runWizard(String? nextStep) async {
+        final temp = Directory.systemTemp.createTempSync('sudoer-setup-');
+        addTearDown(() => temp.deleteSync(recursive: true));
+        final out = StringBuffer();
+        final err = StringBuffer();
+        final code = await runProviderSetup(
+          configPath: p.join(temp.path, 'sudoer.json'),
+          presetId: 'deepseek',
+          model: 'deepseek-v4-flash',
+          auth: AuthStore(path: p.join(temp.path, 'auth.json')),
+          env: (_) => null,
+          out: out,
+          err: err,
+          select: (choices, {required title}) async => choices.first,
+          input: (label) async => null,
+          secret: (title, {bool optional = false}) async => 'sk-test',
+          confirm: (question) async => false,
+          nextStep: nextStep,
+        );
+        expect(code, 0, reason: err.toString());
+        return (out.toString(), err.toString());
+      }
+
+      // Default: the relaunch hint for an explicit --setup.
+      final (plain, _) = await runWizard(null);
+      expect(plain, contains('Start it with:'));
+      // First-run auto setup: the process continues, so say that instead.
+      final (continuing, _) = await runWizard('Starting the session…');
+      expect(continuing, contains('Starting the session…'));
+      expect(continuing, isNot(contains('Start it with:')));
+      // An empty nextStep omits the closing line entirely.
+      final (silent, _) = await runWizard('');
+      expect(silent, isNot(contains('Start it with:')));
+      expect(silent, isNot(contains('Starting the session')));
+    });
 
     test(
       'the setup wizard accepts an exact model query on a long list',

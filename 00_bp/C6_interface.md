@@ -154,7 +154,14 @@ with Pilot (`C2`).
   scrolling and selecting work side by side with no toggle.
   A run owns the cancellation gesture: one `Esc` cancels it immediately and
   keeps the partial transcript. While a run is in flight, Enter queues a
-  follow-up to run after it, and the footer shows the queue depth. Ctrl+C restores the terminal and
+  follow-up to run after it, and the footer shows the queue depth — but
+  output never blocks input: read-only commands (`/status`, `/help`,
+  `/plan`, `/diff`, `/verbose`) and the provider/model switches dispatch at
+  once beside the streaming run. A goal captures its agent when it starts,
+  so a switch never aborts the stream: the live run keeps its (retired)
+  transport until it ends, and later runs use the new one; a session resume
+  is the one switch that queues, because the running goal still writes its
+  transcript. Ctrl+C restores the terminal and
   exits. The TUI reflows on terminal resize and places the hardware cursor at
   the editor caret so IME candidate windows appear in the right place.
 - **Modal popups.** Selection and reference commands never dump their listings
@@ -165,7 +172,11 @@ with Pilot (`C2`).
   must match the id, name, or detail column), Enter selects, and `Esc` (or
   Ctrl+C) cancels without changing anything. The provider picker shows the
   key *state* (never a value) per preset and marks the preset in effect; the
-  model picker shows the context window per model; the session picker resumes
+  model picker lists the recently used provider/model pairs first (kept in
+  `<app dir>/recent.json`, most recent first, capped — the cross-provider
+  combos the catalog cannot offer) above the current provider's catalog with
+  the context window per model, and picking a recent pair switches the
+  provider and the model together; the session picker resumes
   on Enter. A popup command is not a model run: the footer keeps its idle
   hints and the run queue is untouched underneath. An explicit argument
   (`/provider ollama`) skips the popup and switches directly.
@@ -183,13 +194,18 @@ with Pilot (`C2`).
   highlighted command in, Enter fills it when it differs from the typed text
   and sends when it is exact, and Esc dismisses the menu for that prefix (a
   second Esc clears the draft).
-- **Missing-key prompt.** On the TUI, choosing a provider whose API key is
-  missing (or stored but unusable) prompts for the key before the switch
-  applies: a masked one-line modal — the value renders as bullets and is
-  never echoed into the transcript afterwards. Enter validates the key and
-  stores it in the auth store so the switch lands ready to call; Esc (or an
-  empty Enter) skips and the switch still applies with the usual missing-key
-  hint, because a switch is never fatal. Paste into the modal is masked too.
+- **Key-entry prompt.** On the TUI, choosing a key-requiring provider in the
+  `/provider` popup prompts for its key: required when no key resolves
+  (missing, or stored but unusable) and offered as a replacement when one
+  already does — so re-selecting the preset already in effect rotates its
+  key. The modal is a masked one-line input: the value renders as bullets
+  and is never echoed into the transcript afterwards. Enter validates the
+  key and stores it in the auth store — a config literal is dropped for the
+  session (which the store then outranks) and the provider in effect is
+  rebuilt, so the new key is used at once; Esc or an empty Enter keeps the
+  key already in place, and a switch still applies with the usual
+  missing-key hint when nothing resolves, because a switch is never fatal.
+  Paste into the modal is masked too.
 - **Inline fallback (`--inline`).** Keeps the older normal-scrollback
   surface: a `› ` prompt, color and italics, a spinner, streamed replies, and
   a one-line status. Its line editor supports arrow-key cursor movement,
@@ -339,12 +355,17 @@ file, selected by `--config` / `-c` or the `SUDOER_CONFIG` environment
 variable and defaulting to `sudoer.json` in the process working directory.
 The name is tier-agnostic: Prop, Pilot, and Orbit all read `sudoer.json`.
 
-A missing config is a fatal startup error, not a silent default — with one
-exception: `--provider <preset>` (plus `--model` when the preset has no
+A missing config is a fatal startup error, not a silent default — with two
+exceptions. `--provider <preset>` (plus `--model` when the preset has no
 default) builds an ephemeral config rooted at the process working directory,
-so a model can be tried without writing a file. Otherwise the resolved path
-and a copy-pasteable sample config are written to stderr and the process
-exits non-zero. `--setup` writes a config for you.
+so a model can be tried without writing a file. And on an interactive
+terminal (a human surface: not `--automate`, not a catalog listing such as
+`--list-models`) a missing config drops straight into the `--setup` wizard —
+the provider page — so a fresh machine is configured in place: on success
+the process continues with the config it wrote, and cancelling falls back to
+the report below (exit `2`), so the manual path stays visible. Otherwise the
+resolved path and a copy-pasteable sample config are written to stderr and
+the process exits non-zero. `--setup` writes a config for you.
 
 | Key | Owner |
 | --- | --- |
